@@ -15,8 +15,8 @@ alter table public.records enable row level security;
 drop policy if exists "solo i propri dati" on public.records;
 create policy "solo i propri dati" on public.records
   for all to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
 
 -- Aggiornamenti in tempo reale tra i dispositivi.
 do $$ begin
@@ -35,8 +35,8 @@ alter table public.push_subscriptions enable row level security;
 drop policy if exists "solo i propri dispositivi" on public.push_subscriptions;
 create policy "solo i propri dispositivi" on public.push_subscriptions
   for all to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
 
 -- 3. Archivio file privato (foto scontrini e allegati), una cartella per utente.
 insert into storage.buckets (id, name, public, file_size_limit)
@@ -48,10 +48,10 @@ drop policy if exists "file: caricamento proprio" on storage.objects;
 drop policy if exists "file: modifica propria" on storage.objects;
 drop policy if exists "file: eliminazione propria" on storage.objects;
 create policy "file: lettura propria" on storage.objects for select to authenticated
-  using (bucket_id = 'file' and (storage.foldername(name))[1] = auth.uid()::text);
+  using (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "file: caricamento proprio" on storage.objects for insert to authenticated
-  with check (bucket_id = 'file' and (storage.foldername(name))[1] = auth.uid()::text);
+  with check (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "file: modifica propria" on storage.objects for update to authenticated
-  using (bucket_id = 'file' and (storage.foldername(name))[1] = auth.uid()::text);
+  using (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "file: eliminazione propria" on storage.objects for delete to authenticated
-  using (bucket_id = 'file' and (storage.foldername(name))[1] = auth.uid()::text);
+  using (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
