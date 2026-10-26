@@ -1,0 +1,6 @@
+{
+  "name": "diario-di-posa",
+  "private": true,
+  "type": "module",
+  "description": "App per il posatore di serramenti: calendario, interventi, conti, furgone, analisi."
+}

@@ -1,0 +1,44 @@
+name: Promemoria del mattino
+
+on:
+  schedule:
+    - cron: '15 5 * * *'   # ogni giorno: 6:15 ora solare, 7:15 ora legale (GitHub può ritardare qualche minuto)
+  workflow_dispatch:
+    inputs:
+      prova:
+        description: 'Manda una notifica di prova anche se non c''è niente da fare'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  promemoria:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-package-lock web-push@3.6.7
+      - name: Calcola e invia le notifiche
+        run: node scripts/promemoria.mjs ${{ inputs.prova && '--prova' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+      # GitHub sospende i controlli programmati dopo 60 giorni senza modifiche al progetto:
+      # una volta al mese si aggiorna questo file per tenerli attivi.
+      - name: Mantieni attivo il controllo
+        if: github.event_name == 'schedule'
+        run: |
+          if [ "$(date -u +%d)" = "01" ]; then
+            date -u > .github/ultimo-controllo.txt
+            git config user.name "diario-di-posa"
+            git config user.email "actions@users.noreply.github.com"
+            git add .github/ultimo-controllo.txt
+            git commit -m "Controllo mensile" && git push
+          fi
