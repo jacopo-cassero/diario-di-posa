@@ -24,7 +24,7 @@ export const LISTINO_BASE = {
     V('alz', 'Posa serramenti', 'Alzante scorrevole', '', 250),
 
     V('zf', 'Posa accessori', 'Zanzariera finestra', '', 30),
-    V('zpf', 'Posa accessori', 'Zanzariera portafinestra', '', 30),
+    V('zpf', 'Posa accessori', 'Zanzariera portafinestra', '', 40),
     V('av1', 'Posa accessori', 'Avvolgibile', 'Solo telo', 20, 'pz', 'blindato'),
     V('av2', 'Posa accessori', 'Avvolgibile', 'Telo, guide, rullo, cinghia e avvolgitore', 50, 'pz', 'blindato'),
     V('av3', 'Posa accessori', 'Avvolgibile', 'Telo, guide e motore', 70, 'pz', 'blindato'),

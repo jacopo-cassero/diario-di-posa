@@ -839,7 +839,7 @@ function sheetListino() {
     <div class="g2">${F('Blindati €/pz in più', inp('maggBlindato', L.maggBlindato, 'number'))}${F('Posa in luce €/pz in più', inp('maggLuce', L.maggLuce, 'number'))}</div>
     ${F('Trasferta € al km (pose e interventi)', inp('euroKmL', euroKm(), 'number'))}
     <div id="lgroups" class="stack">${gruppi.map(g => `<div class="fieldset lgroup" data-gruppo="${esc(g)}"><span class="fs-t">${esc(g)}</span>${L.voci.filter(v => v.gruppo === g).map(listinoRow).join('')}<button type="button" class="btn sm" data-act="addL">+ Voce in questa sezione</button></div>`).join('')}</div>
-    ${S.listino ? '<button type="button" class="btn ghost small" data-act="resetListino">Ripristina il listino 2027 originale</button>' : ''}
+    ${S.listino ? '<button type="button" class="btn ghost small" data-act="resetListino">Ripristina il listino 2027 (PDF del 27 ottobre)</button>' : ''}
   `, async fd => {
     const voci = [...document.querySelectorAll('#lgroups .lrow')].map(el => {
       const q = n => el.querySelector(`[name="${n}"]`); const p = q('lp').value.trim();
