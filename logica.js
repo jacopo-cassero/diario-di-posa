@@ -58,6 +58,9 @@ export function promemoria(S, today = oggi()) {
   const domani = iso(new Date(pd(today).getTime() + 864e5));
   const pose = (S.lavori || []).filter(l => l.data === domani);
   const ints = (S.interventi || []).filter(i => i.dataProg === domani && i.stato !== 'completato' && i.stato !== 'annullato');
+  const evDomani = (S.eventi || []).filter(e => e.data === domani);
+  const NOMI_EV = { ferie: 'inizio ferie', fiera: 'fiera', corso: 'corso', altro: 'impegno' };
+  if (evDomani.length) out.push({ lvl: 'in', txt: `Domani: ${evDomani.map(e => e.titolo || NOMI_EV[e.tipo] || 'impegno').join(', ')}`, sub: evDomani.map(e => [NOMI_EV[e.tipo], e.orario, e.luogo].filter(Boolean).join(' · ')).join(' / '), act: 'day', arg: domani });
   if (pose.length || ints.length) out.push({ lvl: 'in', txt: `Domani: ${[pose.length ? `${pose.length} ${pose.length === 1 ? 'posa' : 'pose'}` : '', ints.length ? `${ints.length} ${ints.length === 1 ? 'intervento' : 'interventi'}` : ''].filter(Boolean).join(' e ')}`, sub: [...pose, ...ints].map(x => x.cliente).slice(0, 3).join(', '), act: 'day', arg: domani });
   return out;
 }

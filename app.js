@@ -147,6 +147,41 @@ document.addEventListener('submit', async e => {
 });
 
 /* ---------- schede ---------- */
+/* ---------- impegni: ferie, fiere, corsi ---------- */
+const TIPI_EV = [['ferie', 'Ferie'], ['fiera', 'Fiera'], ['corso', 'Corso'], ['altro', 'Altro impegno']];
+const tipoEv = k => (TIPI_EV.find(t => t[0] === k) || TIPI_EV[3])[1];
+const inEv = (e, k) => k >= e.data && k <= (e.dataFine || e.data);
+const evDel = k => S.eventi.filter(e => inEv(e, k));
+function eventoCard(e) {
+  const piu = e.dataFine && e.dataFine > e.data;
+  const n = piu ? Math.round((pd(e.dataFine) - pd(e.data)) / 864e5) + 1 : 1;
+  return `<div class="card evcard ev-${esc(e.tipo)}" role="button" tabindex="0" data-act="editEv" data-id="${e.id}">
+    <div class="row between"><span class="t">${esc(e.titolo || tipoEv(e.tipo))}</span><span class="chip evchip ev-${esc(e.tipo)}">${tipoEv(e.tipo)}</span></div>
+    <div class="small muted">${piu ? `dal ${fmtD(e.data, { day: 'numeric', month: 'short' })} al ${fmtD(e.dataFine, { day: 'numeric', month: 'short' })} · ${n} giorni` : fmtD(e.data, { weekday: 'long', day: 'numeric', month: 'long' })}${e.orario ? ' · ' + esc(e.orario) : ''}${e.luogo ? ' · ' + esc(e.luogo) : ''}${n2(e.costo) ? ' · ' + eur(e.costo) : ''}</div>
+    ${e.note ? `<div class="small">${esc(e.note)}</div>` : ''}
+  </div>`;
+}
+function sheetEvento(e, giorno) {
+  const isNew = !e; e = e || { tipo: 'ferie', data: giorno || UI.day };
+  openSheet(isNew ? 'Nuovo impegno' : (e.titolo || tipoEv(e.tipo)), `
+    <div class="seg evseg" role="group" aria-label="Tipo">${TIPI_EV.map(([k, l]) => `<button type="button" data-act="evTipo" data-arg="${k}" aria-pressed="${e.tipo === k}">${l}</button>`).join('')}</div>
+    <input type="hidden" id="f_etipo" name="etipo" value="${esc(e.tipo)}">
+    ${F('Descrizione', inp('etitolo', e.titolo, 'text', 'placeholder="Es. Ferie estive, Fiera MADE Expo, Corso PosaClima"'))}
+    <div class="g2">${F('Dal giorno', inp('edata', e.data, 'date', 'required'))}${F('Al giorno', inp('edataFine', e.dataFine, 'date'))}</div>
+    <div class="g2">${F('Luogo', inp('eluogo', e.luogo))}${F('Orario', inp('eorario', e.orario, 'text', 'placeholder="Es. 9:00–17:00"'))}</div>
+    <div class="g2">${F('Costo €', inp('ecosto', e.costo, 'number', 'placeholder="Iscrizione, ingresso…"'))}<span></span></div>
+    ${e.movimentoId ? '<div class="small muted">Il costo è già registrato tra le spese.</div>' : `<label class="check"><input type="checkbox" id="f_espesa" name="espesa"> Registra il costo tra le spese</label>`}
+    ${F('Note', `<textarea id="f_enote" name="enote">${esc(e.note || '')}</textarea>`)}`,
+  async fd => {
+    const da = fd.get('edata'), a = fd.get('edataFine');
+    if (a && a < da) throw Object.assign(new Error('date'), { userMsg: 'La data di fine è prima di quella di inizio' });
+    const d = { ...stripId(e), tipo: fd.get('etipo'), titolo: fd.get('etitolo').trim(), data: da, dataFine: a && a > da ? a : '', luogo: fd.get('eluogo').trim(), orario: fd.get('eorario').trim(), costo: n2(fd.get('ecosto')), note: fd.get('enote').trim() };
+    if (fd.get('espesa') && d.costo > 0 && !d.movimentoId) d.movimentoId = store.put('movimenti', null, { tipo: 'uscita', data: da, categoria: 'altro', importo: d.costo, fornitore: '', numero: '', descrizione: d.titolo || tipoEv(d.tipo), righe: [], magazzino: false });
+    store.put('eventi', isNew ? null : e.id, d);
+    UI.day = da; UI.month = da.slice(0, 7);
+    toast(`${tipoEv(d.tipo)} salvat${d.tipo === 'ferie' ? 'e' : d.tipo === 'altro' ? 'o' : 'a'}`);
+  }, { del: isNew ? null : async () => { store.drop('eventi', e.id); toast('Impegno eliminato'); } });
+}
 const cliDi = x => (x.clienteId && S.clienti.find(c => c.id === x.clienteId)) || trovaCliente(x.cliente);
 const chipCli = x => { const c = cliDi(x); return c && c.tipo && c.tipo !== 'finale' ? ` <span class="chip ${c.tipo === 'rivenditore' ? 'in' : 'warn'} small">${tipoCliente(c.tipo)}</span>` : ''; };
 const linkCli = x => { const c = cliDi(x); return c ? `<button type="button" class="linkbtn" data-act="editCli" data-id="${c.id}">Scheda cliente</button>` : ''; };
@@ -200,11 +235,13 @@ function rCal() {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
     const posaK = LAV.filter(l => inPosa(l, k)); const nl = posaK.length;
     const ints = INT.filter(i => (i.dataProg || '') === k);
-    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
+    const evs = evDel(k), ferie = evs.some(e => e.tipo === 'ferie');
+    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}${evs.filter(e => e.tipo !== 'ferie').slice(0, 2).map(e => `<i class="mk ev ev-${esc(e.tipo)}"></i>`).join('')}</span></button>`;
   }
   const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
   const dl = LAV.filter(l => inPosa(l, UI.day));
   const di = INT.filter(i => i.dataProg === UI.day);
+  const de = evDel(UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
   return `${rTodo()}
   ${empty ? `<div class="empty"><b>Il diario è vuoto.</b><span>Tocca un giorno e segna la prima posa, oppure carica alcuni dati di esempio per vedere come funziona. Gli esempi si cancellano con un tocco.</span><button class="btn" data-act="seed" type="button">Carica dati di esempio</button></div>` : ''}
@@ -212,14 +249,14 @@ function rCal() {
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     ${cc ? `<div class="selbar"><div><b>Calendario di ${esc(cc.nome)}</b><div class="small">${LAV.length} ${LAV.length === 1 ? 'posa' : 'pose'} · ${INT.length} ${INT.length === 1 ? 'intervento' : 'interventi'} · solo i suoi lavori</div></div><div class="row"><button class="btn sm" data-act="editCli" data-id="${cc.id}" type="button">Scheda</button><button class="btn sm dark" data-act="calTutti" type="button">Mostra tutti</button></div></div>` : ''}
     <div class="cal">${cells}</div>
-    <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk urg"></i> posa urgente</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
+    <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk urg"></i> posa urgente</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span><i class="mk ev ev-ferie"></i> ferie</span><span><i class="mk ev ev-fiera"></i> fiera</span><span><i class="mk ev ev-corso"></i> corso</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
     ${barraSelezione()}
   </section>
   <section class="stack">
     <div class="row between"><h3>${fmtD(UI.day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
-      <div class="row"><button class="btn sm" data-act="newInt" data-arg="${UI.day}" type="button">+ Intervento</button><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button></div></div>
-    ${dl.map(lavoroCard).join('')}${di.map(intCard).join('')}
-    ${!dl.length && !di.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
+      <div class="row"><button class="btn sm" data-act="newEv" data-arg="${UI.day}" type="button">+ Ferie, fiera, corso</button><button class="btn sm" data-act="newInt" data-arg="${UI.day}" type="button">+ Intervento</button><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button></div></div>
+    ${de.map(eventoCard).join('')}${dl.map(lavoroCard).join('')}${di.map(intCard).join('')}
+    ${!dl.length && !di.length && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
   </section>
   ${S.lavori.some(x => x.esempio) || S.movimenti.some(x => x.esempio) ? `<button class="btn ghost small" data-act="unseed" type="button">Rimuovi i dati di esempio</button>` : ''}`;
 }
@@ -587,7 +624,8 @@ function sheetLav(l, prefill) {
       if (p) store.put('preventivi', p.id, { ...stripId(p), stato: 'accettato', lavoroId: id });
     }
     UI.day = d.data; UI.month = d.data.slice(0, 7);
-    toast('Posa salvata');
+    const inFerie = S.eventi.some(e => e.tipo === 'ferie' && giorniPosa(d).some(g => inEv(e, g)));
+    toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : 'Posa salvata');
   }, {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
@@ -1361,6 +1399,9 @@ document.addEventListener('click', async e => {
       break;
     case 'seed': seed(); render(); break;
     case 'newCli': sheetCliente(null); break;
+    case 'newEv': sheetEvento(null, arg); break;
+    case 'editEv': sheetEvento(S.eventi.find(x => x.id === id)); break;
+    case 'evTipo': document.querySelectorAll('.evseg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); $('#f_etipo').value = arg; break;
     case 'cliCal': { const c = cliCtx; if (!c) break; const s2 = storicoCliente(c); const prox = [...s2.lav.map(x => x.data), ...s2.int.map(x => x.dataProg || x.data)].filter(Boolean).sort(); const d = prox.find(x => x >= TODAY) || prox.pop() || TODAY; UI.calCli = c.id; UI.tab = 'cal'; UI.day = d; UI.month = d.slice(0, 7); closeSheet(); render(); window.scrollTo({ top: 0 }); break; }
     case 'calTutti': UI.calCli = null; render(); break;
     case 'editCli': sheetCliente(S.clienti.find(x => x.id === id)); break;

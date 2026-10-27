@@ -292,3 +292,14 @@ a.btn.primary{color:var(--tape-ink)}
 .g2,.g3{align-items:end}
 .mk.urg{box-shadow:0 0 0 1.5px var(--bad)}
 .urgcheck{margin-top:-2px}
+
+/* Impegni: ferie, fiere, corsi */
+:root{--ferie:#2E8B7A;--ferie-bg:#DCF0EA;--fiera:#3559C7;--fiera-bg:#E2E8FA;--corso:#7A4CC2;--corso-bg:#EEE6FA;--altro:#6B7378;--altro-bg:#E6E9EA}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ferie:#5CC9B4;--ferie-bg:#173A33;--fiera:#8EA8F5;--fiera-bg:#1D2948;--corso:#B794F0;--corso-bg:#2D2341;--altro:#9AA3A8;--altro-bg:#2C3236}}
+:root[data-theme="dark"]{--ferie:#5CC9B4;--ferie-bg:#173A33;--fiera:#8EA8F5;--fiera-bg:#1D2948;--corso:#B794F0;--corso-bg:#2D2341;--altro:#9AA3A8;--altro-bg:#2C3236}
+.day.ferie{background:var(--ferie-bg);border-color:var(--ferie)}
+.mk.ev{border-radius:50%;transform:rotate(45deg);border-radius:1px}
+.mk.ev-ferie{background:var(--ferie)} .mk.ev-fiera{background:var(--fiera)} .mk.ev-corso{background:var(--corso)} .mk.ev-altro{background:var(--altro)}
+.evcard{border-left:5px solid var(--altro)}
+.evcard.ev-ferie{border-left-color:var(--ferie);background:var(--ferie-bg)} .evcard.ev-fiera{border-left-color:var(--fiera)} .evcard.ev-corso{border-left-color:var(--corso)}
+.evchip.ev-ferie{background:var(--ferie-bg);color:var(--ferie)} .evchip.ev-fiera{background:var(--fiera-bg);color:var(--fiera)} .evchip.ev-corso{background:var(--corso-bg);color:var(--corso)} .evchip.ev-altro{background:var(--altro-bg);color:var(--altro)}

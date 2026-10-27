@@ -69,7 +69,7 @@ for (const uid of users) {
     rows.push(...page);
     if (page.length < 1000) break;
   }
-  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], preventivi: [], furgone: {} };
+  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], preventivi: [], eventi: [], furgone: {} };
   for (const r of rows) {
     if (r.kind === 'cfg') { if (r.id === 'furgone') S.furgone = r.data; }
     else if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
