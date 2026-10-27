@@ -689,12 +689,14 @@ function aggiornaTotali() {
     el.querySelector('.riga-tot').textContent = r.prezzo === '' ? '—' : eur(totaleRiga(r, L));
   });
   const righe = leggiRighe();
-  const t = totali({ righe, urgenza: !!$('#f_urgApp')?.checked, iva: kind === 'prev' ? $('#f_iva').value : 'no' }, L);
+  const kmP = kind === 'prev' ? n2($('#f_km')?.value) : 0, ekmP = n2($('#f_euroKm')?.value);
+  const t = totali({ righe: kmP > 0 ? [...righe, rigaKm(kmP, ekmP)] : righe, urgenza: !!$('#f_urgApp')?.checked, iva: kind === 'prev' ? $('#f_iva').value : 'no' }, L);
   let h = '';
+  if (kmP > 0) h += `<div class="tl"><span>Trasferta ${num(kmP, 1)} km × ${eur(ekmP)}</span><span class="price">${eur(kmP * ekmP)}</span></div>`;
   if (t.urgenzaPct) h += `<div class="tl"><span>Totale voci</span><span class="price">${eur(t.imponibileRighe)}</span></div><div class="tl"><span>Urgenza ${num(t.urgenzaPct)}%</span><span class="price">+${eur(t.urgenza)}</span></div>`;
   if (kind === 'prev' && t.ivaPct > 0) h += `<div class="tl"><span>Imponibile</span><span class="price">${eur(t.imponibile)}</span></div><div class="tl"><span>${esc(t.ivaLabel)}</span><span class="price">${eur(t.iva)}</span></div>`;
   h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
-  $('#totBox').innerHTML = righe.length ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
+  $('#totBox').innerHTML = righe.length || kmP > 0 ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
   const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
   const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * 100) / 100;
   let target = t.imponibile + trasf, conVoci = righe.length > 0 || trasf > 0;
@@ -770,7 +772,8 @@ function sheetPrev(p) {
     </div>
     ${F('Indirizzo del cantiere', inp('cantiere', p.cantiere, 'text', 'placeholder="Se diverso da quello del cliente"'))}
     ${F('Oggetto', `<textarea id="f_oggetto" name="oggetto" placeholder="Es. Posa di 6 finestre e 2 portefinestre con smontaggio dei vecchi serramenti">${esc(p.oggetto || '')}</textarea>`)}
-    ${righeBox(p.righe, 'prev', { urgenza: !!p.urgenza, iva: p.iva })}
+    ${kmBox(separaKm(p.righe).km, separaKm(p.righe).euro)}
+    ${righeBox(separaKm(p.righe).altre, 'prev', { urgenza: !!p.urgenza, iva: p.iva })}
     ${F('Note per il cliente', `<textarea id="f_note" name="note" placeholder="Es. Materiale di consumo compreso">${esc(p.note || '')}</textarea>`)}
     <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
@@ -784,7 +787,7 @@ function salvaPrev(fd) {
   const d = { ...stripId(p),
     numero: fd.get('numero').trim(), data: fd.get('data'), validita: n2(fd.get('validita')), stato: fd.get('stato'),
     cliente: { nome: fd.get('cnome').trim(), tipo: fd.get('ctipo'), indirizzo: fd.get('cindirizzo').trim(), piva: fd.get('cpiva').trim(), telefono: fd.get('ctel').trim(), email: fd.get('cemail').trim() },
-    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: leggiRighe(),
+    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd),
     urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
   const id = store.put('preventivi', isNew ? null : p.id, d);
