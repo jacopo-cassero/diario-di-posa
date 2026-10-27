@@ -104,7 +104,7 @@ h3{font-family:var(--f-display);font-weight:600;font-size:1.15rem;text-transform
 .day[aria-pressed="true"]{border:2px solid var(--fg)}
 .day.we{background:var(--sunk)}
 .marks{display:flex;gap:3px;flex-wrap:wrap}
-.mk{width:8px;height:8px;border-radius:2px;background:var(--frame)}
+.mk{width:8px;height:8px;border-radius:2px;background:var(--tape)}
 .mk.int{background:var(--bad);border-radius:50%}
 .mk.int.done{background:var(--ok)}
 .legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted);flex-wrap:wrap}
