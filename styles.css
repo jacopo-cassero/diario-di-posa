@@ -290,3 +290,5 @@ a.btn.primary{color:var(--tape-ink)}
 .cliline.nuovo{color:var(--muted)}
 .card .t .chip{vertical-align:2px;margin-left:4px}
 .g2,.g3{align-items:end}
+.mk.urg{box-shadow:0 0 0 1.5px var(--bad)}
+.urgcheck{margin-top:-2px}

@@ -155,12 +155,12 @@ function lavoroCard(l) {
   const mats = (l.materiali || []).filter(m => m.nome);
   const cart = S.cartelle.find(c => c.id === l.cartellaId);
   const nAll = (l.allegati || []).length;
-  return `<div class="card" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
+  return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
-    <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
+    <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}${l.urgenzaApplicata ? '<span class="chip warn">Urgente</span>' : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${mats.length ? `<div class="mats">${mats.map(m => `<span class="chip">${esc(m.nome)} · ${num(m.qta)}</span>`).join('')}</div>` : ''}
     ${l.indirizzo || cart || isUrl(l.cartellaUrl) || nAll || cliDi(l) ? `<div class="links">
       ${linkCli(l)}
@@ -198,9 +198,9 @@ function rCal() {
   for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
   for (let d = 1; d <= dim; d++) {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
-    const nl = LAV.filter(l => inPosa(l, k)).length;
+    const posaK = LAV.filter(l => inPosa(l, k)); const nl = posaK.length;
     const ints = INT.filter(i => (i.dataProg || '') === k);
-    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${'<i class="mk"></i>'.repeat(Math.min(nl, 3))}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
+    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
   }
   const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
   const dl = LAV.filter(l => inPosa(l, UI.day));
@@ -212,7 +212,7 @@ function rCal() {
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     ${cc ? `<div class="selbar"><div><b>Calendario di ${esc(cc.nome)}</b><div class="small">${LAV.length} ${LAV.length === 1 ? 'posa' : 'pose'} · ${INT.length} ${INT.length === 1 ? 'intervento' : 'interventi'} · solo i suoi lavori</div></div><div class="row"><button class="btn sm" data-act="editCli" data-id="${cc.id}" type="button">Scheda</button><button class="btn sm dark" data-act="calTutti" type="button">Mostra tutti</button></div></div>` : ''}
     <div class="cal">${cells}</div>
-    <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
+    <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk urg"></i> posa urgente</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
     ${barraSelezione()}
   </section>
   <section class="stack">
@@ -544,8 +544,9 @@ function sheetLav(l, prefill) {
     </div>
     ${impHint()}
     ${kmBox(KM.km, KM.euro)}
+    <label class="check urgcheck"><input type="checkbox" id="f_urgApp" name="urgApp" ${l.urgenzaApplicata ? 'checked' : ''}> Posa urgente: maggiorazione urgenza ${num(LIST().urgenzaPct)}%</label>
     <div id="modoPezzo" ${calcolo === 'ore' ? 'hidden' : ''}>${righeBox(calcolo === 'ore' ? [] : KM.altre, 'lav')}</div>
-    <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria + trasferta.</div>
+    <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria (+ urgenza) + trasferta.</div>
     ${matBox(l.materiali)}
     <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note || notaVecchia))}</div>
     <div class="fieldset"><span class="fs-t">Cartella</span>
@@ -574,7 +575,7 @@ function sheetLav(l, prefill) {
     if (kmG > 0) righe = [...righe, { ...rigaKm(kmG * gg, n2(fd.get('euroKm'))), descr: gg > 1 ? `Trasferta (${gg} giorni × ${num(kmG, 1)} km)` : 'Trasferta', kmGiorno: kmG, giorni: gg }];
     if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
     if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
-    const d = { data: fd.get('data'), dataFine, soloFeriali, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const d = { data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     if (l.preventivoId) d.preventivoId = l.preventivoId;
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
@@ -595,8 +596,8 @@ function sheetLav(l, prefill) {
   const pz = $('#f_pezzi');
   if (pz) pz.dataset.auto = !n2(l.pezzi) || Math.abs(n2(l.pezzi) - contaPezzi(l.righe)) < 0.01 ? '1' : '0';
   const imp = $('#f_importo');
-  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa - n2(KM.kmTot) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
-  else initImporto('#f_importo', l.righe, l.importo);
+  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa * (l.urgenzaApplicata ? 1 + n2(l.urgenzaPct ?? LIST().urgenzaPct) / 100 : 1) - n2(KM.kmTot) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
+  else initImporto('#f_importo', l.righe, l.importo, !!l.urgenzaApplicata);
 }
 function cambiaCalcolo(modo) {
   const ore = modo === 'ore';
@@ -767,10 +768,11 @@ function aggiornaTotali() {
   const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * gg * 100) / 100;
   let target = t.imponibile + trasf, conVoci = righe.length > 0 || trasf > 0;
   if (kind !== 'prev' && trasf > 0) {
-    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km${gg > 1 ? ` × ${gg} giorni` : ''} × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
+    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', t.urgenzaPct ? 'Voci con urgenza' : 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km${gg > 1 ? ` × ${gg} giorni` : ''} × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
   }
   if (kind === 'lav' && $('#f_calcolo')?.value === 'ore') {
-    target = Math.round((n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) + trasf) * 100) / 100; conVoci = target > 0;
+    const urgK = $('#f_urgApp')?.checked ? 1 + n2(LIST().urgenzaPct) / 100 : 1;
+    target = Math.round((n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) * urgK + trasf) * 100) / 100; conVoci = target > 0;
   } else if (kind === 'lav') {
     const pz = $('#f_pezzi'); if (pz && pz.dataset.auto !== '0') pz.value = contaPezzi(righe) || '';
     if (righe.length) $('#totBox').insertAdjacentHTML('beforeend', `<div class="small muted">Nel calendario: ${esc(riepilogoVoci(righe))}</div>`);
@@ -1413,7 +1415,7 @@ document.addEventListener('change', e => {
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }
   if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; }
   if (t.id === 'addVoce') { const v = t.value; t.value = ''; aggiungiVoce(v); return; }
-  if (t.id === 'f_urgApp') t.dataset.touched = '1';
+  if (t.id === 'f_urgApp') { t.dataset.touched = '1'; aggiornaTotali(); }
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
   if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
