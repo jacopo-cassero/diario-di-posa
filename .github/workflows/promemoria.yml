@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm install --no-save --no-package-lock web-push@3.6.7
       - name: Calcola e invia le notifiche
         run: node scripts/promemoria.mjs ${{ inputs.prova && '--prova' || '' }}
@@ -30,15 +30,22 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-      # GitHub sospende i controlli programmati dopo 60 giorni senza modifiche al progetto:
-      # una volta al mese si aggiorna questo file per tenerli attivi.
+      # Salva l'esito (senza chiavi) quando qualcosa non va, o una volta al mese.
+      # Il salvataggio mensile tiene attivo il controllo: GitHub sospende quelli
+      # programmati dopo 60 giorni senza modifiche al progetto.
+      - name: Salva l'esito
+        if: always() && (failure() || github.event_name == 'workflow_dispatch')
+        run: |
+          git config user.name "diario-di-posa"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/stato-promemoria.txt 2>/dev/null || true
+          git commit -m "Esito controllo notifiche" && git pull --rebase -q && git push || true
       - name: Mantieni attivo il controllo
-        if: github.event_name == 'schedule'
+        if: success() && github.event_name == 'schedule'
         run: |
           if [ "$(date -u +%d)" = "01" ]; then
-            date -u > .github/ultimo-controllo.txt
             git config user.name "diario-di-posa"
             git config user.email "actions@users.noreply.github.com"
-            git add .github/ultimo-controllo.txt
-            git commit -m "Controllo mensile" && git push
+            git add .github/stato-promemoria.txt
+            git commit -m "Controllo mensile" && git pull --rebase -q && git push
           fi
