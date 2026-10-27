@@ -438,26 +438,74 @@ async function openFile(path) {
 }
 
 /* lavoro */
+/* posa: giornata a pezzo (voci del listino) o a ore */
+const GRUPPI_NON_PEZZI = ['Smontaggio, scarico, tiro al piano e tariffa oraria', 'Assistenza e manutenzione'];
+/** Pezzi posati: tutte le voci di posa al pezzo (esclusi smontaggi, scarico, assistenza). */
+function contaPezzi(righe) {
+  const voci = LIST().voci;
+  return sum((righe || []).filter(r => {
+    if (r.unita !== 'pz') return false;
+    const v = voci.find(x => x.id === r.voce);
+    return v ? !GRUPPI_NON_PEZZI.includes(v.gruppo) : false;
+  }), r => r.qta);
+}
+/** Descrizione della giornata creata dalle voci. */
+function riepilogoVoci(righe) {
+  return (righe || []).map(r => {
+    const extra = [r.blindato && 'blindato', r.luce && 'in luce'].filter(Boolean).join(', ');
+    const nome = r.descr + (extra ? ` (${extra})` : '');
+    return r.unita === 'corpo' ? nome : r.unita === 'ora' ? `${num(r.qta, 2)} ore ${nome.toLowerCase()}` : `${num(r.qta, 2)} × ${nome}`;
+  }).join(', ');
+}
+const tariffaOraria = () => n2((LIST().voci.find(v => v.id === 'ora') || {}).prezzo) || 30;
+function calcoloDi(l) {
+  if (l.calcolo) return l.calcolo;
+  const r = l.righe || [];
+  return r.length && r.every(x => x.unita === 'ora') ? 'ore' : 'pezzo';
+}
+
 function sheetLav(l, prefill) {
-  const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', ...(prefill || {}) };
+  const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', calcolo: 'pezzo', ...(prefill || {}) };
   sheetFiles = [...(l.allegati || [])];
+  const calcolo = calcoloDi(l);
+  const righeOre = calcolo === 'ore' ? (l.righe || []) : [];
+  const tariffa = righeOre[0] ? n2(righeOre[0].prezzo) : tariffaOraria();
+  const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     <div class="g2">${F('Data', inp('data', l.data, 'date', 'required'))}${F('Cliente', inp('cliente', l.cliente, 'text', 'required list="clilist" placeholder="Nome o impresa"'))}</div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
-    ${F('Cosa hai posato', `<textarea id="f_installato" name="installato" placeholder="Es. 4 finestre PVC 120×140, 1 portafinestra, 2 persiane">${esc(l.installato || '')}</textarea>`)}
-    <div class="g3">${F('Pezzi', inp('pezzi', l.pezzi, 'number'))}${F('Ore impiegate', inp('ore', l.ore, 'number'))}${F('Importo €', inp('importo', l.importo, 'number'))}</div>
+    ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
+    <div class="g3">
+      ${F('Ore impiegate', inp('ore', l.ore, 'number'))}
+      <label class="f" id="wrapPezzi" ${calcolo === 'ore' ? 'hidden' : ''}><span>Pezzi posati</span>${inp('pezzi', l.pezzi, 'number')}</label>
+      <label class="f" id="wrapTariffa" ${calcolo === 'ore' ? '' : 'hidden'}><span>Tariffa €/ora</span>${inp('tariffa', tariffa, 'number')}</label>
+      ${F('Importo €', inp('importo', l.importo, 'number'))}
+    </div>
     ${impHint()}
-    ${righeBox(l.righe, 'lav')}
+    <div id="modoPezzo" ${calcolo === 'ore' ? 'hidden' : ''}>${righeBox(calcolo === 'ore' ? [] : l.righe, 'lav')}</div>
+    <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria.</div>
     ${matBox(l.materiali)}
-    <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note))}</div>
+    <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note || notaVecchia))}</div>
     <div class="fieldset"><span class="fs-t">Cartella</span>
       <div class="g2">${F('Cartella di lavoro', sel('cartellaId', [['', 'Nessuna'], ...S.cartelle.map(c => [c.id, c.nome])], l.cartellaId || ''))}${F('Link cartella del cantiere', inp('cartellaUrl', l.cartellaUrl, 'url', 'placeholder="https://www.icloud.com/…"'))}</div>
     </div>
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), installato: fd.get('installato').trim(), pezzi: n2(fd.get('pezzi')), ore: n2(fd.get('ore')), importo: n2(fd.get('importo')), righe: leggiRighe(), materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const modo = fd.get('calcolo');
+    const ore = n2(fd.get('ore'));
+    let righe, installato, pezzi;
+    if (modo === 'ore') {
+      righe = ore ? [{ voce: 'ora', descr: 'Tariffa oraria', unita: 'ora', qta: ore, prezzo: n2(fd.get('tariffa')), magg: '' }] : [];
+      installato = ore ? `Giornata a ore: ${num(ore, 2)} ore` : 'Giornata a ore';
+      pezzi = 0;
+    } else {
+      righe = leggiRighe();
+      installato = riepilogoVoci(righe);
+      pezzi = n2(fd.get('pezzi'));
+    }
+    const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     if (l.preventivoId) d.preventivoId = l.preventivoId;
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
@@ -473,7 +521,19 @@ function sheetLav(l, prefill) {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
   });
-  initImporto('#f_importo', l.righe, l.importo);
+  const pz = $('#f_pezzi');
+  if (pz) pz.dataset.auto = !n2(l.pezzi) || Math.abs(n2(l.pezzi) - contaPezzi(l.righe)) < 0.01 ? '1' : '0';
+  const imp = $('#f_importo');
+  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa) < 0.01 ? '1' : '0'; aggiornaTotali(); }
+  else initImporto('#f_importo', l.righe, l.importo);
+}
+function cambiaCalcolo(modo) {
+  const ore = modo === 'ore';
+  $('#modoPezzo').hidden = ore; $('#modoOre').hidden = !ore;
+  $('#wrapPezzi').hidden = ore; $('#wrapTariffa').hidden = !ore;
+  $('#f_importo').dataset.auto = '1';
+  aggiornaTotali();
+  if (ore && !n2($('#f_ore').value)) $('#f_ore').focus();
 }
 
 /* intervento */
@@ -626,9 +686,16 @@ function aggiornaTotali() {
   h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
   $('#totBox').innerHTML = righe.length ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
   const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
-  if (imp && righe.length && imp.dataset.auto !== '0') imp.value = t.imponibile || '';
+  let target = t.imponibile, conVoci = righe.length > 0;
+  if (kind === 'lav' && $('#f_calcolo')?.value === 'ore') {
+    target = Math.round(n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) * 100) / 100; conVoci = target > 0;
+  } else if (kind === 'lav') {
+    const pz = $('#f_pezzi'); if (pz && pz.dataset.auto !== '0') pz.value = contaPezzi(righe) || '';
+    if (righe.length) $('#totBox').insertAdjacentHTML('beforeend', `<div class="small muted">Nel calendario: ${esc(riepilogoVoci(righe))}</div>`);
+  }
+  if (imp && conVoci && imp.dataset.auto !== '0') imp.value = target || '';
   const hint = $('#impHint');
-  if (hint) { hint.hidden = !(imp && righe.length && imp.dataset.auto === '0' && Math.abs(n2(imp.value) - t.imponibile) > 0.009); hint.querySelector('b').textContent = eur(t.imponibile); }
+  if (hint) { hint.hidden = !(imp && conVoci && imp.dataset.auto === '0' && Math.abs(n2(imp.value) - target) > 0.009); hint.querySelector('b').textContent = eur(target); }
 }
 function initImporto(selector, righe, valore) {
   const imp = $(selector); if (!imp) return;
@@ -1005,7 +1072,7 @@ document.addEventListener('click', async e => {
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
     case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { store.put('preventivi', p.id, { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
-    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', installato: p.oggetto || '', righe: p.righe || [], importo: totPrev(p).imponibile, note: p.note || '', preventivoId: p.id }); break; }
+    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
     case 'editListino': sheetListino(); break;
     case 'editAzienda': sheetAzienda(); break;
     case 'addL': b.insertAdjacentHTML('beforebegin', listinoRow({ id: 'v' + Date.now().toString(36), nome: '', variante: '', prezzo: '', unita: 'pz' })); b.previousElementSibling.querySelector('[name="ln"]').focus(); break;
@@ -1034,13 +1101,16 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgApp') t.dataset.touched = '1';
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
+  if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga')) t.dataset.auto = '0'; aggiornaTotali(); return; }
+  if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga') || $('#f_calcolo')?.value === 'ore') t.dataset.auto = '0'; aggiornaTotali(); return; }
+  if (t.id === 'f_pezzi') { t.dataset.auto = '0'; return; }
+  if (t.id === 'f_ore' || t.id === 'f_tariffa') { aggiornaTotali(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 caricaImmagini();
