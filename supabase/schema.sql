@@ -59,4 +59,4 @@ create policy "file: eliminazione propria" on storage.objects for delete to auth
 -- Aggiornamento per database già creati (preventivi):
 alter table public.records drop constraint if exists records_kind_check;
 alter table public.records add constraint records_kind_check
-  check (kind in ('lavori','interventi','movimenti','magazzino','cartelle','cfg','preventivi'));
+  check (kind in ('lavori','interventi','movimenti','magazzino','cartelle','cfg','preventivi','clienti'));

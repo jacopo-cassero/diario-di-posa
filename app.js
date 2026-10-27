@@ -31,6 +31,7 @@ const ICON = {
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
   prev: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/>',
+  cli: '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -38,8 +39,8 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 const CFG = window.DIARIO_CONFIG || {};
 const store = createStore(CFG, () => render());
 const S = store.S;
-const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
+const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
+const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
   if (TABS.some(t => t[0] === h) || h === 'set') UI.tab = h;
@@ -88,7 +89,7 @@ function render() {
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
     : st.syncing || pend ? '<span class="st busy">Sincronizzo</span>' : '<span class="st">Sincronizzato</span>';
   $('#matlist').innerHTML = S.magazzino.map(m => `<option value="${esc(m.nome)}"></option>`).join('');
-  $('#clilist').innerHTML = [...new Set([...S.lavori, ...S.interventi].map(x => x.cliente).filter(Boolean))].map(c => `<option value="${esc(c)}"></option>`).join('');
+  $('#clilist').innerHTML = [...new Set([...S.clienti.map(c => c.nome), ...[...S.lavori, ...S.interventi].map(x => x.cliente)].filter(Boolean))].sort((a, b) => a.localeCompare(b)).map(c => `<option value="${esc(c)}"></option>`).join('');
 
   if (st.auth === 'checking') { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
@@ -96,7 +97,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -278,6 +279,18 @@ function rVan() {
 }
 
 function inPeriod(d) { if (!d) return false; if (!d.startsWith(String(UI.anYear))) return false; return UI.anMonth === 'all' || d.slice(5, 7) === UI.anMonth; }
+function clientiPrincipali(lav, ints) {
+  const m = new Map();
+  for (const [x, imp] of [...lav.map(l => [l, n2(l.importo)]), ...ints.map(i => [i, n2(i.costo)])]) {
+    const k = x.clienteId || normNome(x.cliente); if (!k) continue;
+    const r = m.get(k) || { nome: (S.clienti.find(c => c.id === x.clienteId) || {}).nome || x.cliente, id: x.clienteId, imp: 0, n: 0 };
+    r.imp += imp; r.n++; m.set(k, r);
+  }
+  const top = [...m.values()].sort((a, b) => b.imp - a.imp).slice(0, 5);
+  if (!top.length) return '';
+  const max = top[0].imp || 1, tot = sum([...m.values()], r => r.imp) || 1;
+  return `<section class="panel stack"><h3>Clienti principali</h3><div class="bars">${top.map(r => `<div ${r.id ? `role="button" tabindex="0" data-act="editCli" data-id="${r.id}" style="cursor:pointer"` : ''}><div class="bar-l"><span>${esc(r.nome)} <span class="muted small">· ${r.n} ${r.n === 1 ? 'lavoro' : 'lavori'}</span></span><span class="num">${eur(r.imp)} · ${num(r.imp / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${r.imp / max * 100}%"></div></div></div>`).join('')}</div></section>`;
+}
 function rAn() {
   const yrs = [...new Set([TODAY.slice(0, 4), ...S.lavori.map(l => (l.data || '').slice(0, 4)), ...S.movimenti.map(m => (m.data || '').slice(0, 4))].filter(Boolean))].sort().reverse();
   const lav = S.lavori.filter(l => inPeriod(l.data) && l.data <= TODAY);
@@ -317,6 +330,7 @@ function rAn() {
     <div class="small muted">Costo del materiale usato in ogni posa (al costo medio di magazzino) rispetto a quanto incassato. Nel periodo: <b class="num">${eur(sum(inc, x => x.c))}</b> di materiale.</div>
     ${inc.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cantiere</th><th class="r">Incasso</th><th class="r">Materiale</th><th class="r">Incidenza</th><th class="r">€ / ora</th></tr></thead><tbody>${inc.sort((a, b) => String(b.l.data).localeCompare(a.l.data)).slice(0, 15).map(x => `<tr><td>${fmtD(x.l.data, { day: 'numeric', month: 'short' })} · ${esc(x.l.cliente)}</td><td class="r num">${eur(x.l.importo)}</td><td class="r num">${eur(x.c)}</td><td class="r num">${num(x.p)}%</td><td class="r num">${n2(x.l.ore) ? eur((n2(x.l.importo) - x.c) / n2(x.l.ore)) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Segna importo e materiale usato nelle pose per vedere l\'incidenza.</div>'}
   </section>
+  ${clientiPrincipali(lav, ints)}
   <section class="stack"><h3>Consumo e ordini materiale</h3>
     ${matRows.length ? `<div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Usato</th><th class="r">Comprato</th><th class="r">Ordini</th><th class="r">Ordini ogni</th><th>Ultimo</th></tr></thead><tbody>${matRows.map(r => `<tr><td><b>${esc(r.s.nome)}</b></td><td class="r num">${num(r.used)} ${esc(r.s.unita)}</td><td class="r num">${num(r.bought)} ${esc(r.s.unita)}</td><td class="r num">${r.ordini}</td><td class="r num">${r.ogni !== null ? r.ogni + ' gg' : '—'}</td><td class="num">${r.ultimo ? fmtD(r.ultimo, { day: 'numeric', month: 'short' }) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Qui vedrai quanto materiale usi e ogni quanti giorni lo riordini, appena registri acquisti e pose.</div>'}
   </section>
@@ -520,6 +534,7 @@ function sheetLav(l, prefill) {
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
     moveStock(mats, -1);
+    d.clienteId = assicuraCliente(d.cliente);
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (isNew && d.preventivoId) {
       const p = S.preventivi.find(x => x.id === d.preventivoId);
@@ -570,6 +585,7 @@ function sheetInt(i, day) {
     if (i.esempio) d.esempio = true;
     if (!isNew) moveStock(i.materiali, +1);
     moveStock(mats, -1);
+    d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     store.put('interventi', isNew ? null : i.id, d);
     toast('Intervento salvato');
   }, {
@@ -791,17 +807,138 @@ function salvaPrev(fd) {
     cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd),
     urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
+  d.clienteId = assicuraCliente(d.cliente.nome, { tipo: d.cliente.tipo, indirizzo: d.cliente.indirizzo, piva: d.cliente.piva, telefono: d.cliente.telefono, email: d.cliente.email });
   const id = store.put('preventivi', isNew ? null : p.id, d);
   prevCtx = { p: { id, ...d }, isNew: false };
   return prevCtx.p;
 }
 /** Compila i dati del cliente da un preventivo precedente con lo stesso nome. */
 function compilaCliente(nome) {
+  if (compilaDaRubrica(nome)) return;
   const prec = [...S.preventivi].reverse().find(p => (p.cliente?.nome || '').toLowerCase() === nome.trim().toLowerCase());
   if (!prec) return;
   const c = prec.cliente;
   for (const [id, v] of [['f_cindirizzo', c.indirizzo], ['f_cpiva', c.piva], ['f_ctel', c.telefono], ['f_cemail', c.email]]) { const el = $('#' + id); if (el && !el.value && v) el.value = v; }
   const t = $('#f_ctipo'); if (t && c.tipo) t.value = c.tipo;
+}
+
+/* ---------- clienti (CRM) ---------- */
+const TIPI_CLIENTE = [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']];
+const tipoCliente = k => (TIPI_CLIENTE.find(t => t[0] === k) || TIPI_CLIENTE[0])[1];
+const normNome = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const trovaCliente = nome => normNome(nome) ? S.clienti.find(c => normNome(c.nome) === normNome(nome)) : null;
+const nomeDi = x => typeof x.cliente === 'object' ? (x.cliente?.nome || '') : (x.cliente || '');
+/** Restituisce l'id del cliente con quel nome; se non esiste lo crea. Completa i dati mancanti. */
+function assicuraCliente(nome, extra = {}) {
+  if (!normNome(nome)) return '';
+  const c = trovaCliente(nome);
+  const pulito = Object.fromEntries(Object.entries(extra).filter(([, v]) => v));
+  if (c) {
+    const mancanti = Object.fromEntries(Object.entries(pulito).filter(([k]) => !c[k]));
+    if (Object.keys(mancanti).length) store.put('clienti', c.id, { ...stripId(c), ...mancanti });
+    return c.id;
+  }
+  return store.put('clienti', null, { nome: String(nome).trim(), tipo: 'finale', creato: TODAY, ...pulito });
+}
+/** Tutto ciò che riguarda un cliente: collegato per id o, per i dati vecchi, per nome. */
+function storicoCliente(c) {
+  const mio = x => x.clienteId === c.id || (!x.clienteId && normNome(nomeDi(x)) === normNome(c.nome));
+  const lav = S.lavori.filter(mio), int = S.interventi.filter(mio), prev = S.preventivi.filter(mio);
+  const fatt = [...lav.map(x => ({ imp: n2(x.importo), d: x.data, amm: x.amm })), ...int.filter(i => i.stato === 'completato').map(x => ({ imp: n2(x.costo), d: x.dataProg || x.data, amm: x.amm }))].filter(x => x.d && x.d <= TODAY);
+  return {
+    lav, int, prev,
+    fatturato: sum(fatt, x => x.imp),
+    anno: sum(fatt.filter(x => x.d.startsWith(TODAY.slice(0, 4))), x => x.imp),
+    aperto: sum(fatt.filter(x => (x.amm || 'da_cons') !== 'pag'), x => x.imp),
+    ultimo: [...lav.map(x => x.data), ...int.map(x => x.dataProg || x.data), ...prev.map(x => x.data)].filter(Boolean).sort().pop() || '',
+  };
+}
+const nomiSenzaScheda = () => [...new Set([...S.lavori, ...S.interventi, ...S.preventivi].map(nomeDi).map(n => n.trim()).filter(Boolean))].filter(n => !trovaCliente(n));
+function importaClienti() {
+  let n = 0;
+  for (const nome of nomiSenzaScheda()) {
+    const p = [...S.preventivi].reverse().find(x => normNome(nomeDi(x)) === normNome(nome));
+    const i = S.interventi.find(x => normNome(nomeDi(x)) === normNome(nome) && x.telefono);
+    const extra = p ? { tipo: p.cliente.tipo, indirizzo: p.cliente.indirizzo, piva: p.cliente.piva, telefono: p.cliente.telefono, email: p.cliente.email } : {};
+    if (!extra.telefono && i) extra.telefono = i.telefono;
+    assicuraCliente(nome, extra); n++;
+  }
+  // collega i lavori esistenti alle schede
+  for (const [kind, arr] of [['lavori', S.lavori], ['interventi', S.interventi], ['preventivi', S.preventivi]]) {
+    for (const x of arr) { if (x.clienteId) continue; const c = trovaCliente(nomeDi(x)); if (c) store.put(kind, x.id, { ...stripId(x), clienteId: c.id }); }
+  }
+  return n;
+}
+function rClienti() {
+  const q = normNome(UI.cerca);
+  const L = S.clienti.filter(c => (UI.cliTipo === 'tutti' || (c.tipo || 'finale') === UI.cliTipo) && (!q || [c.nome, c.referente, c.telefono, c.email, c.indirizzo].some(v => normNome(v).includes(q))))
+    .map(c => ({ c, s: storicoCliente(c) }))
+    .sort((a, b) => UI.cliOrd === 'nome' ? a.c.nome.localeCompare(b.c.nome) : (b.s.ultimo || '').localeCompare(a.s.ultimo || '') || a.c.nome.localeCompare(b.c.nome));
+  const senza = nomiSenzaScheda();
+  const FT = [['tutti', 'Tutti'], ...TIPI_CLIENTE.map(([k, l]) => [k, l.split(' ')[0] === 'Cliente' ? 'Privati' : l === 'Rivenditore' ? 'Rivenditori' : 'Imprese'])];
+  return `<div class="row between"><h2>Clienti</h2><button class="btn primary" data-act="newCli" type="button">${svg('plus')} Nuovo</button></div>
+  ${senza.length ? `<div class="notice row between"><span><b>${senza.length} ${senza.length === 1 ? 'cliente' : 'clienti'}</b> dei tuoi lavori ${senza.length === 1 ? 'non ha' : 'non hanno'} ancora una scheda: ${esc(senza.slice(0, 3).join(', '))}${senza.length > 3 ? '…' : ''}</span><button class="btn sm dark" data-act="importaCli" type="button">Crea le schede</button></div>` : ''}
+  <label class="f"><span class="sr">Cerca</span><input id="cercaCliente" type="search" placeholder="Cerca per nome, telefono, email…" value="${esc(UI.cerca)}" autocomplete="off"></label>
+  <div class="seg" role="group" aria-label="Tipo">${FT.map(([k, l]) => `<button data-act="cliTipo" data-arg="${k}" aria-pressed="${UI.cliTipo === k}" type="button">${l}</button>`).join('')}</div>
+  <div class="row between small muted"><span>${S.clienti.length} in rubrica</span><button class="linkbtn" data-act="cliOrd" type="button">Ordina per ${UI.cliOrd === 'nome' ? 'ultimo lavoro' : 'nome'}</button></div>
+  <div class="stack" id="listaClienti">${L.map(({ c, s }) => `<div class="card" role="button" tabindex="0" data-act="editCli" data-id="${c.id}">
+      <div class="row between"><span class="t">${esc(c.nome)}</span><span class="chip ${c.tipo === 'rivenditore' ? 'in' : c.tipo === 'impresa' ? 'warn' : ''}">${tipoCliente(c.tipo)}</span></div>
+      ${c.referente || c.telefono ? `<div class="addr">${esc([c.referente, c.telefono].filter(Boolean).join(' · '))}</div>` : ''}
+      <div class="meta"><span><b class="num">${s.lav.length}</b> ${s.lav.length === 1 ? 'posa' : 'pose'}</span><span><b class="num">${s.int.length}</b> ${s.int.length === 1 ? 'intervento' : 'interventi'}</span><span><b class="num">${s.prev.length}</b> ${s.prev.length === 1 ? 'preventivo' : 'preventivi'}</span>${s.fatturato ? `<span>Lavorato <b>${eur(s.fatturato)}</b></span>` : ''}${s.aperto ? `<span class="chip warn">da incassare ${eur(s.aperto)}</span>` : ''}</div>
+    </div>`).join('') || `<div class="empty"><b>${S.clienti.length ? 'Nessun cliente trovato.' : 'La rubrica è vuota.'}</b><span class="small">Ogni cliente che scrivi in una posa, un intervento o un preventivo finisce qui da solo, con tutto lo storico.</span></div>`}</div>`;
+}
+function sheetCliente(c) {
+  const isNew = !c; c = c || { tipo: 'finale' };
+  const s = isNew ? null : storicoCliente(c);
+  const az = AZ();
+  const voce = (d, tipo, testo, imp, chip, act, id) => `<div class="hist" role="button" tabindex="0" data-act="${act}" data-id="${id}"><span class="hd num">${fmtD(d, { day: '2-digit', month: '2-digit', year: '2-digit' })}</span><span class="hm"><b>${tipo}</b>${testo ? ' · ' + esc(testo) : ''}</span><span class="hr"><span class="price">${imp ? eur(imp) : ''}</span>${chip}</span></div>`;
+  const storia = isNew ? [] : [
+    ...s.prev.map(p => ({ d: p.data, h: voce(p.data, `Preventivo ${esc(p.numero || '')}`, p.oggetto, totPrev(p).totale, `<span class="chip ${statoPrev(p.stato)[2]}">${statoPrev(p.stato)[1]}</span>`, 'editPrev', p.id) })),
+    ...s.lav.map(l => ({ d: l.data, h: voce(l.data, 'Posa', l.installato, l.importo, `<span class="chip ${ammOf(l.amm)[2]}">${ammOf(l.amm)[1]}</span>`, 'editLav', l.id) })),
+    ...s.int.map(i => ({ d: i.dataProg || i.data, h: voce(i.dataProg || i.data, 'Intervento', i.descrizione, i.costo, `<span class="chip ${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[2]}">${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[1]}</span>`, 'editInt', i.id) })),
+  ].sort((a, b) => String(b.d).localeCompare(String(a.d)));
+  cliCtx = isNew ? null : c;
+  openSheet(isNew ? 'Nuovo cliente' : c.nome, `
+    ${isNew ? '' : `<div class="kpis"><div class="kpi"><div class="l">Lavorato</div><div class="v">${eur(s.fatturato)}</div></div><div class="kpi"><div class="l">Quest'anno</div><div class="v">${eur(s.anno)}</div></div><div class="kpi"><div class="l">Da incassare</div><div class="v">${eur(s.aperto)}</div></div><div class="kpi"><div class="l">Ultimo lavoro</div><div class="v">${s.ultimo ? fmtD(s.ultimo, { day: 'numeric', month: 'short' }) : '—'}</div></div></div>
+    <div class="row">${c.telefono ? `<a class="btn sm" href="tel:${esc(c.telefono.replace(/\s/g, ''))}">Chiama</a><a class="btn sm" href="https://wa.me/${esc(c.telefono.replace(/\D/g, '').replace(/^(?!39)(?=3)/, '39'))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}">Email</a>` : ''}${c.indirizzo ? `<a class="btn sm" href="https://maps.apple.com/?q=${encodeURIComponent(c.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>
+    <div class="row"><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button></div>
+    <div class="fieldset"><span class="fs-t">Storico</span><div class="histlist">${storia.map(x => x.h).join('') || '<div class="small muted">Ancora nessun lavoro.</div>'}</div></div>`}
+    <div class="fieldset"><span class="fs-t">Dati del cliente</span>
+      <div class="g2">${F('Nome o ragione sociale', inp('kNome', c.nome, 'text', 'required'))}${F('Tipo', sel('kTipo', TIPI_CLIENTE, c.tipo || 'finale'))}</div>
+      <div class="g2">${F('Referente', inp('kRef', c.referente, 'text', 'placeholder="Persona di riferimento"'))}${F('Telefono', inp('kTel', c.telefono, 'tel'))}</div>
+      <div class="g2">${F('Email', inp('kEmail', c.email, 'email'))}${F('P. IVA / Codice fiscale', inp('kPiva', c.piva))}</div>
+      ${F('Indirizzo', inp('kInd', c.indirizzo, 'text', 'placeholder="Sede o abitazione"'))}
+      <div class="g2">${F('Codice SDI o PEC', inp('kSdi', c.sdi, 'text', 'placeholder="Per la fattura elettronica"'))}${F('IVA nei preventivi', sel('kIva', [['', `Predefinita (${ivaOf(az.ivaPredefinita)[1]})`], ...IVA.map(i => [i[0], i[1]])], c.iva || ''))}</div>
+      ${F('Note', `<textarea id="f_kNote" name="kNote" placeholder="Es. paga a 30 giorni, chiavi dal portinaio…">${esc(c.note || '')}</textarea>`)}
+    </div>`,
+  async fd => {
+    const nome = fd.get('kNome').trim();
+    const altro = trovaCliente(nome);
+    if (altro && altro.id !== c.id) throw Object.assign(new Error('doppio'), { userMsg: `Esiste già un cliente chiamato "${altro.nome}"` });
+    const d = { ...stripId(c), nome, tipo: fd.get('kTipo'), referente: fd.get('kRef').trim(), telefono: fd.get('kTel').trim(), email: fd.get('kEmail').trim(), piva: fd.get('kPiva').trim(), indirizzo: fd.get('kInd').trim(), sdi: fd.get('kSdi').trim(), iva: fd.get('kIva'), note: fd.get('kNote').trim() };
+    if (isNew) d.creato = TODAY;
+    const id = store.put('clienti', isNew ? null : c.id, d);
+    if (!isNew && normNome(c.nome) !== normNome(nome)) {
+      // nome cambiato: aggiorna anche pose, interventi e preventivi collegati
+      for (const x of s.lav) store.put('lavori', x.id, { ...stripId(x), cliente: nome, clienteId: id });
+      for (const x of s.int) store.put('interventi', x.id, { ...stripId(x), cliente: nome, clienteId: id });
+      for (const x of s.prev) store.put('preventivi', x.id, { ...stripId(x), cliente: { ...(x.cliente || {}), nome }, clienteId: id });
+    }
+    toast('Cliente salvato');
+  }, { del: isNew ? null : async () => { store.drop('clienti', c.id); toast('Cliente tolto dalla rubrica (i lavori restano)'); } });
+}
+let cliCtx = null;
+/** Quando scrivi il nome di un cliente in rubrica, completa i campi vuoti del modulo. */
+function compilaDaRubrica(nome) {
+  const c = trovaCliente(nome); if (!c) return false;
+  const metti = (id, v) => { const el = $('#' + id); if (el && !el.value && v) el.value = v; };
+  // preventivo
+  metti('f_cindirizzo', c.indirizzo); metti('f_cpiva', c.piva); metti('f_ctel', c.telefono); metti('f_cemail', c.email);
+  const t = $('#f_ctipo'); if (t && c.tipo) t.value = c.tipo;
+  const iva = $('#f_iva'); if (iva && c.iva && $('#righeBox')?.dataset.kind === 'prev') { iva.value = c.iva; aggiornaTotali(); }
+  // intervento
+  metti('f_telefono', c.telefono);
+  return true;
 }
 
 /* ---------- consuntivo di più giorni ---------- */
@@ -880,6 +1017,8 @@ Totale: ${eur(t.imponibile)} + IVA se dovuta`;
 /* ---------- PDF ---------- */
 let pdfCorrente = null;
 function apriPdf(tipo, doc, indietro) {
+  const cr = trovaCliente(doc.cliente?.nome);
+  if (cr) doc = { ...doc, cliente: { indirizzo: cr.indirizzo, piva: cr.piva, email: cr.email, telefono: cr.telefono, ...Object.fromEntries(Object.entries(doc.cliente || {}).filter(([, v]) => v)) } };
   let bytes;
   try { bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG }); }
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
@@ -1152,6 +1291,14 @@ document.addEventListener('click', async e => {
       try { b.disabled = true; await sheetDel(); closeSheet(); render(); } catch { toast('Non eliminato, riprova'); b.disabled = false; }
       break;
     case 'seed': seed(); render(); break;
+    case 'newCli': sheetCliente(null); break;
+    case 'editCli': sheetCliente(S.clienti.find(x => x.id === id)); break;
+    case 'importaCli': { const n = importaClienti(); render(); toast(`${n} ${n === 1 ? 'scheda creata' : 'schede create'}`); break; }
+    case 'cliTipo': UI.cliTipo = arg; render(); break;
+    case 'cliOrd': UI.cliOrd = UI.cliOrd === 'nome' ? 'recenti' : 'nome'; render(); break;
+    case 'cliPrev': { const c = cliCtx; if (!c) break; sheetPrev(null); $('#f_cnome').value = c.nome; compilaDaRubrica(c.nome); break; }
+    case 'cliLav': { const c = cliCtx; if (!c) break; sheetLav(null, { cliente: c.nome }); break; }
+    case 'cliInt': { const c = cliCtx; if (!c) break; sheetInt(null); $('#f_cliente').value = c.nome; compilaDaRubrica(c.nome); break; }
     case 'newPrev': sheetPrev(null); break;
     case 'editPrev': sheetPrev(S.preventivi.find(x => x.id === id)); break;
     case 'prevF': UI.prevFilter = arg; render(); break;
@@ -1200,6 +1347,7 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgApp') t.dataset.touched = '1';
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
+  if (t.id === 'f_cliente') compilaDaRubrica(t.value);
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
   if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }
   if (t.classList && t.classList.contains('cmChk')) { aggiornaCM(); return; }
@@ -1209,6 +1357,12 @@ $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeS
 
 document.addEventListener('input', e => {
   const t = e.target;
+  if (t.id === 'cercaCliente') {
+    UI.cerca = t.value;
+    const tmp = document.createElement('div'); tmp.innerHTML = rClienti();
+    $('#listaClienti').replaceWith(tmp.querySelector('#listaClienti'));
+    return;
+  }
   if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga') || $('#f_calcolo')?.value === 'ore') t.dataset.auto = '0'; aggiornaTotali(); return; }
   if (t.id === 'f_pezzi') { t.dataset.auto = '0'; return; }
   if (['f_ore', 'f_tariffa', 'f_km', 'f_euroKm'].includes(t.id)) { aggiornaTotali(); return; }
