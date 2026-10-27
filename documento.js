@@ -208,6 +208,7 @@ export function docDaLavoro(x, tipoLavoro, azienda) {
   const righe = (x.righe || []).length ? x.righe : (+(L ? x.importo : x.costo) > 0 ? [{ descr: L ? `Posa in opera${x.installato ? ' – ' + x.installato : ''}` : `Intervento${x.descrizione ? ' – ' + x.descrizione : ''}`, unita: 'corpo', qta: 1, prezzo: +(L ? x.importo : x.costo) }] : []);
   return {
     data: L ? x.data : (x.dataProg || x.data),
+    dataFine: L ? (x.dataFine || '') : '',
     cliente: { nome: x.cliente, telefono: x.telefono || '' },
     cantiere: x.indirizzo,
     oggetto: L ? x.installato : x.descrizione,

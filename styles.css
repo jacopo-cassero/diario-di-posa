@@ -289,3 +289,4 @@ a.btn.primary{color:var(--tape-ink)}
 .cliline:empty{display:none}
 .cliline.nuovo{color:var(--muted)}
 .card .t .chip{vertical-align:2px;margin-left:4px}
+.g2,.g3{align-items:end}

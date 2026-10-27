@@ -157,6 +157,7 @@ function lavoroCard(l) {
   const nAll = (l.allegati || []).length;
   return `<div class="card" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
+    ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
@@ -197,12 +198,12 @@ function rCal() {
   for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
   for (let d = 1; d <= dim; d++) {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
-    const nl = LAV.filter(l => l.data === k).length;
+    const nl = LAV.filter(l => inPosa(l, k)).length;
     const ints = INT.filter(i => (i.dataProg || '') === k);
     cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${'<i class="mk"></i>'.repeat(Math.min(nl, 3))}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
   }
   const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
-  const dl = LAV.filter(l => l.data === UI.day);
+  const dl = LAV.filter(l => inPosa(l, UI.day));
   const di = INT.filter(i => i.dataProg === UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
   return `${rTodo()}
@@ -482,7 +483,33 @@ function riepilogoVoci(righe) {
   }).join(', ');
 }
 const euroKm = () => { const v = LIST().euroKm; return v === undefined || v === null || v === '' ? 1 : n2(v); };
-function separaKm(righe) { const r = righe || []; const k = r.find(x => x.voce === 'km'); return { km: k ? n2(k.qta) : '', euro: k ? n2(k.prezzo) : euroKm(), altre: r.filter(x => x.voce !== 'km') }; }
+function separaKm(righe) { const r = righe || []; const k = r.find(x => x.voce === 'km'); return { km: k ? n2(k.kmGiorno ?? k.qta) : '', kmTot: k ? n2(k.qta) : 0, euro: k ? n2(k.prezzo) : euroKm(), altre: r.filter(x => x.voce !== 'km') }; }
+/** Giorni di lavoro di una posa (dal giorno di inizio a quello di fine; sabato e domenica in mezzo si saltano se richiesto). */
+function giorniPosa(l) {
+  const da = l.data, a = l.dataFine && l.dataFine > l.data ? l.dataFine : l.data;
+  if (!da) return [];
+  const out = [];
+  for (let d = pd(da); iso(d) <= a && out.length < 366; d.setDate(d.getDate() + 1)) {
+    const k = iso(d), dow = d.getDay();
+    if (l.soloFeriali !== false && (dow === 0 || dow === 6) && k !== da && k !== a) continue;
+    out.push(k);
+  }
+  return out;
+}
+const inPosa = (l, k) => k >= l.data && k <= (l.dataFine || l.data) && giorniPosa(l).includes(k);
+function giorniForm() {
+  const da = $('#f_data')?.value, a = $('#f_dataFine')?.value;
+  return giorniPosa({ data: da, dataFine: a, soloFeriali: $('#f_soloFeriali') ? $('#f_soloFeriali').checked : true }).length || 1;
+}
+function aggiornaGiorni() {
+  const info = $('#giorniInfo'); if (!info) return;
+  const a = $('#f_dataFine').value, da = $('#f_data').value, g = giorniForm();
+  $('#wrapFeriali').hidden = !(a && a > da);
+  info.textContent = a && a < da ? 'La data di fine è prima di quella di inizio' : a && a > da ? `${g} giorni di lavoro` : 'Un solo giorno';
+  info.classList.toggle('err', !!(a && a < da));
+  const lk = $('#f_km')?.closest('label')?.querySelector('span'); if (lk) lk.textContent = g > 1 ? 'Km al giorno' : 'Trasferta km';
+  const lo = $('#f_ore')?.closest('label')?.querySelector('span'); if (lo) lo.textContent = g > 1 ? 'Ore impiegate (totali)' : 'Ore impiegate';
+}
 const rigaKm = (km, euro) => ({ voce: 'km', descr: 'Trasferta', unita: 'km', qta: km, prezzo: euro, magg: '' });
 const conKm = (righe, fd) => { const km = n2(fd.get('km')); return km > 0 ? [...righe, rigaKm(km, n2(fd.get('euroKm')))] : righe; };
 const kmBox = (km, euro) => `<div class="g2">${F('Trasferta km', inp('km', km, 'number', 'placeholder="0"'))}${F('€ al km', inp('euroKm', euro, 'number'))}</div>`;
@@ -505,7 +532,8 @@ function sheetLav(l, prefill) {
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     <div class="cliline small" id="cliInfo"></div>
-    ${F('Data', inp('data', l.data, 'date', 'required'))}
+    <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
+    <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta sabato e domenica</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
     <div class="g3">
@@ -538,9 +566,15 @@ function sheetLav(l, prefill) {
       installato = riepilogoVoci(righe);
       pezzi = n2(fd.get('pezzi'));
     }
-    righe = conKm(righe, fd);
-    if (n2(fd.get('km')) > 0) installato = [installato, `trasferta ${num(n2(fd.get('km')), 1)} km`].filter(Boolean).join(', ');
-    const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const dataFine = fd.get('dataFine') && fd.get('dataFine') > fd.get('data') ? fd.get('dataFine') : '';
+    if (fd.get('dataFine') && fd.get('dataFine') < fd.get('data')) throw Object.assign(new Error('date'), { userMsg: 'La data di fine è prima di quella di inizio' });
+    const soloFeriali = !!fd.get('soloFeriali') || !dataFine;
+    const gg = giorniPosa({ data: fd.get('data'), dataFine, soloFeriali }).length || 1;
+    const kmG = n2(fd.get('km'));
+    if (kmG > 0) righe = [...righe, { ...rigaKm(kmG * gg, n2(fd.get('euroKm'))), descr: gg > 1 ? `Trasferta (${gg} giorni × ${num(kmG, 1)} km)` : 'Trasferta', kmGiorno: kmG, giorni: gg }];
+    if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
+    if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
+    const d = { data: fd.get('data'), dataFine, soloFeriali, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     if (l.preventivoId) d.preventivoId = l.preventivoId;
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
@@ -557,10 +591,11 @@ function sheetLav(l, prefill) {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
   });
+  aggiornaGiorni();
   const pz = $('#f_pezzi');
   if (pz) pz.dataset.auto = !n2(l.pezzi) || Math.abs(n2(l.pezzi) - contaPezzi(l.righe)) < 0.01 ? '1' : '0';
   const imp = $('#f_importo');
-  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa - n2(KM.km) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
+  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa - n2(KM.kmTot) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
   else initImporto('#f_importo', l.righe, l.importo);
 }
 function cambiaCalcolo(modo) {
@@ -728,10 +763,11 @@ function aggiornaTotali() {
   h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
   $('#totBox').innerHTML = righe.length || kmP > 0 ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
   const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
-  const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * 100) / 100;
+  const gg = kind === 'lav' ? giorniForm() : 1;
+  const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * gg * 100) / 100;
   let target = t.imponibile + trasf, conVoci = righe.length > 0 || trasf > 0;
   if (kind !== 'prev' && trasf > 0) {
-    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
+    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km${gg > 1 ? ` × ${gg} giorni` : ''} × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
   }
   if (kind === 'lav' && $('#f_calcolo')?.value === 'ore') {
     target = Math.round((n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) + trasf) * 100) / 100; conVoci = target > 0;
@@ -975,7 +1011,7 @@ function compilaDaRubrica(nome) {
 /* ---------- consuntivo di più giorni ---------- */
 function lavoriSel() {
   const set = UI.sel || new Set(), out = [];
-  S.lavori.filter(l => set.has(l.data)).forEach(x => out.push({ x, kind: 'lavori', d: x.data }));
+  S.lavori.filter(l => giorniPosa(l).some(g => set.has(g))).forEach(x => out.push({ x, kind: 'lavori', d: x.data }));
   S.interventi.filter(i => i.stato === 'completato' && set.has(i.dataProg || i.data)).forEach(x => out.push({ x, kind: 'interventi', d: x.dataProg || x.data }));
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
@@ -1383,6 +1419,7 @@ document.addEventListener('change', e => {
   if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
   if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
+  if (['f_data', 'f_dataFine', 'f_soloFeriali'].includes(t.id) && $('#giorniInfo')) { aggiornaGiorni(); aggiornaTotali(); }
   if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }
   if (t.classList && t.classList.contains('cmChk')) { aggiornaCM(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
@@ -1400,6 +1437,7 @@ document.addEventListener('input', e => {
   }
   if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga') || $('#f_calcolo')?.value === 'ore') t.dataset.auto = '0'; aggiornaTotali(); return; }
   if (t.id === 'f_pezzi') { t.dataset.auto = '0'; return; }
+  if (['f_data', 'f_dataFine'].includes(t.id) && $('#giorniInfo')) { aggiornaGiorni(); aggiornaTotali(); return; }
   if (['f_ore', 'f_tariffa', 'f_km', 'f_euroKm'].includes(t.id)) { aggiornaTotali(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
