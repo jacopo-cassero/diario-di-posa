@@ -42,7 +42,8 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
   pdf.rect(X0, y + 7, 22, 1.1, { fill: C.arancio });
   const destra = [];
   if (doc.numero) destra.push([`N. ${doc.numero}`, 'bold', 11]);
-  destra.push([`${prev ? 'Data' : 'Data lavori'}: ${dataIt(doc.data)}`, 'normal', 9.5]);
+  if (!prev && doc.dataFine && doc.dataFine !== doc.data) destra.push([`Lavori dal ${dataIt(doc.data)} al ${dataIt(doc.dataFine)}`, 'normal', 9.5]);
+  else destra.push([`${prev ? 'Data' : 'Data lavori'}: ${dataIt(doc.data)}`, 'normal', 9.5]);
   if (prev && +doc.validita > 0) destra.push([`Valido fino al: ${dataIt(addDays(doc.data, +doc.validita))}`, 'normal', 9.5]);
   destra.forEach(([t, font, size], i) => pdf.text(X1, y + 1 + i * 5.2, t, { size, font, align: 'right', color: i ? C.grigio : C.testo }));
   y += 16;
@@ -79,7 +80,18 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
     pdf.text(col.descr, y + 5.8, 'Nessuna voce inserita', { size: 9, color: C.grigio, font: 'italic' });
     y += 9;
   }
-  righe.forEach((r, i) => {
+  // con più giornate, ogni giornata ha la sua intestazione nella tabella
+  const elenco = doc.gruppi ? doc.gruppi.flatMap(g => [{ gruppo: g.titolo }, ...(g.righe || []).filter(r => r.descr || r.prezzo)]) : righe;
+  let ir = 0;
+  elenco.forEach(r => {
+    if (r.gruppo) {
+      const hg = 5.8;
+      if (y + hg + 6 > BOTTOM) { y = nuovaPagina(); intestazione(); }
+      pdf.rect(X0, y, LARG, hg, { fill: '#FFF3D1', stroke: C.bordo });
+      pdf.text(col.descr, y + 4, r.gruppo, { size: 8, font: 'bold' });
+      y += hg; ir = 0; return;
+    }
+    const i = ir++;
     const descr = pdf.wrap(r.descr || 'Voce', 104, 8.8);
     const extra = [];
     if (r.blindato) extra.push(`compresa maggiorazione prodotto blindato ${eur(r.maggBlindato ?? L.maggBlindato)}/pz`);

@@ -38,7 +38,7 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 const CFG = window.DIARIO_CONFIG || {};
 const store = createStore(CFG, () => render());
 const S = store.S;
-const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
+const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
@@ -191,7 +191,7 @@ function rCal() {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
     const nl = S.lavori.filter(l => l.data === k).length;
     const ints = S.interventi.filter(i => (i.dataProg || '') === k);
-    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${'<i class="mk"></i>'.repeat(Math.min(nl, 3))}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
+    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${'<i class="mk"></i>'.repeat(Math.min(nl, 3))}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
   }
   const ml = S.lavori.filter(l => (l.data || '').startsWith(UI.month));
   const dl = S.lavori.filter(l => l.data === UI.day);
@@ -203,6 +203,7 @@ function rCal() {
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="cal">${cells}</div>
     <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
+    ${barraSelezione()}
   </section>
   <section class="stack">
     <div class="row between"><h3>${fmtD(UI.day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
@@ -803,13 +804,87 @@ function compilaCliente(nome) {
   const t = $('#f_ctipo'); if (t && c.tipo) t.value = c.tipo;
 }
 
+/* ---------- consuntivo di più giorni ---------- */
+function lavoriSel() {
+  const set = UI.sel || new Set(), out = [];
+  S.lavori.filter(l => set.has(l.data)).forEach(x => out.push({ x, kind: 'lavori', d: x.data }));
+  S.interventi.filter(i => i.stato === 'completato' && set.has(i.dataProg || i.data)).forEach(x => out.push({ x, kind: 'interventi', d: x.dataProg || x.data }));
+  return out.sort((a, b) => a.d.localeCompare(b.d));
+}
+const importoJob = j => n2(j.kind === 'lavori' ? j.x.importo : j.x.costo);
+function barraSelezione() {
+  if (!UI.sel) return `<div class="row between"><span class="small muted">Più giornate per lo stesso cliente?</span><button class="btn sm" data-act="selMode" type="button">Consuntivo di più giorni</button></div>`;
+  const j = lavoriSel();
+  return `<div class="selbar"><div><b>${UI.sel.size} ${UI.sel.size === 1 ? 'giorno scelto' : 'giorni scelti'}</b><div class="small">${j.length ? `${j.length} ${j.length === 1 ? 'lavoro' : 'lavori'} · ${eur(sum(j, importoJob))}` : 'Tocca i giorni nel calendario, anche di mesi diversi'}</div></div>
+    <div class="row"><button class="btn sm" data-act="selAnnulla" type="button">Annulla</button><button class="btn sm dark" data-act="selCons" type="button" ${j.length ? '' : 'disabled'}>Crea consuntivo</button></div></div>`;
+}
+let cmCtx = null;
+function sheetConsMulti() {
+  const jobs = lavoriSel();
+  if (!jobs.length) { toast('Nei giorni scelti non ci sono pose o interventi completati'); return; }
+  const clienti = [...new Set(jobs.map(j => j.x.cliente || ''))];
+  const conta = c => jobs.filter(j => (j.x.cliente || '') === c).length;
+  const cli = [...clienti].sort((a, b) => conta(b) - conta(a))[0];
+  cmCtx = { jobs };
+  openSheet('Consuntivo di più giorni', `
+    ${clienti.length > 1 ? F('Cliente', sel('cmCliente', clienti.map(c => [c, c || 'Senza nome']), cli)) : `<div class="small muted">Cliente</div><b>${esc(cli || 'Senza nome')}</b>`}
+    <div class="fieldset"><span class="fs-t">Lavori compresi</span><div id="cmLista" class="stack"></div></div>
+    ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(AZ().ivaPredefinita)))}
+    <pre class="cons" id="consTxt"></pre>`,
+  async () => {
+    const sc = jobsScelti(); if (!sc.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scegli almeno un lavoro' });
+    for (const j of sc) if ((j.x.amm || 'da_cons') === 'da_cons') store.put(j.kind, j.x.id, { ...stripId(j.x), amm: 'cons' });
+    UI.sel = null; toast(`Consuntivo segnato come inviato (${sc.length} ${sc.length === 1 ? 'lavoro' : 'lavori'})`);
+  }, { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consMultiPdf">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
+  disegnaListaCM(cli);
+}
+function disegnaListaCM(cli) {
+  const lista = cmCtx.jobs.filter(j => (j.x.cliente || '') === cli);
+  $('#cmLista').innerHTML = lista.map(j => `<label class="check cmrow"><input type="checkbox" class="cmChk" data-kind="${j.kind}" data-id="${esc(j.x.id)}" checked><span><b>${fmtD(j.d, { weekday: 'short', day: 'numeric', month: 'short' })}</b> · ${j.kind === 'lavori' ? 'Posa' : 'Intervento'}${(j.kind === 'lavori' ? j.x.installato : j.x.descrizione) ? ' · ' + esc(j.kind === 'lavori' ? j.x.installato : j.x.descrizione) : ''}<br><span class="small muted">${eur(importoJob(j))}${(j.x.amm || 'da_cons') !== 'da_cons' ? ' · ' + ammOf(j.x.amm)[1].toLowerCase() : ''}</span></span></label>`).join('');
+  aggiornaCM();
+}
+function jobsScelti() {
+  return [...document.querySelectorAll('.cmChk:checked')].map(c => cmCtx.jobs.find(j => j.kind === c.dataset.kind && j.x.id === c.dataset.id)).filter(Boolean);
+}
+function docMulti(sc, iva) {
+  const L = LIST(); let ore = 0;
+  const gruppi = sc.map(j => {
+    const d = docDaLavoro(j.x, j.kind, AZ());
+    const t = totali(d, L);
+    const righe = d.righe.map(r => ({ ...r }));
+    if (t.urgenzaPct) righe.push({ descr: `Maggiorazione urgenza ${num(t.urgenzaPct)}%`, unita: 'corpo', qta: 1, prezzo: t.urgenza });
+    ore += n2(j.x.ore);
+    return { titolo: `${fmtD(j.d, { weekday: 'long', day: 'numeric', month: 'long' })} · ${j.kind === 'lavori' ? 'Posa' : 'Intervento'}${j.x.indirizzo ? ' · ' + j.x.indirizzo : ''}`, righe };
+  });
+  const indirizzi = [...new Set(sc.map(j => j.x.indirizzo).filter(Boolean))];
+  return { data: sc[0].d, dataFine: sc[sc.length - 1].d, cliente: { nome: sc[0].x.cliente || '', telefono: sc[0].x.telefono || '' }, cantiere: indirizzi.length === 1 ? indirizzi[0] : '', oggetto: `${sc.length} ${sc.length === 1 ? 'giornata' : 'giornate'} di lavoro`, ore, righe: gruppi.flatMap(g => g.righe), gruppi, iva, note: '' };
+}
+function aggiornaCM() {
+  const pre = $('#consTxt'); if (!pre) return;
+  const sc = jobsScelti();
+  if (!sc.length) { pre.textContent = 'Scegli almeno un lavoro.'; return; }
+  const L = LIST(), doc = docMulti(sc, 'no'), t = totali(doc, L);
+  const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
+  const dd = s => fmtD(s, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const riga = r => r.prezzo === '' ? `- ${r.descr}: da concordare` : um(r) ? `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, L))} = ${eur(totaleRiga(r, L))}` : `- ${r.descr}: ${eur(totaleRiga(r, L))}`;
+  pre.textContent = `CONSUNTIVO LAVORI
+Cliente: ${doc.cliente.nome}
+Periodo: ${dd(doc.data)}${doc.dataFine !== doc.data ? ' – ' + dd(doc.dataFine) : ''}
+${doc.cantiere ? 'Cantiere: ' + doc.cantiere + '\n' : ''}
+${doc.gruppi.map(g => `${g.titolo.toUpperCase()}\n${g.righe.map(riga).join('\n') || '- nessuna voce'}`).join('\n\n')}
+
+Ore totali: ${num(doc.ore, 2)}
+Totale: ${eur(t.imponibile)} + IVA se dovuta`;
+}
+
 /* ---------- PDF ---------- */
 let pdfCorrente = null;
 function apriPdf(tipo, doc, indietro) {
   let bytes;
   try { bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG }); }
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
-  const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}` : `Consuntivo ${String(doc.data || '').split('-').reverse().join('-')}`;
+  const dIt = s => String(s || '').split('-').reverse().join('-');
+  const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}` : `Consuntivo ${dIt(doc.data)}${doc.dataFine && doc.dataFine !== doc.data ? ' al ' + dIt(doc.dataFine) : ''}`;
   const nome = `${base} ${doc.cliente?.nome || ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
@@ -1039,7 +1114,13 @@ document.addEventListener('click', async e => {
     case 'mag': UI.tab = 'conti'; UI.seg = 'mag'; go(); break;
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
     case 'cMonth': UI.cMonth = shiftMonth(UI.cMonth, +arg); render(); break;
-    case 'day': UI.tab = 'cal'; UI.day = arg; UI.month = arg.slice(0, 7); render(); break;
+    case 'day':
+      if (UI.sel && UI.tab === 'cal') { UI.sel.has(arg) ? UI.sel.delete(arg) : UI.sel.add(arg); UI.day = arg; render(); break; }
+      UI.tab = 'cal'; UI.day = arg; UI.month = arg.slice(0, 7); render(); break;
+    case 'selMode': UI.sel = new Set(); render(); toast('Tocca i giorni da mettere nel consuntivo'); break;
+    case 'selAnnulla': UI.sel = null; render(); break;
+    case 'selCons': sheetConsMulti(); break;
+    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } apriPdf('consuntivo', docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), () => sheetConsMulti()); break; }
     case 'intF': UI.intFilter = arg; render(); break;
     case 'seg': UI.seg = arg; render(); break;
     case 'authView': UI.authView = arg; UI.authErr = ''; UI.authMsg = ''; render(); break;
@@ -1120,6 +1201,8 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
+  if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }
+  if (t.classList && t.classList.contains('cmChk')) { aggiornaCM(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });

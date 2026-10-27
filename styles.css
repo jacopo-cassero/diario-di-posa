@@ -262,3 +262,11 @@ a.btn{text-decoration:none;color:inherit;justify-content:center}
 a.btn.primary{color:var(--tape-ink)}
 .lprezzo{display:flex;align-items:center;gap:6px;min-width:0}
 .lprezzo span{color:var(--muted);font-weight:600}
+
+/* Selezione di più giorni */
+.day.sel{background:var(--tape);border-color:var(--tape)}
+.day.sel .n{color:var(--tape-ink);font-weight:700}
+.day.sel .mk:not(.int){background:var(--tape-ink)}
+.selbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--surface);border:2px solid var(--tape);border-radius:var(--r);padding:10px 12px}
+.cmrow{align-items:flex-start;font-weight:400;line-height:1.35}
+.cmrow input{margin-top:2px;flex:none}
