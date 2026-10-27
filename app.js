@@ -39,7 +39,7 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 const CFG = window.DIARIO_CONFIG || {};
 const store = createStore(CFG, () => render());
 const S = store.S;
-const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
+const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
@@ -147,18 +147,22 @@ document.addEventListener('submit', async e => {
 });
 
 /* ---------- schede ---------- */
+const cliDi = x => (x.clienteId && S.clienti.find(c => c.id === x.clienteId)) || trovaCliente(x.cliente);
+const chipCli = x => { const c = cliDi(x); return c && c.tipo && c.tipo !== 'finale' ? ` <span class="chip ${c.tipo === 'rivenditore' ? 'in' : 'warn'} small">${tipoCliente(c.tipo)}</span>` : ''; };
+const linkCli = x => { const c = cliDi(x); return c ? `<button type="button" class="linkbtn" data-act="editCli" data-id="${c.id}">Scheda cliente</button>` : ''; };
 function lavoroCard(l) {
   const a = ammOf(l.amm);
   const mats = (l.materiali || []).filter(m => m.nome);
   const cart = S.cartelle.find(c => c.id === l.cartellaId);
   const nAll = (l.allegati || []).length;
   return `<div class="card" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
-    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${mats.length ? `<div class="mats">${mats.map(m => `<span class="chip">${esc(m.nome)} · ${num(m.qta)}</span>`).join('')}</div>` : ''}
-    ${l.indirizzo || cart || isUrl(l.cartellaUrl) || nAll ? `<div class="links">
+    ${l.indirizzo || cart || isUrl(l.cartellaUrl) || nAll || cliDi(l) ? `<div class="links">
+      ${linkCli(l)}
       ${l.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(l.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}
       ${cart && isUrl(cart.url) ? `<a href="${esc(cart.url)}" target="_blank" rel="noopener">Cartella ${esc(cart.nome)}</a>` : ''}
       ${isUrl(l.cartellaUrl) ? `<a href="${esc(l.cartellaUrl)}" target="_blank" rel="noopener">Cartella cantiere</a>` : ''}
@@ -169,11 +173,11 @@ function intCard(i) {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
-    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
     ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
-    ${i.telefono || i.indirizzo ? `<div class="links">${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
+    ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -184,24 +188,28 @@ function rTodo() {
 }
 
 function rCal() {
+  const cc = UI.calCli && S.clienti.find(c => c.id === UI.calCli);
+  const mioCli = x => !cc || x.clienteId === cc.id || (!x.clienteId && normNome(x.cliente) === normNome(cc.nome));
+  const LAV = S.lavori.filter(mioCli), INT = S.interventi.filter(mioCli);
   const [y, m] = UI.month.split('-').map(Number);
   const first = new Date(y, m - 1, 1), off = (first.getDay() + 6) % 7, dim = new Date(y, m, 0).getDate();
   let cells = ['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(d => `<div class="dow">${d}</div>`).join('');
   for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
   for (let d = 1; d <= dim; d++) {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
-    const nl = S.lavori.filter(l => l.data === k).length;
-    const ints = S.interventi.filter(i => (i.dataProg || '') === k);
+    const nl = LAV.filter(l => l.data === k).length;
+    const ints = INT.filter(i => (i.dataProg || '') === k);
     cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${'<i class="mk"></i>'.repeat(Math.min(nl, 3))}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}</span></button>`;
   }
-  const ml = S.lavori.filter(l => (l.data || '').startsWith(UI.month));
-  const dl = S.lavori.filter(l => l.data === UI.day);
-  const di = S.interventi.filter(i => i.dataProg === UI.day);
+  const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
+  const dl = LAV.filter(l => l.data === UI.day);
+  const di = INT.filter(i => i.dataProg === UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
   return `${rTodo()}
   ${empty ? `<div class="empty"><b>Il diario è vuoto.</b><span>Tocca un giorno e segna la prima posa, oppure carica alcuni dati di esempio per vedere come funziona. Gli esempi si cancellano con un tocco.</span><button class="btn" data-act="seed" type="button">Carica dati di esempio</button></div>` : ''}
   <section class="stack">
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
+    ${cc ? `<div class="selbar"><div><b>Calendario di ${esc(cc.nome)}</b><div class="small">${LAV.length} ${LAV.length === 1 ? 'posa' : 'pose'} · ${INT.length} ${INT.length === 1 ? 'intervento' : 'interventi'} · solo i suoi lavori</div></div><div class="row"><button class="btn sm" data-act="editCli" data-id="${cc.id}" type="button">Scheda</button><button class="btn sm dark" data-act="calTutti" type="button">Mostra tutti</button></div></div>` : ''}
     <div class="cal">${cells}</div>
     <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
     ${barraSelezione()}
@@ -404,6 +412,7 @@ function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra
   onSubmit = submit; sheetDel = del;
   $('#sheetFoot').innerHTML = `${del ? `<button type="button" class="btn danger" data-act="del">Elimina</button>` : ''}${extra}<span class="sp"></span><button type="button" class="btn" data-act="close">${submit ? 'Annulla' : 'Chiudi'}</button>${submit ? `<button type="submit" class="btn primary" id="saveBtn">${saveLabel}</button>` : ''}`;
   $('#sheet').hidden = false;
+  aggiornaCliInfo();
   $('#sheetBody').scrollTop = 0;
   hydrateFiles($('#sheetBody'));
 }
@@ -494,7 +503,9 @@ function sheetLav(l, prefill) {
   const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
-    <div class="g2">${F('Data', inp('data', l.data, 'date', 'required'))}${F('Cliente', inp('cliente', l.cliente, 'text', 'required list="clilist" placeholder="Nome o impresa"'))}</div>
+    ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
+    <div class="cliline small" id="cliInfo"></div>
+    ${F('Data', inp('data', l.data, 'date', 'required'))}
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
     <div class="g3">
@@ -566,7 +577,9 @@ function sheetInt(i, day) {
   const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons' };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
-    <div class="g2">${F('Cliente', inp('cliente', i.cliente, 'text', 'required list="clilist"'))}${F('Telefono', inp('telefono', i.telefono, 'tel'))}</div>
+    ${campoCliente('cliente', 'Cliente', i.cliente)}
+    <div class="cliline small" id="cliInfo"></div>
+    ${F('Telefono', inp('telefono', i.telefono, 'tel'))}
     ${F('Indirizzo', inp('indirizzo', i.indirizzo))}
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
@@ -782,7 +795,9 @@ function sheetPrev(p) {
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
     ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
     <div class="fieldset"><span class="fs-t">Cliente</span>
-      <div class="g2">${F('Nome o ragione sociale', inp('cnome', c.nome, 'text', 'required list="clilist"'))}${F('Tipo di cliente', sel('ctipo', [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']], c.tipo || 'finale'))}</div>
+      ${campoCliente('cnome', 'Nome o ragione sociale', c.nome)}
+      <div class="g2">${F('Tipo di cliente', sel('ctipo', [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']], c.tipo || 'finale'))}</div>
+      <div class="cliline small" id="cliInfo"></div>
       ${F('Indirizzo', inp('cindirizzo', c.indirizzo))}
       <div class="g2">${F('P. IVA / Codice fiscale', inp('cpiva', c.piva))}${F('Telefono', inp('ctel', c.telefono, 'tel'))}</div>
       ${F('Email', inp('cemail', c.email, 'email'))}
@@ -901,7 +916,7 @@ function sheetCliente(c) {
   openSheet(isNew ? 'Nuovo cliente' : c.nome, `
     ${isNew ? '' : `<div class="kpis"><div class="kpi"><div class="l">Lavorato</div><div class="v">${eur(s.fatturato)}</div></div><div class="kpi"><div class="l">Quest'anno</div><div class="v">${eur(s.anno)}</div></div><div class="kpi"><div class="l">Da incassare</div><div class="v">${eur(s.aperto)}</div></div><div class="kpi"><div class="l">Ultimo lavoro</div><div class="v">${s.ultimo ? fmtD(s.ultimo, { day: 'numeric', month: 'short' }) : '—'}</div></div></div>
     <div class="row">${c.telefono ? `<a class="btn sm" href="tel:${esc(c.telefono.replace(/\s/g, ''))}">Chiama</a><a class="btn sm" href="https://wa.me/${esc(c.telefono.replace(/\D/g, '').replace(/^(?!39)(?=3)/, '39'))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}">Email</a>` : ''}${c.indirizzo ? `<a class="btn sm" href="https://maps.apple.com/?q=${encodeURIComponent(c.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>
-    <div class="row"><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button></div>
+    <div class="row"><button class="btn sm dark" data-act="cliCal" type="button">${svg('cal', 'i')} Vedi nel calendario</button><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button></div>
     <div class="fieldset"><span class="fs-t">Storico</span><div class="histlist">${storia.map(x => x.h).join('') || '<div class="small muted">Ancora nessun lavoro.</div>'}</div></div>`}
     <div class="fieldset"><span class="fs-t">Dati del cliente</span>
       <div class="g2">${F('Nome o ragione sociale', inp('kNome', c.nome, 'text', 'required'))}${F('Tipo', sel('kTipo', TIPI_CLIENTE, c.tipo || 'finale'))}</div>
@@ -928,6 +943,21 @@ function sheetCliente(c) {
   }, { del: isNew ? null : async () => { store.drop('clienti', c.id); toast('Cliente tolto dalla rubrica (i lavori restano)'); } });
 }
 let cliCtx = null;
+/** Campo cliente: si scrive il nome o si sceglie dalla rubrica. */
+function campoCliente(id, label, valore, extra = '') {
+  const elenco = [...S.clienti].sort((a, b) => a.nome.localeCompare(b.nome));
+  return `<label class="f"><span>${label}</span><div class="clipick">${inp(id, valore, 'text', `required list="clilist" ${extra}`)}${elenco.length ? `<select id="pickCli" data-for="f_${id}" aria-label="Scegli dalla rubrica"><option value="">Rubrica</option>${elenco.map(c => `<option value="${esc(c.id)}">${esc(c.nome)}</option>`).join('')}</select>` : ''}</div></label>`;
+}
+/** Sotto il campo cliente: dice se è in rubrica o se verrà aggiunto. */
+function aggiornaCliInfo() {
+  const box = $('#cliInfo'); if (!box) return;
+  const el = $('#f_cliente') || $('#f_cnome'); const nome = (el?.value || '').trim();
+  const c = trovaCliente(nome);
+  box.innerHTML = !nome ? '' : c
+    ? `${svg('cli', 'i')} In rubrica · ${tipoCliente(c.tipo)}${c.telefono ? ' · ' + esc(c.telefono) : ''}${c.referente ? ' · ' + esc(c.referente) : ''}`
+    : `${svg('cli', 'i')} Cliente nuovo: lo aggiungo alla rubrica quando salvi`;
+  box.classList.toggle('nuovo', !c);
+}
 /** Quando scrivi il nome di un cliente in rubrica, completa i campi vuoti del modulo. */
 function compilaDaRubrica(nome) {
   const c = trovaCliente(nome); if (!c) return false;
@@ -936,8 +966,9 @@ function compilaDaRubrica(nome) {
   metti('f_cindirizzo', c.indirizzo); metti('f_cpiva', c.piva); metti('f_ctel', c.telefono); metti('f_cemail', c.email);
   const t = $('#f_ctipo'); if (t && c.tipo) t.value = c.tipo;
   const iva = $('#f_iva'); if (iva && c.iva && $('#righeBox')?.dataset.kind === 'prev') { iva.value = c.iva; aggiornaTotali(); }
-  // intervento
+  // intervento e posa
   metti('f_telefono', c.telefono);
+  metti('f_indirizzo', c.indirizzo);
   return true;
 }
 
@@ -1292,6 +1323,8 @@ document.addEventListener('click', async e => {
       break;
     case 'seed': seed(); render(); break;
     case 'newCli': sheetCliente(null); break;
+    case 'cliCal': { const c = cliCtx; if (!c) break; const s2 = storicoCliente(c); const prox = [...s2.lav.map(x => x.data), ...s2.int.map(x => x.dataProg || x.data)].filter(Boolean).sort(); const d = prox.find(x => x >= TODAY) || prox.pop() || TODAY; UI.calCli = c.id; UI.tab = 'cal'; UI.day = d; UI.month = d.slice(0, 7); closeSheet(); render(); window.scrollTo({ top: 0 }); break; }
+    case 'calTutti': UI.calCli = null; render(); break;
     case 'editCli': sheetCliente(S.clienti.find(x => x.id === id)); break;
     case 'importaCli': { const n = importaClienti(); render(); toast(`${n} ${n === 1 ? 'scheda creata' : 'schede create'}`); break; }
     case 'cliTipo': UI.cliTipo = arg; render(); break;
@@ -1347,7 +1380,8 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgApp') t.dataset.touched = '1';
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
-  if (t.id === 'f_cliente') compilaDaRubrica(t.value);
+  if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
+  if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
   if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }
   if (t.classList && t.classList.contains('cmChk')) { aggiornaCM(); return; }
@@ -1357,6 +1391,7 @@ $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeS
 
 document.addEventListener('input', e => {
   const t = e.target;
+  if (t.id === 'f_cliente' || t.id === 'f_cnome') aggiornaCliInfo();
   if (t.id === 'cercaCliente') {
     UI.cerca = t.value;
     const tmp = document.createElement('div'); tmp.innerHTML = rClienti();

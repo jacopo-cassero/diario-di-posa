@@ -283,3 +283,9 @@ a.btn.primary{color:var(--tape-ink)}
 .tabs-in{grid-template-columns:repeat(7,1fr)}
 .tab{font-size:.6rem}
 .tab svg{width:21px;height:21px}
+.clipick{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:6px}
+.clipick select{border:1px solid var(--line);background:var(--sunk);border-radius:8px;padding:6px 8px;min-height:42px;width:100%;min-width:0;font-weight:600;color:var(--muted)}
+.cliline{color:var(--ok);display:flex;align-items:center;gap:6px;margin-top:-4px}
+.cliline:empty{display:none}
+.cliline.nuovo{color:var(--muted)}
+.card .t .chip{vertical-align:2px;margin-left:4px}
