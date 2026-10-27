@@ -12,6 +12,7 @@ export const LISTINO_BASE = {
   maggBlindato: 20,
   maggLuce: 20,
   urgenzaPct: 10,
+  euroKm: 1,
   voci: [
     V('ctf', 'Posa controtelai e spalle', 'Controtelaio finestra', '', 60),
     V('ctpf', 'Posa controtelai e spalle', 'Controtelaio portafinestra', '', 80),
@@ -113,7 +114,7 @@ Con la sottoscrizione del presente listino, il Cliente finale autorizza l'instal
 In caso di annullamento del cantiere senza il necessario preavviso, o di impossibilità ad avviare o proseguire i lavori per cause non imputabili all'installatore (esempio: materiale errato, mancante o danneggiato, cantiere non pronto o non accessibile), potrà essere addebitato al Rivenditore un importo a titolo di indennizzo pari a € 175 per la mezza giornata oppure € 300 per la giornata intera, in base all'effettivo fermo lavorativo. A tali importi si aggiungono le eventuali spese di trasferta già sostenute. L'indennizzo sarà indicato nel conteggio finale.`,
 };
 
-export const UNITA = { pz: 'pz', ora: 'ore', corpo: 'a corpo' };
+export const UNITA = { pz: 'pz', ora: 'ore', corpo: 'a corpo', km: 'km' };
 export const UNITA_LUNGA = { pz: 'a pezzo', ora: 'a ora', corpo: 'a corpo' };
 
 // Regimi IVA: valore -> etichetta e nota per il documento
@@ -144,7 +145,8 @@ export function totali(doc, listino = LISTINO_BASE) {
   const righe = (doc.righe || []).filter(r => r.descr || r.prezzo);
   const imponibileRighe = r2(righe.reduce((s, r) => s + totaleRiga(r, listino), 0));
   const pct = doc.urgenza ? num(doc.urgenzaPct ?? listino.urgenzaPct) : 0;
-  const urgenza = r2(imponibileRighe * pct / 100);
+  // la trasferta a km non ha maggiorazione urgenza
+  const urgenza = r2(righe.filter(r => r.voce !== 'km').reduce((s, r) => s + totaleRiga(r, listino), 0) * pct / 100);
   const imponibile = r2(imponibileRighe + urgenza);
   const [, ivaLabel, ivaPct, ivaNota] = ivaOf(doc.iva ?? '22');
   const iva = r2(imponibile * ivaPct / 100);

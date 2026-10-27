@@ -457,6 +457,11 @@ function riepilogoVoci(righe) {
     return r.unita === 'corpo' ? nome : r.unita === 'ora' ? `${num(r.qta, 2)} ore ${nome.toLowerCase()}` : `${num(r.qta, 2)} × ${nome}`;
   }).join(', ');
 }
+const euroKm = () => { const v = LIST().euroKm; return v === undefined || v === null || v === '' ? 1 : n2(v); };
+function separaKm(righe) { const r = righe || []; const k = r.find(x => x.voce === 'km'); return { km: k ? n2(k.qta) : '', euro: k ? n2(k.prezzo) : euroKm(), altre: r.filter(x => x.voce !== 'km') }; }
+const rigaKm = (km, euro) => ({ voce: 'km', descr: 'Trasferta', unita: 'km', qta: km, prezzo: euro, magg: '' });
+const conKm = (righe, fd) => { const km = n2(fd.get('km')); return km > 0 ? [...righe, rigaKm(km, n2(fd.get('euroKm')))] : righe; };
+const kmBox = (km, euro) => `<div class="g2">${F('Trasferta km', inp('km', km, 'number', 'placeholder="0"'))}${F('€ al km', inp('euroKm', euro, 'number'))}</div>`;
 const tariffaOraria = () => n2((LIST().voci.find(v => v.id === 'ora') || {}).prezzo) || 30;
 function calcoloDi(l) {
   if (l.calcolo) return l.calcolo;
@@ -467,8 +472,9 @@ function calcoloDi(l) {
 function sheetLav(l, prefill) {
   const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', calcolo: 'pezzo', ...(prefill || {}) };
   sheetFiles = [...(l.allegati || [])];
-  const calcolo = calcoloDi(l);
-  const righeOre = calcolo === 'ore' ? (l.righe || []) : [];
+  const calcolo = calcoloDi({ ...l, righe: separaKm(l.righe).altre });
+  const KM = separaKm(l.righe);
+  const righeOre = calcolo === 'ore' ? KM.altre : [];
   const tariffa = righeOre[0] ? n2(righeOre[0].prezzo) : tariffaOraria();
   const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
@@ -483,8 +489,9 @@ function sheetLav(l, prefill) {
       ${F('Importo €', inp('importo', l.importo, 'number'))}
     </div>
     ${impHint()}
-    <div id="modoPezzo" ${calcolo === 'ore' ? 'hidden' : ''}>${righeBox(calcolo === 'ore' ? [] : l.righe, 'lav')}</div>
-    <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria.</div>
+    ${kmBox(KM.km, KM.euro)}
+    <div id="modoPezzo" ${calcolo === 'ore' ? 'hidden' : ''}>${righeBox(calcolo === 'ore' ? [] : KM.altre, 'lav')}</div>
+    <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria + trasferta.</div>
     ${matBox(l.materiali)}
     <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note || notaVecchia))}</div>
     <div class="fieldset"><span class="fs-t">Cartella</span>
@@ -505,6 +512,8 @@ function sheetLav(l, prefill) {
       installato = riepilogoVoci(righe);
       pezzi = n2(fd.get('pezzi'));
     }
+    righe = conKm(righe, fd);
+    if (n2(fd.get('km')) > 0) installato = [installato, `trasferta ${num(n2(fd.get('km')), 1)} km`].filter(Boolean).join(', ');
     const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     if (l.preventivoId) d.preventivoId = l.preventivoId;
     if (l.esempio) d.esempio = true;
@@ -524,7 +533,7 @@ function sheetLav(l, prefill) {
   const pz = $('#f_pezzi');
   if (pz) pz.dataset.auto = !n2(l.pezzi) || Math.abs(n2(l.pezzi) - contaPezzi(l.righe)) < 0.01 ? '1' : '0';
   const imp = $('#f_importo');
-  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa) < 0.01 ? '1' : '0'; aggiornaTotali(); }
+  if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa - n2(KM.km) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
   else initImporto('#f_importo', l.righe, l.importo);
 }
 function cambiaCalcolo(modo) {
@@ -548,13 +557,14 @@ function sheetInt(i, day) {
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
     <div class="g2">${F('Costo al cliente €', inp('costo', i.costo, 'number'))}${F('Ore', inp('ore', i.ore, 'number'))}</div>
     ${impHint()}
-    ${righeBox(i.righe, 'int', { urgenza: i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale') })}
+    ${kmBox(separaKm(i.righe).km, separaKm(i.righe).euro)}
+    ${righeBox(separaKm(i.righe).altre, 'int', { urgenza: i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale') })}
     ${matBox(i.materiali)}
     ${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), i.amm || 'da_cons'))}
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: leggiRighe(), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
+    const d = { cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (i.esempio) d.esempio = true;
     if (!isNew) moveStock(i.materiali, +1);
@@ -566,7 +576,7 @@ function sheetInt(i, day) {
     extra: isNew || i.stato !== 'completato' ? '' : `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>`,
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
-  initImporto('#f_costo', i.righe, i.costo);
+  initImporto('#f_costo', i.righe, i.costo, i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale'));
 }
 
 /* consuntivo */
@@ -577,7 +587,7 @@ function sheetCons(kind, id) {
   const doc = docDaLavoro(x, kind, AZ());
   const t = totali(doc, lis);
   const mats = (x.materiali || []).filter(m => m.nome);
-  const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : 'pz';
+  const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : r.unita === 'km' ? 'km' : 'pz';
   const txt = `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
 Cliente: ${x.cliente || ''}
 Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
@@ -686,9 +696,13 @@ function aggiornaTotali() {
   h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
   $('#totBox').innerHTML = righe.length ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
   const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
-  let target = t.imponibile, conVoci = righe.length > 0;
+  const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * 100) / 100;
+  let target = t.imponibile + trasf, conVoci = righe.length > 0 || trasf > 0;
+  if (kind !== 'prev' && trasf > 0) {
+    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
+  }
   if (kind === 'lav' && $('#f_calcolo')?.value === 'ore') {
-    target = Math.round(n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) * 100) / 100; conVoci = target > 0;
+    target = Math.round((n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) + trasf) * 100) / 100; conVoci = target > 0;
   } else if (kind === 'lav') {
     const pz = $('#f_pezzi'); if (pz && pz.dataset.auto !== '0') pz.value = contaPezzi(righe) || '';
     if (righe.length) $('#totBox').insertAdjacentHTML('beforeend', `<div class="small muted">Nel calendario: ${esc(riepilogoVoci(righe))}</div>`);
@@ -697,9 +711,9 @@ function aggiornaTotali() {
   const hint = $('#impHint');
   if (hint) { hint.hidden = !(imp && conVoci && imp.dataset.auto === '0' && Math.abs(n2(imp.value) - target) > 0.009); hint.querySelector('b').textContent = eur(target); }
 }
-function initImporto(selector, righe, valore) {
+function initImporto(selector, righe, valore, urgenza = false) {
   const imp = $(selector); if (!imp) return;
-  const t = totali({ righe: righe || [] }, LIST()).imponibile;
+  const t = totali({ righe: righe || [], urgenza }, LIST()).imponibile;
   imp.dataset.auto = !(righe || []).length || !n2(valore) || Math.abs(n2(valore) - t) < 0.01 ? '1' : '0';
   aggiornaTotali();
 }
@@ -823,6 +837,7 @@ function sheetListino() {
     <div class="small muted">Prezzi IVA esclusa. Lascia vuoto il prezzo delle voci "da concordare". Le modifiche valgono per i nuovi preventivi e lavori: quelli già salvati non cambiano.</div>
     <div class="g2">${F('Anno del listino', inp('anno', L.anno, 'number'))}${F('Urgenza %', inp('urgenzaPct', L.urgenzaPct, 'number'))}</div>
     <div class="g2">${F('Blindati €/pz in più', inp('maggBlindato', L.maggBlindato, 'number'))}${F('Posa in luce €/pz in più', inp('maggLuce', L.maggLuce, 'number'))}</div>
+    ${F('Trasferta € al km (pose e interventi)', inp('euroKmL', euroKm(), 'number'))}
     <div id="lgroups" class="stack">${gruppi.map(g => `<div class="fieldset lgroup" data-gruppo="${esc(g)}"><span class="fs-t">${esc(g)}</span>${L.voci.filter(v => v.gruppo === g).map(listinoRow).join('')}<button type="button" class="btn sm" data-act="addL">+ Voce in questa sezione</button></div>`).join('')}</div>
     ${S.listino ? '<button type="button" class="btn ghost small" data-act="resetListino">Ripristina il listino 2027 originale</button>' : ''}
   `, async fd => {
@@ -830,7 +845,7 @@ function sheetListino() {
       const q = n => el.querySelector(`[name="${n}"]`); const p = q('lp').value.trim();
       return { id: el.dataset.id, gruppo: el.closest('.lgroup').dataset.gruppo, nome: q('ln').value.trim(), variante: q('lv').value.trim(), prezzo: p === '' ? null : n2(p), unita: q('lu').value, magg: el.dataset.magg || '' };
     }).filter(v => v.nome);
-    store.put('cfg', 'listino', { anno: n2(fd.get('anno')) || L.anno, urgenzaPct: n2(fd.get('urgenzaPct')), maggBlindato: n2(fd.get('maggBlindato')), maggLuce: n2(fd.get('maggLuce')), voci });
+    store.put('cfg', 'listino', { anno: n2(fd.get('anno')) || L.anno, urgenzaPct: n2(fd.get('urgenzaPct')), maggBlindato: n2(fd.get('maggBlindato')), maggLuce: n2(fd.get('maggLuce')), euroKm: n2(fd.get('euroKmL')), voci });
     toast('Listino salvato');
   });
 }
@@ -1110,7 +1125,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga') || $('#f_calcolo')?.value === 'ore') t.dataset.auto = '0'; aggiornaTotali(); return; }
   if (t.id === 'f_pezzi') { t.dataset.auto = '0'; return; }
-  if (t.id === 'f_ore' || t.id === 'f_tariffa') { aggiornaTotali(); return; }
+  if (['f_ore', 'f_tariffa', 'f_km', 'f_euroKm'].includes(t.id)) { aggiornaTotali(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 caricaImmagini();
