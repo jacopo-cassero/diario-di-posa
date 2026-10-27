@@ -1,4 +1,6 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino } from './logica.js';
+import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
+import { creaDocumento, docDaLavoro } from './documento.js';
 import { createStore } from './store.js';
 
 /* ---------- utilità ---------- */
@@ -28,6 +30,7 @@ const ICON = {
   fuel: '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/>',
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
+  prev: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -35,8 +38,8 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 const CFG = window.DIARIO_CONFIG || {};
 const store = createStore(CFG, () => render());
 const S = store.S;
-const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
+const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
+const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
   if (TABS.some(t => t[0] === h) || h === 'set') UI.tab = h;
@@ -59,6 +62,15 @@ function moveStock(items, sign, withCost) {
       data.costoMedio = Math.round(((oq * (cur?.costoMedio || 0)) + q * n2(it.prezzoUnit)) / (oq + q) * 100) / 100;
     }
     store.put('magazzino', id, data);
+  }
+}
+const LIST = () => (S.listino && Array.isArray(S.listino.voci) ? { ...LISTINO_BASE, ...S.listino } : LISTINO_BASE);
+const AZ = () => ({ ...AZIENDA_BASE, ...(S.azienda || {}) });
+const IMG = {};
+async function caricaImmagini() {
+  for (const [k, f] of [['logo', 'icone/logo-cassero.jpg'], ['posaclima', 'icone/badge-posaclima.jpg'], ['dekra', 'icone/badge-dekra.jpg']]) {
+    if (IMG[k]) continue;
+    try { const r = await fetch(f); if (r.ok) IMG[k] = new Uint8Array(await r.arrayBuffer()); } catch {}
   }
 }
 const costoMat = list => sum(list || [], m => { const s = S.magazzino.find(x => x.id === slug(m.nome)); return n2(m.qta) * (s?.costoMedio || 0); });
@@ -84,7 +96,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -335,6 +347,10 @@ function rSet() {
       <p class="muted">Funzionano anche i link di Google Drive, Dropbox o OneDrive. Ogni posa può avere anche la sua cartella e i suoi allegati.</p>
     </details>
   </section>
+  <section class="stack"><h3>Listino e preventivi</h3><div class="panel stack">
+    <div class="row between"><span>Listino prezzi ${esc(LIST().anno || '')} · <b class="num">${LIST().voci.length}</b> voci</span><button class="btn sm" data-act="editListino" type="button">Modifica listino</button></div>
+    <div class="row between"><span class="small">Dati azienda, IVA predefinita (<b>${esc(ivaOf(AZ().ivaPredefinita)[1])}</b>), termini e condizioni</span><button class="btn sm" data-act="editAzienda" type="button">Modifica</button></div>
+  </div></section>
   <section class="stack"><h3>Notifiche</h3><div class="panel stack">
     ${ps === 'granted' ? `<div class="row between"><span>Notifiche attive su questo dispositivo. Ogni mattina ricevi le cose da fare.</span><button class="btn sm" data-act="pushTest" type="button">Riattiva</button></div>`
       : ps === 'install' ? `<div><b>Prima aggiungi l'app alla schermata Home.</b> Su iPhone e iPad le notifiche funzionano solo così:</div><ol class="ios-steps"><li>In Safari tocca il pulsante <b>Condividi</b> (il quadrato con la freccia).</li><li>Scegli <b>Aggiungi alla schermata Home</b>.</li><li>Apri l'app dall'icona e torna qui.</li></ol>`
@@ -371,7 +387,7 @@ function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = body;
   onSubmit = submit; sheetDel = del;
-  $('#sheetFoot').innerHTML = `${del ? `<button type="button" class="btn danger" data-act="del">Elimina</button>` : ''}${extra}<span class="sp"></span><button type="button" class="btn" data-act="close">Annulla</button>${submit ? `<button type="submit" class="btn primary" id="saveBtn">${saveLabel}</button>` : ''}`;
+  $('#sheetFoot').innerHTML = `${del ? `<button type="button" class="btn danger" data-act="del">Elimina</button>` : ''}${extra}<span class="sp"></span><button type="button" class="btn" data-act="close">${submit ? 'Annulla' : 'Chiudi'}</button>${submit ? `<button type="submit" class="btn primary" id="saveBtn">${saveLabel}</button>` : ''}`;
   $('#sheet').hidden = false;
   $('#sheetBody').scrollTop = 0;
   hydrateFiles($('#sheetBody'));
@@ -422,14 +438,17 @@ async function openFile(path) {
 }
 
 /* lavoro */
-function sheetLav(l) {
-  const isNew = !l; l = l || { data: UI.day, amm: 'da_cons' };
+function sheetLav(l, prefill) {
+  const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(l.allegati || [])];
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
+    ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     <div class="g2">${F('Data', inp('data', l.data, 'date', 'required'))}${F('Cliente', inp('cliente', l.cliente, 'text', 'required list="clilist" placeholder="Nome o impresa"'))}</div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${F('Cosa hai posato', `<textarea id="f_installato" name="installato" placeholder="Es. 4 finestre PVC 120×140, 1 portafinestra, 2 persiane">${esc(l.installato || '')}</textarea>`)}
     <div class="g3">${F('Pezzi', inp('pezzi', l.pezzi, 'number'))}${F('Ore impiegate', inp('ore', l.ore, 'number'))}${F('Importo €', inp('importo', l.importo, 'number'))}</div>
+    ${impHint()}
+    ${righeBox(l.righe, 'lav')}
     ${matBox(l.materiali)}
     <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note))}</div>
     <div class="fieldset"><span class="fs-t">Cartella</span>
@@ -438,17 +457,23 @@ function sheetLav(l) {
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), installato: fd.get('installato').trim(), pezzi: n2(fd.get('pezzi')), ore: n2(fd.get('ore')), importo: n2(fd.get('importo')), materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const d = { data: fd.get('data'), cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), installato: fd.get('installato').trim(), pezzi: n2(fd.get('pezzi')), ore: n2(fd.get('ore')), importo: n2(fd.get('importo')), righe: leggiRighe(), materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    if (l.preventivoId) d.preventivoId = l.preventivoId;
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
     moveStock(mats, -1);
-    store.put('lavori', isNew ? null : l.id, d);
+    const id = store.put('lavori', isNew ? null : l.id, d);
+    if (isNew && d.preventivoId) {
+      const p = S.preventivi.find(x => x.id === d.preventivoId);
+      if (p) store.put('preventivi', p.id, { ...stripId(p), stato: 'accettato', lavoroId: id });
+    }
     UI.day = d.data; UI.month = d.data.slice(0, 7);
     toast('Posa salvata');
   }, {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
   });
+  initImporto('#f_importo', l.righe, l.importo);
 }
 
 /* intervento */
@@ -462,12 +487,14 @@ function sheetInt(i, day) {
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
     <div class="g2">${F('Costo al cliente €', inp('costo', i.costo, 'number'))}${F('Ore', inp('ore', i.ore, 'number'))}</div>
+    ${impHint()}
+    ${righeBox(i.righe, 'int', { urgenza: i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale') })}
     ${matBox(i.materiali)}
     ${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), i.amm || 'da_cons'))}
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
+    const d = { cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: leggiRighe(), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (i.esempio) d.esempio = true;
     if (!isNew) moveStock(i.materiali, +1);
@@ -478,27 +505,34 @@ function sheetInt(i, day) {
     del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); toast('Intervento eliminato'); },
     extra: isNew || i.stato !== 'completato' ? '' : `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>`,
   });
+  if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
+  initImporto('#f_costo', i.righe, i.costo);
 }
 
 /* consuntivo */
 function sheetCons(kind, id) {
   const x = S[kind].find(r => r.id === id); if (!x) return;
   const L = kind === 'lavori';
-  const imp = L ? x.importo : x.costo, d = L ? x.data : (x.dataProg || x.data);
+  const lis = LIST();
+  const doc = docDaLavoro(x, kind, AZ());
+  const t = totali(doc, lis);
   const mats = (x.materiali || []).filter(m => m.nome);
+  const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : 'pz';
   const txt = `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
 Cliente: ${x.cliente || ''}
-Data: ${fmtD(d, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
 Cantiere: ${x.indirizzo || '—'}
 
 Lavori eseguiti:
 ${(L ? x.installato : x.descrizione) || '—'}${L && n2(x.pezzi) ? `\nPezzi posati: ${num(x.pezzi, 0)}` : ''}
 Ore impiegate: ${n2(x.ore) ? num(x.ore) : '—'}
-${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
-Importo: ${eur(imp)} + IVA se dovuta`;
-  openSheet('Consuntivo', `<div class="small muted">Copialo e mandalo al cliente o all'impresa (WhatsApp, email), poi segnalo come inviato. Da qui si passa alla fattura.</div><pre class="cons" id="consTxt">${esc(txt)}</pre>`,
-    async () => { store.put(kind, id, { ...stripId(x), amm: 'cons' }); toast('Consuntivo segnato come inviato'); },
-    { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn" data-act="copy">Copia testo</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
+${doc.righe.length ? `\nDettaglio:\n${doc.righe.map(r => `- ${r.descr}: ${r.prezzo === '' ? 'da concordare' : `${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`}`.replace(/  +/g, ' ')).join('\n')}\n` : ''}${t.urgenzaPct ? `Maggiorazione urgenza ${num(t.urgenzaPct)}%: ${eur(t.urgenza)}\n` : ''}${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
+Totale: ${eur(t.imponibile)} + IVA se dovuta`;
+  openSheet('Consuntivo', `<div class="small muted">Mandalo al cliente o all'impresa come testo (WhatsApp, email) o come PDF, poi segnalo come inviato. Da qui si passa alla fattura.</div>
+    <pre class="cons" id="consTxt">${esc(txt)}</pre>
+    ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}`,
+    async fd => { store.put(kind, id, { ...stripId(x), iva: fd.get('iva'), amm: 'cons' }); toast('Consuntivo segnato come inviato'); },
+    { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consPdf" data-arg="${kind}" data-id="${id}">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
 }
 const stripId = o => { const { id, ...r } = o; return r; };
 
@@ -528,6 +562,227 @@ function sheetMov(m, prefill) {
     UI.cMonth = d.data.slice(0, 7);
     toast(mag ? 'Spesa salvata e magazzino aggiornato' : 'Spesa salvata');
   }, { del: isNew ? null : async () => { if (m.magazzino) moveStock(m.righe, -1); if (m.foto) store.removeFile(m.foto).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
+}
+
+/* ---------- voci e prezzi dal listino ---------- */
+const UNITA_OPT = [['pz', 'pezzo'], ['ora', 'ore'], ['corpo', 'corpo']];
+function opzioniListino() {
+  const L = LIST(); const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
+  return gruppi.map(g => `<optgroup label="${esc(g)}">${L.voci.filter(v => v.gruppo === g).map(v => `<option value="${esc(v.id)}">${esc(v.nome)}${v.variante ? ' – ' + esc(v.variante) : ''} · ${v.prezzo == null ? 'da concordare' : eur(v.prezzo) + (v.unita === 'ora' ? '/ora' : v.unita === 'pz' ? '/pz' : '')}</option>`).join('')}</optgroup>`).join('');
+}
+function rigaHtml(r) {
+  const L = LIST();
+  return `<div class="riga" data-voce="${esc(r.voce || '')}" data-magg="${esc(r.magg || '')}">
+    <div class="riga-top"><input name="rd" value="${esc(r.descr || '')}" placeholder="Descrizione della voce" aria-label="Descrizione"><button type="button" data-act="rmRiga" aria-label="Togli voce">×</button></div>
+    <div class="riga-num">
+      <label class="f"><span>Q.tà</span><input name="rq" type="number" step="any" inputmode="decimal" value="${esc(r.qta ?? 1)}"></label>
+      <label class="f"><span>Tipo</span><select name="ru">${UNITA_OPT.map(([k, l]) => `<option value="${k}" ${k === (r.unita || 'pz') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="f"><span>€ cad.</span><input name="rp" type="number" step="any" inputmode="decimal" value="${esc(r.prezzo ?? '')}" placeholder="${r.daConcordare ? 'concordare' : ''}"></label>
+      <span class="riga-tot price"></span>
+    </div>
+    ${r.magg === 'blindato' ? `<label class="check small"><input type="checkbox" name="rb" ${r.blindato ? 'checked' : ''}> Prodotto blindato (+${eur(L.maggBlindato)}/pz)</label>` : ''}
+    ${r.magg === 'luce' ? `<label class="check small"><input type="checkbox" name="rl" ${r.luce ? 'checked' : ''}> Posa in luce (+${eur(L.maggLuce)}/pz)</label>` : ''}
+  </div>`;
+}
+function righeBox(righe, kind, { urgenza = false, iva = null } = {}) {
+  const L = LIST();
+  return `<div class="fieldset" id="righeBox" data-kind="${kind}">
+    <span class="fs-t">Voci e prezzi dal listino</span>
+    <div class="righe" id="righe">${(righe || []).map(rigaHtml).join('')}</div>
+    <div class="row"><select id="addVoce" class="btn sm addvoce" aria-label="Aggiungi voce dal listino"><option value="">+ Aggiungi dal listino…</option>${opzioniListino()}</select><button type="button" class="btn sm" data-act="addLibera">+ Voce libera</button></div>
+    ${kind !== 'lav' ? `<label class="check"><input type="checkbox" id="f_urgApp" name="urgApp" ${urgenza ? 'checked' : ''}> Maggiorazione urgenza ${num(L.urgenzaPct)}%</label>` : ''}
+    ${kind === 'prev' ? F('IVA', sel('iva', IVA.map(i => [i[0], i[1]]), String(iva ?? AZ().ivaPredefinita))) : ''}
+    <div class="totbox" id="totBox"></div>
+  </div>`;
+}
+const impHint = () => `<div class="small" id="impHint" hidden>Importo scritto a mano. Dal listino sarebbe <b></b>. <button class="linkbtn" data-act="ricalcola" type="button">Usa il prezzo del listino</button></div>`;
+function leggiRighe() {
+  const L = LIST();
+  return [...document.querySelectorAll('#righe .riga')].map(el => {
+    const q = n => el.querySelector(`[name="${n}"]`);
+    const p = q('rp').value.trim();
+    const r = { voce: el.dataset.voce || '', descr: q('rd').value.trim(), unita: q('ru').value, qta: n2(q('rq').value), prezzo: p === '' ? '' : n2(p), magg: el.dataset.magg || '', blindato: !!q('rb')?.checked, luce: !!q('rl')?.checked };
+    if (r.blindato) r.maggBlindato = L.maggBlindato;
+    if (r.luce) r.maggLuce = L.maggLuce;
+    return r;
+  }).filter(r => r.descr || r.prezzo !== '');
+}
+function aggiornaTotali() {
+  const box = $('#righeBox'); if (!box) return;
+  const kind = box.dataset.kind, L = LIST();
+  document.querySelectorAll('#righe .riga').forEach(el => {
+    const q = n => el.querySelector(`[name="${n}"]`);
+    const r = { unita: q('ru').value, qta: n2(q('rq').value), prezzo: q('rp').value.trim(), blindato: !!q('rb')?.checked, luce: !!q('rl')?.checked };
+    const sp = el.querySelectorAll('.riga-num .f > span');
+    sp[0].textContent = r.unita === 'ora' ? 'Ore' : 'Q.tà';
+    sp[2].textContent = r.unita === 'ora' ? '€ / ora' : r.unita === 'corpo' ? '€ a corpo' : '€ cad.';
+    el.querySelector('.riga-tot').textContent = r.prezzo === '' ? '—' : eur(totaleRiga(r, L));
+  });
+  const righe = leggiRighe();
+  const t = totali({ righe, urgenza: !!$('#f_urgApp')?.checked, iva: kind === 'prev' ? $('#f_iva').value : 'no' }, L);
+  let h = '';
+  if (t.urgenzaPct) h += `<div class="tl"><span>Totale voci</span><span class="price">${eur(t.imponibileRighe)}</span></div><div class="tl"><span>Urgenza ${num(t.urgenzaPct)}%</span><span class="price">+${eur(t.urgenza)}</span></div>`;
+  if (kind === 'prev' && t.ivaPct > 0) h += `<div class="tl"><span>Imponibile</span><span class="price">${eur(t.imponibile)}</span></div><div class="tl"><span>${esc(t.ivaLabel)}</span><span class="price">${eur(t.iva)}</span></div>`;
+  h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
+  $('#totBox').innerHTML = righe.length ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
+  const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
+  if (imp && righe.length && imp.dataset.auto !== '0') imp.value = t.imponibile || '';
+  const hint = $('#impHint');
+  if (hint) { hint.hidden = !(imp && righe.length && imp.dataset.auto === '0' && Math.abs(n2(imp.value) - t.imponibile) > 0.009); hint.querySelector('b').textContent = eur(t.imponibile); }
+}
+function initImporto(selector, righe, valore) {
+  const imp = $(selector); if (!imp) return;
+  const t = totali({ righe: righe || [] }, LIST()).imponibile;
+  imp.dataset.auto = !(righe || []).length || !n2(valore) || Math.abs(n2(valore) - t) < 0.01 ? '1' : '0';
+  aggiornaTotali();
+}
+function aggiungiVoce(id) {
+  const v = LIST().voci.find(x => x.id === id); if (!v) return;
+  const ore = n2($('#f_ore')?.value);
+  const r = rigaDaVoce(v, v.unita === 'ora' && ore ? ore : 1);
+  $('#righe').insertAdjacentHTML('beforeend', rigaHtml(r));
+  aggiornaTotali();
+  const el = $('#righe').lastElementChild;
+  (r.daConcordare ? el.querySelector('[name="rp"]') : el.querySelector('[name="rq"]')).focus();
+}
+
+/* ---------- preventivi ---------- */
+const STATI_PREV = [['bozza', 'Bozza', ''], ['inviato', 'Inviato', 'warn'], ['accettato', 'Accettato', 'ok'], ['rifiutato', 'Rifiutato', 'bad']];
+const statoPrev = k => STATI_PREV.find(s => s[0] === (k || 'bozza')) || STATI_PREV[0];
+const totPrev = p => totali(p, LIST());
+function prevCard(p) {
+  const t = totPrev(p), st = statoPrev(p.stato);
+  const attesa = p.stato === 'inviato' ? -daysTo(p.dataInvio || p.data) : 0;
+  return `<div class="card" role="button" tabindex="0" data-act="editPrev" data-id="${p.id}">
+    <div class="row between"><span class="t">${esc(p.cliente?.nome || 'Cliente')}</span><span class="price">${eur(t.totale)}</span></div>
+    ${p.oggetto ? `<div>${esc(p.oggetto)}</div>` : ''}
+    <div class="meta"><span class="num">N. ${esc(p.numero || '')}</span><span>${fmtD(p.data, { day: 'numeric', month: 'short' })}</span><span class="chip ${st[2]}">${st[1]}</span>${attesa >= 7 ? `<span class="chip warn">senza risposta da ${attesa} gg</span>` : ''}${p.lavoroId ? '<span class="chip in">in calendario</span>' : ''}</div>
+  </div>`;
+}
+function rPrev() {
+  const FL = [['aperti', 'Aperti'], ['accettati', 'Accettati'], ['rifiutati', 'Rifiutati'], ['tutti', 'Tutti']];
+  const aperto = p => ['bozza', 'inviato'].includes(p.stato || 'bozza');
+  const L = S.preventivi.filter(p => UI.prevFilter === 'tutti' || (UI.prevFilter === 'aperti' && aperto(p)) || (UI.prevFilter === 'accettati' && p.stato === 'accettato') || (UI.prevFilter === 'rifiutati' && p.stato === 'rifiutato'))
+    .sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.numero).localeCompare(String(a.numero)));
+  const anno = TODAY.slice(0, 4);
+  const chiusi = S.preventivi.filter(p => ['accettato', 'rifiutato'].includes(p.stato));
+  const acc = S.preventivi.filter(p => p.stato === 'accettato');
+  return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Nuovo</button></div>
+  <div class="kpis"><div class="kpi"><div class="l">Da inviare</div><div class="v">${S.preventivi.filter(p => (p.stato || 'bozza') === 'bozza').length}</div></div><div class="kpi"><div class="l">In attesa</div><div class="v">${S.preventivi.filter(p => p.stato === 'inviato').length}</div></div><div class="kpi"><div class="l">Accettati ${anno}</div><div class="v">${eur(sum(acc.filter(p => (p.data || '').startsWith(anno)), p => totPrev(p).imponibile))}</div></div><div class="kpi"><div class="l">Tasso accettazione</div><div class="v">${chiusi.length ? Math.round(acc.length / chiusi.length * 100) + '%' : '—'}</div></div></div>
+  <div class="seg" role="group" aria-label="Filtro">${FL.map(([k, l]) => `<button data-act="prevF" data-arg="${k}" aria-pressed="${UI.prevFilter === k}" type="button">${l}</button>`).join('')}</div>
+  <div class="stack">${L.map(prevCard).join('') || `<div class="empty"><b>${S.preventivi.length ? 'Nessun preventivo in questa lista.' : 'Nessun preventivo ancora.'}</b><span class="small">Scegli le voci dal listino, il totale si calcola da solo e il PDF con termini, condizioni e firma è pronto da mandare.</span><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Crea un preventivo</button></div>`}</div>`;
+}
+let prevCtx = null;
+function sheetPrev(p) {
+  const isNew = !p, az = AZ();
+  p = p || { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, cliente: { tipo: 'finale' }, righe: [], iva: az.ivaPredefinita, condizioni: true };
+  prevCtx = { p, isNew };
+  const c = p.cliente || {};
+  openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
+    <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
+    ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
+    <div class="fieldset"><span class="fs-t">Cliente</span>
+      <div class="g2">${F('Nome o ragione sociale', inp('cnome', c.nome, 'text', 'required list="clilist"'))}${F('Tipo di cliente', sel('ctipo', [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']], c.tipo || 'finale'))}</div>
+      ${F('Indirizzo', inp('cindirizzo', c.indirizzo))}
+      <div class="g2">${F('P. IVA / Codice fiscale', inp('cpiva', c.piva))}${F('Telefono', inp('ctel', c.telefono, 'tel'))}</div>
+      ${F('Email', inp('cemail', c.email, 'email'))}
+    </div>
+    ${F('Indirizzo del cantiere', inp('cantiere', p.cantiere, 'text', 'placeholder="Se diverso da quello del cliente"'))}
+    ${F('Oggetto', `<textarea id="f_oggetto" name="oggetto" placeholder="Es. Posa di 6 finestre e 2 portefinestre con smontaggio dei vecchi serramenti">${esc(p.oggetto || '')}</textarea>`)}
+    ${righeBox(p.righe, 'prev', { urgenza: !!p.urgenza, iva: p.iva })}
+    ${F('Note per il cliente', `<textarea id="f_note" name="note" placeholder="Es. Materiale di consumo compreso">${esc(p.note || '')}</textarea>`)}
+    <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
+  `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
+    del: isNew ? null : async () => { store.drop('preventivi', p.id); toast('Preventivo eliminato'); },
+    extra: `<button type="button" class="btn dark" data-act="prevPdf">PDF</button>${!isNew && p.stato === 'accettato' && !p.lavoroId ? '<button type="button" class="btn" data-act="pianifica">Metti in calendario</button>' : ''}`,
+  });
+  aggiornaTotali();
+}
+function salvaPrev(fd) {
+  const { p, isNew } = prevCtx;
+  const d = { ...stripId(p),
+    numero: fd.get('numero').trim(), data: fd.get('data'), validita: n2(fd.get('validita')), stato: fd.get('stato'),
+    cliente: { nome: fd.get('cnome').trim(), tipo: fd.get('ctipo'), indirizzo: fd.get('cindirizzo').trim(), piva: fd.get('cpiva').trim(), telefono: fd.get('ctel').trim(), email: fd.get('cemail').trim() },
+    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: leggiRighe(),
+    urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
+  if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
+  const id = store.put('preventivi', isNew ? null : p.id, d);
+  prevCtx = { p: { id, ...d }, isNew: false };
+  return prevCtx.p;
+}
+/** Compila i dati del cliente da un preventivo precedente con lo stesso nome. */
+function compilaCliente(nome) {
+  const prec = [...S.preventivi].reverse().find(p => (p.cliente?.nome || '').toLowerCase() === nome.trim().toLowerCase());
+  if (!prec) return;
+  const c = prec.cliente;
+  for (const [id, v] of [['f_cindirizzo', c.indirizzo], ['f_cpiva', c.piva], ['f_ctel', c.telefono], ['f_cemail', c.email]]) { const el = $('#' + id); if (el && !el.value && v) el.value = v; }
+  const t = $('#f_ctipo'); if (t && c.tipo) t.value = c.tipo;
+}
+
+/* ---------- PDF ---------- */
+let pdfCorrente = null;
+function apriPdf(tipo, doc, indietro) {
+  let bytes;
+  try { bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG }); }
+  catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
+  const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}` : `Consuntivo ${String(doc.data || '').split('-').reverse().join('-')}`;
+  const nome = `${base} ${doc.cliente?.nome || ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+  const file = new File([bytes], nome, { type: 'application/pdf' });
+  if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
+  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo };
+  let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
+  openSheet(tipo === 'preventivo' ? 'Preventivo pronto' : 'Consuntivo pronto', `
+    <div class="pdfready">${svg('doc')}<div><b>${esc(nome)}</b><div class="small muted">${num(bytes.length / 1024, 0)} KB${tipo === 'preventivo' && doc.condizioni ? ' · con termini, condizioni e firma' : ''}</div></div></div>
+    <div class="stack">
+      ${share ? `<button type="button" class="btn primary" data-act="pdfShare">Invia o salva (WhatsApp, Mail, File…)</button>` : ''}
+      <a class="btn ${share ? '' : 'primary'}" href="${pdfCorrente.url}" target="_blank" rel="noopener">Apri il PDF</a>
+      <button type="button" class="btn" data-act="pdfDown">Scarica sul dispositivo</button>
+      ${tipo === 'preventivo' && (doc.stato || 'bozza') === 'bozza' ? `<button type="button" class="btn" data-act="prevInviato">Segna come inviato al cliente</button>` : ''}
+    </div>
+    ${tipo === 'preventivo' && (doc.stato || 'bozza') === 'bozza' ? '<div class="small muted">Quando il preventivo è segnato come inviato, se il cliente non risponde entro 7 giorni te lo ricordo.</div>' : ''}
+  `, null, { extra: indietro ? '<button type="button" class="btn" data-act="pdfBack">‹ Torna indietro</button>' : '' });
+}
+
+/* ---------- listino e dati azienda ---------- */
+const listinoRow = v => `<div class="lrow" data-id="${esc(v.id)}" data-magg="${esc(v.magg || '')}">
+  <div class="lname"><input name="ln" value="${esc(v.nome)}" aria-label="Nome voce" placeholder="Nome voce"><input name="lv" value="${esc(v.variante || '')}" placeholder="Dettaglio (facoltativo)" aria-label="Dettaglio"></div>
+  <label class="lprezzo"><span>€</span><input name="lp" type="number" step="any" inputmode="decimal" value="${v.prezzo ?? ''}" placeholder="da concordare" aria-label="Prezzo"></label>
+  <select name="lu" aria-label="Tipo di prezzo">${UNITA_OPT.map(([k, l]) => `<option value="${k}" ${k === (v.unita || 'pz') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+  <button type="button" data-act="rmL" aria-label="Togli voce">×</button></div>`;
+function sheetListino() {
+  const L = LIST();
+  const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
+  openSheet('Listino prezzi', `
+    <div class="small muted">Prezzi IVA esclusa. Lascia vuoto il prezzo delle voci "da concordare". Le modifiche valgono per i nuovi preventivi e lavori: quelli già salvati non cambiano.</div>
+    <div class="g2">${F('Anno del listino', inp('anno', L.anno, 'number'))}${F('Urgenza %', inp('urgenzaPct', L.urgenzaPct, 'number'))}</div>
+    <div class="g2">${F('Blindati €/pz in più', inp('maggBlindato', L.maggBlindato, 'number'))}${F('Posa in luce €/pz in più', inp('maggLuce', L.maggLuce, 'number'))}</div>
+    <div id="lgroups" class="stack">${gruppi.map(g => `<div class="fieldset lgroup" data-gruppo="${esc(g)}"><span class="fs-t">${esc(g)}</span>${L.voci.filter(v => v.gruppo === g).map(listinoRow).join('')}<button type="button" class="btn sm" data-act="addL">+ Voce in questa sezione</button></div>`).join('')}</div>
+    ${S.listino ? '<button type="button" class="btn ghost small" data-act="resetListino">Ripristina il listino 2027 originale</button>' : ''}
+  `, async fd => {
+    const voci = [...document.querySelectorAll('#lgroups .lrow')].map(el => {
+      const q = n => el.querySelector(`[name="${n}"]`); const p = q('lp').value.trim();
+      return { id: el.dataset.id, gruppo: el.closest('.lgroup').dataset.gruppo, nome: q('ln').value.trim(), variante: q('lv').value.trim(), prezzo: p === '' ? null : n2(p), unita: q('lu').value, magg: el.dataset.magg || '' };
+    }).filter(v => v.nome);
+    store.put('cfg', 'listino', { anno: n2(fd.get('anno')) || L.anno, urgenzaPct: n2(fd.get('urgenzaPct')), maggBlindato: n2(fd.get('maggBlindato')), maggLuce: n2(fd.get('maggLuce')), voci });
+    toast('Listino salvato');
+  });
+}
+function sheetAzienda() {
+  const a = AZ();
+  openSheet('Dati per preventivi', `
+    ${F('Ragione sociale', inp('ragioneSociale', a.ragioneSociale, 'text', 'required'))}
+    <div class="g2">${F('Partita IVA', inp('piva', a.piva))}${F('Telefono', inp('telefono', a.telefono, 'tel'))}</div>
+    <div class="g2">${F('Email', inp('email', a.email, 'email'))}${F('Indirizzo (facoltativo)', inp('indirizzo', a.indirizzo))}</div>
+    ${F('IBAN per i pagamenti (facoltativo)', inp('iban', a.iban))}
+    <div class="g2">${F('IVA predefinita', sel('ivaPredefinita', IVA.map(i => [i[0], i[1]]), String(a.ivaPredefinita)))}${F('Validità preventivi (giorni)', inp('validitaGiorni', a.validitaGiorni, 'number'))}</div>
+    ${F('Avviso imprevisti', inp('notaImprevisti', a.notaImprevisti))}
+    ${F('Termini e condizioni allegati ai preventivi', `<textarea id="f_condTesto" name="condizioni" style="min-height:280px">${esc(a.condizioni)}</textarea>`)}
+    <div class="small muted">Separa i punti con una riga vuota: la prima riga di ogni punto è il titolo.</div>`,
+  async fd => {
+    const d = {}; ['ragioneSociale', 'piva', 'telefono', 'email', 'indirizzo', 'iban', 'ivaPredefinita', 'notaImprevisti', 'condizioni'].forEach(k => d[k] = String(fd.get(k) || '').trim());
+    d.validitaGiorni = n2(fd.get('validitaGiorni')) || 30;
+    store.put('cfg', 'azienda', d); toast('Dati salvati');
+  });
 }
 
 /* foto scontrino */
@@ -731,6 +986,33 @@ document.addEventListener('click', async e => {
       try { b.disabled = true; await sheetDel(); closeSheet(); render(); } catch { toast('Non eliminato, riprova'); b.disabled = false; }
       break;
     case 'seed': seed(); render(); break;
+    case 'newPrev': sheetPrev(null); break;
+    case 'editPrev': sheetPrev(S.preventivi.find(x => x.id === id)); break;
+    case 'prevF': UI.prevFilter = arg; render(); break;
+    case 'addLibera': $('#righe').insertAdjacentHTML('beforeend', rigaHtml({ descr: '', unita: 'corpo', qta: 1, prezzo: '' })); aggiornaTotali(); $('#righe').lastElementChild.querySelector('[name="rd"]').focus(); break;
+    case 'rmRiga': b.closest('.riga').remove(); aggiornaTotali(); break;
+    case 'ricalcola': { const imp = $('#f_importo') || $('#f_costo'); if (imp) { imp.dataset.auto = '1'; aggiornaTotali(); } break; }
+    case 'prevPdf': {
+      const form = $('#sheetForm');
+      const bad = [...form.querySelectorAll('[required]')].find(i => !String(i.value).trim());
+      if (bad) { bad.focus(); toast('Compila: ' + (bad.closest('label')?.querySelector('span')?.textContent || 'campo obbligatorio')); break; }
+      const saved = salvaPrev(new FormData(form));
+      apriPdf('preventivo', saved, () => sheetPrev(S.preventivi.find(x => x.id === saved.id) || saved));
+      break;
+    }
+    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const doc = docDaLavoro(x, arg, AZ()); doc.iva = $('#f_iva')?.value || doc.iva; apriPdf('consuntivo', doc, () => sheetCons(arg, id)); break; }
+    case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
+    case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
+    case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
+    case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { store.put('preventivi', p.id, { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
+    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', installato: p.oggetto || '', righe: p.righe || [], importo: totPrev(p).imponibile, note: p.note || '', preventivoId: p.id }); break; }
+    case 'editListino': sheetListino(); break;
+    case 'editAzienda': sheetAzienda(); break;
+    case 'addL': b.insertAdjacentHTML('beforebegin', listinoRow({ id: 'v' + Date.now().toString(36), nome: '', variante: '', prezzo: '', unita: 'pz' })); b.previousElementSibling.querySelector('[name="ln"]').focus(); break;
+    case 'rmL': b.closest('.lrow').remove(); break;
+    case 'resetListino':
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per ripristinare i prezzi originali'; break; }
+      store.drop('cfg', 'listino'); closeSheet(); render(); toast('Listino 2027 ripristinato'); break;
     case 'unseed': unseed(); render(); break;
     case 'csv': csv(arg); break;
     case 'pushOn': case 'pushTest': pushOn(); break;
@@ -748,9 +1030,20 @@ document.addEventListener('change', e => {
   if (t.dataset.change === 'anY') { UI.anYear = +t.value; render(); return; }
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }
   if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; }
+  if (t.id === 'addVoce') { const v = t.value; t.value = ''; aggiungiVoce(v); return; }
+  if (t.id === 'f_urgApp') t.dataset.touched = '1';
+  if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
+  if (t.id === 'f_cnome') compilaCliente(t.value);
+  if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga')) t.dataset.auto = '0'; aggiornaTotali(); return; }
+  if (t.closest && t.closest('#righeBox')) aggiornaTotali();
+});
+caricaImmagini();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn(e));
 render();
 store.init().then(render);

@@ -57,6 +57,10 @@ Nel repository vai in **Settings › Secrets and variables › Actions › New r
 
 ## Come funziona
 
+- **Preventivi**: scegli le voci dal listino (al pezzo, a ore o a corpo), con maggiorazioni per prodotti blindati, posa in luce e urgenza. Il totale si calcola da solo e il PDF, con logo, termini e condizioni e firma per accettazione, è pronto da mandare. Un preventivo accettato si mette in calendario con un tocco.
+- **Prezzi automatici**: anche nelle pose e negli interventi si aggiungono le voci del listino e l'importo si calcola da solo. Dal consuntivo si crea il PDF.
+- **Listino**: si modifica da *Cartelle e impostazioni › Listino prezzi*. Le modifiche valgono per i nuovi documenti; quelli già salvati non cambiano.
+
 - **Senza rete** l'app continua a funzionare: le modifiche si salvano sul dispositivo e partono appena torna il segnale.
 - **Scontrini**: la foto viene letta direttamente dal telefono (riconoscimento del testo gratuito). Data, totale e fornitore sono letti abbastanza bene; le righe di materiale vanno sempre controllate.
 - **Cartelle**: in *Cartelle e impostazioni* salvi i link alle tue cartelle di iCloud Drive (o Google Drive, Dropbox). Ogni posa può avere la sua cartella e i suoi allegati.
@@ -76,6 +80,8 @@ Nel repository vai in **Settings › Secrets and variables › Actions › New r
 | `index.html`, `styles.css`, `app.js` | l'app |
 | `store.js` | salvataggio sul dispositivo e sincronizzazione |
 | `logica.js` | promemoria e lettura scontrini (usata anche dalle notifiche) |
+| `listino.js` | listino prezzi 2027, termini e condizioni, calcolo dei prezzi |
+| `pdf.js`, `pdf-metrics.js`, `documento.js` | creazione dei PDF di preventivi e consuntivi |
 | `sw.js`, `manifest.webmanifest`, `icone/` | installazione come app, funzionamento offline, notifiche |
 | `config.js` | collegamento a Supabase |
 | `supabase/schema.sql` | struttura del database |

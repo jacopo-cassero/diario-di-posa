@@ -4,7 +4,7 @@
 -- 1. Dati dell'app: ogni riga è un elemento (posa, intervento, spesa, materiale, cartella, furgone).
 create table if not exists public.records (
   user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  kind       text not null check (kind in ('lavori','interventi','movimenti','magazzino','cartelle','cfg')),
+  kind       text not null check (kind in ('lavori','interventi','movimenti','magazzino','cartelle','cfg','preventivi')),
   id         text not null,
   data       jsonb not null default '{}'::jsonb,
   deleted    boolean not null default false,
@@ -55,3 +55,8 @@ create policy "file: modifica propria" on storage.objects for update to authenti
   using (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "file: eliminazione propria" on storage.objects for delete to authenticated
   using (bucket_id = 'file' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Aggiornamento per database già creati (preventivi):
+alter table public.records drop constraint if exists records_kind_check;
+alter table public.records add constraint records_kind_check
+  check (kind in ('lavori','interventi','movimenti','magazzino','cartelle','cfg','preventivi'));

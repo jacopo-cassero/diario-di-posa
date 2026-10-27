@@ -52,6 +52,9 @@ export function promemoria(S, today = oggi()) {
   const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
   if (urg.length) out.push({ lvl: 'bad', txt: `${urg.length} ${urg.length === 1 ? 'intervento molto urgente' : 'interventi molto urgenti'} aperti`, sub: urg.map(i => i.cliente).slice(0, 2).join(', '), act: 'tab', arg: 'int' });
 
+  const attesa = (S.preventivi || []).filter(p => p.stato === 'inviato' && daysBetween(p.dataInvio || p.data || today, today) >= 7);
+  if (attesa.length) out.push({ lvl: 'warn', txt: `${attesa.length} ${attesa.length === 1 ? 'preventivo senza risposta' : 'preventivi senza risposta'} da più di 7 giorni`, sub: attesa.map(p => (p.cliente && p.cliente.nome) || p.numero).slice(0, 3).join(', '), act: 'tab', arg: 'prev' });
+
   const domani = iso(new Date(pd(today).getTime() + 864e5));
   const pose = (S.lavori || []).filter(l => l.data === domani);
   const ints = (S.interventi || []).filter(i => i.dataProg === domani && i.stato !== 'completato' && i.stato !== 'annullato');

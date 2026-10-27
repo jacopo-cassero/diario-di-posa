@@ -233,3 +233,32 @@ svg.i{width:14px;height:14px;vertical-align:-2px;stroke:currentColor;fill:none;s
 .card[role="button"]{cursor:pointer}
 .card[role="button"]:hover{border-color:var(--muted)}
 details summary{cursor:pointer}
+
+/* Preventivi e voci dal listino */
+.tabs-in{grid-template-columns:repeat(6,1fr)}
+.tab{font-size:.64rem;letter-spacing:0;padding-left:0;padding-right:0}
+.righe{display:flex;flex-direction:column;gap:8px}
+.riga{border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--bg)}
+.riga-top{display:flex;gap:6px}
+.riga-top input{flex:1;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 8px;min-height:40px;font-weight:600}
+.riga-top button,.lrow button{border:0;background:none;color:var(--muted);font-size:1.4rem;width:32px;flex:none}
+.riga-num{display:grid;grid-template-columns:56px minmax(0,1fr) 76px minmax(68px,auto);gap:6px;align-items:end}
+.riga-num .f > span{font-size:.68rem}
+.riga-num .f input,.riga-num .f select{min-height:40px;padding:6px 8px}
+.riga-tot{text-align:right;padding-bottom:10px;font-weight:600;white-space:nowrap}
+.check.small{font-size:.88rem}
+.addvoce{flex:1;min-width:0;max-width:100%;text-align:left}
+.totbox{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:8px}
+.tl{display:flex;justify-content:space-between;gap:10px;font-size:.92rem;color:var(--muted)}
+.tl.big{color:var(--fg);font-weight:700;font-size:1.08rem}
+.lrow{display:grid;grid-template-columns:minmax(0,1fr) 110px 32px;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.lrow .lname{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:6px}
+.lrow input,.lrow select{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:6px 7px;min-height:36px;width:100%;min-width:0}
+.lname input[name="lv"]{color:var(--muted)}
+.pdfready{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px}
+.pdfready svg{width:34px;height:34px;stroke:var(--bad);fill:none;stroke-width:1.6;flex:none}
+.pdfready b{overflow-wrap:anywhere}
+a.btn{text-decoration:none;color:inherit;justify-content:center}
+a.btn.primary{color:var(--tape-ink)}
+.lprezzo{display:flex;align-items:center;gap:6px;min-width:0}
+.lprezzo span{color:var(--muted);font-weight:600}
