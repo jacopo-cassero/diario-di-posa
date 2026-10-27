@@ -1,0 +1,10 @@
+2026-10-27T06:25:45.559Z
+SUPABASE_URL: presente (40 caratteri, inizia con "https://uolc…")
+SUPABASE_SERVICE_ROLE_KEY: presente (41 caratteri, inizia con "sb_…")
+VAPID_PUBLIC_KEY: presente (87 caratteri, inizia con "BHJ…")
+VAPID_PRIVATE_KEY: presente (43 caratteri, inizia con "yUG…")
+VAPID_SUBJECT: presente
+2026-10-27: 2 dispositivi, 1 utenti
+Cose da fare per un utente: 0
+Notifica inviata a un dispositivo Apple
+Notifica inviata a un dispositivo Apple
