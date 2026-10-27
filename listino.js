@@ -89,28 +89,25 @@ export const AZIENDA_BASE = {
   ivaPredefinita: '22',
   validitaGiorni: 30,
   notaImprevisti: 'In caso di imprevisti, il tempo necessario alla risoluzione sarà addebitato secondo la tariffa oraria.',
-  condizioni: `1. Accettazione del listino
-Il presente listino deve essere letto, accettato e sottoscritto dal Cliente prima dell'inizio dei lavori. La firma vale come accettazione integrale dei prezzi e delle condizioni qui riportate.
+  condizioni: `1. Accettazione del preventivo
+Il presente preventivo deve essere letto, accettato e sottoscritto dal Cliente prima dell'inizio dei lavori. La firma vale come accettazione integrale dei prezzi e delle condizioni qui riportate.
 
 2. Modalità di pagamento
 Il pagamento deve essere effettuato all'emissione della fattura, tramite bonifico bancario. Nella causale del bonifico è obbligatorio indicare il numero della fattura di riferimento.
 
-3. Lavori senza preventivo
-Per i lavori per i quali non è stato richiesto un preventivo, si applicano i prezzi del presente listino posa accettato dal Cliente. Eventuali lavorazioni extra saranno indicate nel conteggio finale.
-
-4. Lavori oggetto di preventivo
+3. Lavori oggetto di preventivo
 Per i cantieri oggetto di preventivo, ci si riserva la facoltà di addebitare eventuali lavorazioni extra non comprese nel preventivo stesso. Tali extra saranno sempre indicati nel consuntivo finale.
 
-5. Variazioni e servizi non indicati
+4. Variazioni e servizi non indicati
 Il presente listino può essere soggetto a variazioni. Per i servizi non indicati nel listino, il Cliente è tenuto a richiederne il costo prima dell'esecuzione.
 
-6. Trasferte
+5. Trasferte
 In caso di trasferta, le spese di vitto e alloggio sono a carico del Cliente. Qualora tali spese vengano sostenute direttamente dall'installatore, saranno conteggiate a fine lavoro con una maggiorazione del 15%.
 
-7. Contenuti fotografici e video
+6. Contenuti fotografici e video
 Con la sottoscrizione del presente listino, il Cliente finale autorizza l'installatore a realizzare foto e video presso i cantieri in cui opera e a pubblicarli sui propri canali social (Instagram e Facebook) a scopo promozionale. Nel caso in cui il cliente finale non desideri che vengano effettuate riprese, è tenuto a comunicarlo prima dell'inizio dei lavori. In assenza di tale comunicazione, l'autorizzazione si intende valida per tutti i cantieri.
 
-8. Annullamenti e fermi cantiere
+7. Annullamenti e fermi cantiere
 In caso di annullamento del cantiere senza il necessario preavviso, o di impossibilità ad avviare o proseguire i lavori per cause non imputabili all'installatore (esempio: materiale errato, mancante o danneggiato, cantiere non pronto o non accessibile), potrà essere addebitato al Rivenditore un importo a titolo di indennizzo pari a € 175 per la mezza giornata oppure € 300 per la giornata intera, in base all'effettivo fermo lavorativo. A tali importi si aggiungono le eventuali spese di trasferta già sostenute. L'indennizzo sarà indicato nel conteggio finale.`,
 };
 
