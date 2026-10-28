@@ -3,6 +3,7 @@ import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnita
 import { creaDocumento, docDaLavoro } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
+import { creaCalendario } from './calendario-ics.js';
 import { createStore } from './store.js';
 
 /* ---------- utilità ---------- */
@@ -44,7 +45,7 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 
 /* ---------- stato ---------- */
 const CFG = window.DIARIO_CONFIG || {};
-const store = createStore(CFG, () => render());
+const store = createStore(CFG, () => { render(); aggiornaCalendario(); });
 const S = store.S;
 const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
@@ -754,18 +755,39 @@ function rCantieri() {
     ${!tutti.length ? `<div class="empty"><b>${q ? 'Nessun cantiere trovato.' : 'Nessun cantiere ancora.'}</b><span class="small">Compaiono qui gli indirizzi delle pose e degli interventi.</span></div>` : ''}
   </div>`;
 }
-/** Calendario in abbonamento: l'iPhone lo rilegge da solo e lo mostra anche su CarPlay. */
-const urlCalendario = t => `${(CFG.supabaseUrl || 'https://uolcdcvszeeaeoviovjb.supabase.co').replace(/\/$/, '')}/functions/v1/calendario?t=${t}`;
+/** Calendario in abbonamento: l'app lo tiene aggiornato e l'iPhone lo rilegge da solo (visibile anche su CarPlay). */
 function boxCalendario() {
-  const t = S.impostazioni?.calendario?.token;
-  if (!t) return `<div class="panel stack"><b>Calendario sempre aggiornato</b><div class="small muted">Aggiunge pose, interventi e impegni al Calendario dell'iPhone (e quindi a CarPlay) e lo tiene aggiornato da solo, senza aggiungere i lavori uno per uno.</div><div class="row"><button type="button" class="btn sm primary" data-act="calAttiva">Attiva</button></div></div>`;
-  const u = urlCalendario(t);
-  return `<div class="panel stack"><b>Calendario sempre aggiornato</b>
-    <div class="small muted">Tocca <b>Iscriviti</b> sull'iPhone e conferma: il calendario «Diario di Posa» compare nell'app Calendario e su CarPlay e si aggiorna da solo (l'iPhone lo rilegge ogni tanto, di solito entro un'ora).</div>
-    <div class="row"><a class="btn sm primary" href="${esc(u.replace(/^https:/, 'webcal:'))}">Iscriviti sull'iPhone</a><button type="button" class="btn sm" data-act="calCopia">Copia indirizzo</button></div>
-    <div class="small muted">L'indirizzo è personale: chi lo ha vede i tuoi appuntamenti. Se lo hai dato a qualcuno per sbaglio, <button type="button" class="linkbtn" data-act="calNuovo">cambia codice</button> (il vecchio smette di funzionare) oppure <button type="button" class="linkbtn" data-act="calSpegni">disattiva</button>.</div></div>`;
+  const c = S.impostazioni?.calendario;
+  if (!c?.url) return `<div class="panel stack"><b>Calendario sull'iPhone</b><div class="small muted">Crea un calendario dedicato «Diario di Posa» nell'app Calendario (e quindi su CarPlay) con pose, interventi, ferie, fiere e corsi. Si aggiorna da solo ogni volta che cambi qualcosa qui.</div><div class="row"><button type="button" class="btn sm primary" data-act="calAttiva">Attiva</button></div></div>`;
+  return `<div class="panel stack"><b>Calendario sull'iPhone</b>
+    <div class="small muted">Tocca <b>Iscriviti sull'iPhone</b> e conferma con <b>Iscriviti</b>: compare il calendario «Diario di Posa», anche su CarPlay. Ogni modifica fatta qui arriva sul telefono da sola (l'iPhone controlla di solito ogni ora; per farlo più spesso: Impostazioni › App › Calendario › Account › Recupera dati).</div>
+    <div class="row"><a class="btn sm primary" href="${esc(c.url.replace(/^https:/, 'webcal:'))}">Iscriviti sull'iPhone</a><button type="button" class="btn sm" data-act="calCopia">Copia indirizzo</button></div>
+    <div class="small muted">Il link è personale: chi lo ha vede i tuoi appuntamenti. Se lo hai dato a qualcuno per sbaglio, <button type="button" class="linkbtn" data-act="calNuovo">cambia link</button> (il vecchio smette di funzionare) oppure <button type="button" class="linkbtn" data-act="calSpegni">disattiva</button>.</div></div>`;
 }
 const nuovoToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+const testoCal = () => creaCalendario(S, IMP().giornata);
+const senzaStamp = t => t.replace(/^DTSTAMP:.*\r\n/gm, '');
+let calTimer = null;
+/** Dopo ogni modifica: se il calendario è cambiato, lo ricarico (aspetto qualche secondo per raggruppare le modifiche). */
+function aggiornaCalendario() {
+  const c = S.impostazioni?.calendario; if (!c?.path || !store.cloud()) return;
+  clearTimeout(calTimer);
+  calTimer = setTimeout(async () => {
+    const t = testoCal(), k = 'ddp:cal:' + c.path, firma = senzaStamp(t);
+    let prima = ''; try { prima = localStorage.getItem(k) || ''; } catch {}
+    if (prima === firma) return;
+    if (await store.caricaCalendario(c.path, t)) { try { localStorage.setItem(k, firma); } catch {} }
+  }, 6000);
+}
+async function attivaCalendario(cambio) {
+  if (!store.cloud()) throw Object.assign(new Error('no'), { userMsg: 'Serve essere collegati con il tuo account e avere la rete.' });
+  const vecchio = S.impostazioni?.calendario?.path;
+  const path = store.calPath(nuovoToken());
+  if (!(await store.caricaCalendario(path, testoCal()))) throw Object.assign(new Error('upload'), { userMsg: 'Non sono riuscito a creare il calendario: controlla la rete e riprova.' });
+  const url = await store.linkCalendario(path);
+  salvaImp({ calendario: { path, url, creato: TODAY } });
+  if (cambio && vecchio) store.removeFile(vecchio).catch(() => {});
+}
 /** File .ics di un lavoro, da aprire con il Calendario dell'iPhone (visibile anche su CarPlay). */
 function icsLavoro(kind, x) {
   const G = IMP().giornata, pad = n => String(n).padStart(2, '0');
@@ -2071,9 +2093,9 @@ document.addEventListener('click', async e => {
     case 'mcSu': { const r = b.closest('.mcampo'); if (r.previousElementSibling) r.parentElement.insertBefore(r, r.previousElementSibling); break; }
     case 'mcGiu': { const r = b.closest('.mcampo'); if (r.nextElementSibling) r.parentElement.insertBefore(r.nextElementSibling, r); break; }
     case 'mcRm': b.closest('.mcampo').remove(); break;
-    case 'calAttiva': case 'calNuovo': salvaImp({ calendario: { token: nuovoToken(), creato: TODAY } }); toast(a === 'calNuovo' ? 'Codice cambiato: iscriviti di nuovo sull\'iPhone' : 'Calendario attivato'); render(); break;
-    case 'calSpegni': salvaImp({ calendario: null }); toast('Calendario disattivato'); render(); break;
-    case 'calCopia': { const u = urlCalendario(S.impostazioni?.calendario?.token || ''); try { await navigator.clipboard.writeText(u); toast('Indirizzo copiato'); } catch { prompt('Copia questo indirizzo', u); } break; }
+    case 'calAttiva': case 'calNuovo': try { b.disabled = true; await attivaCalendario(a === 'calNuovo'); toast(a === 'calNuovo' ? 'Link cambiato: iscriviti di nuovo sull\'iPhone' : 'Calendario pronto: ora tocca «Iscriviti sull\'iPhone»'); } catch (err) { toast(err.userMsg || 'Non sono riuscito, riprova'); } render(); break;
+    case 'calSpegni': { const pth = S.impostazioni?.calendario?.path; salvaImp({ calendario: null }); if (pth) store.removeFile(pth).catch(() => {}); toast('Calendario disattivato: puoi toglierlo anche dall\'iPhone'); render(); break; }
+    case 'calCopia': { const u = S.impostazioni?.calendario?.url || ''; try { await navigator.clipboard.writeText(u); toast('Indirizzo copiato'); } catch { prompt('Copia questo indirizzo', u); } break; }
     case 'icsJob': {
       const x = S[arg].find(r => r.id === id); if (!x) break;
       const file = new File([icsLavoro(arg, x)], `${arg === 'lavori' ? 'posa' : 'intervento'}-${String(x.cliente || 'cliente').replace(/[^\w]+/g, '-')}.ics`, { type: 'text/calendar' });

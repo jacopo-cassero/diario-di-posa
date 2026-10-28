@@ -191,6 +191,21 @@ export function createStore(cfg, onChange) {
       if (sb) await sb.storage.from('file').remove([path]);
     },
 
+    /** Calendario in abbonamento: file .ics nella cartella privata, letto dall'iPhone tramite un link firmato. */
+    calPath: token => uid ? `${uid}/calendario-${token}.ics` : '',
+    async caricaCalendario(path, testo) {
+      if (!sb || !uid || !navigator.onLine) return false;
+      const { error } = await sb.storage.from('file').upload(path, new Blob([testo], { type: 'text/calendar' }), { contentType: 'text/calendar; charset=utf-8', upsert: true, cacheControl: '60' });
+      if (error) { console.warn(error); return false; }
+      return true;
+    },
+    async linkCalendario(path) {
+      const { data, error } = await sb.storage.from('file').createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+      if (error) throw error;
+      return data.signedUrl;
+    },
+    cloud: () => !!(sb && uid),
+
     async savePush(sub) {
       if (!sb || !uid) throw new Error('Accedi prima di attivare le notifiche.');
       const j = sub.toJSON();
