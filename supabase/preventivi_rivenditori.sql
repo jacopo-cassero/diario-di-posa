@@ -55,15 +55,13 @@ begin
   select * into m from public.membri where user_id = auth.uid() and stato = 'attivo' and ruolo = 'rivenditore';
   if m.user_id is null then raise exception 'Accesso non consentito'; end if;
   if jsonb_typeof(dati) <> 'object' or length(dati::text) > 30000 then raise exception 'Dati non validi'; end if;
-  if jsonb_typeof(dati->'righe') <> 'array' or jsonb_array_length(dati->'righe') = 0 then raise exception 'Aggiungi almeno una tipologia con la quantità'; end if;
-  if coalesce(trim(dati->>'indirizzo'), '') = '' then raise exception 'Scrivi il luogo del cantiere'; end if;
   if (select count(*) from public.richieste_preventivo where rivenditore = m.user_id and creato > now() - interval '1 hour') >= 20 then
     raise exception 'Troppe richieste in poco tempo, riprova più tardi';
   end if;
   insert into public.richieste_preventivo (titolare, rivenditore, cliente, indirizzo, telefono, piano, ascensore, tiro, righe, note, stima)
   values (m.titolare, m.user_id, left(trim(dati->>'cliente'), 120), left(trim(dati->>'indirizzo'), 200), left(trim(dati->>'telefono'), 40),
           left(dati->>'piano', 40), left(dati->>'ascensore', 10), coalesce((dati->>'tiro')::boolean, false),
-          dati->'righe', left(trim(dati->>'note'), 2000), nullif(dati->>'stima', '')::numeric)
+          case when jsonb_typeof(dati->'righe') = 'array' then dati->'righe' else '[]'::jsonb end, left(trim(dati->>'note'), 2000), nullif(dati->>'stima', '')::numeric)
   returning id into nuovo;
   return nuovo;
 end $$;

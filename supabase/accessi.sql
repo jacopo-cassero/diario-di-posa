@@ -281,7 +281,6 @@ begin
   if a - da > 14 then raise exception 'Al massimo 15 giorni per prenotazione'; end if;
   if da < oggi + pre then raise exception 'Serve un preavviso di almeno % giorni', pre; end if;
   if a > (oggi + make_interval(months => mesi))::date then raise exception 'Si può prenotare al massimo % mesi avanti', mesi; end if;
-  if coalesce(trim(cliente), '') = '' or coalesce(trim(indirizzo), '') = '' then raise exception 'Scrivi cliente e indirizzo del cantiere'; end if;
   perform pg_advisory_xact_lock(hashtext('prenota:' || m.titolare::text));
   if exists (select 1 from public._occupati(m.titolare, da, a) o where lav @> to_jsonb(extract(dow from o.giorno)::int)) then
     raise exception 'Una o più giornate sono appena state occupate: aggiorna il calendario';

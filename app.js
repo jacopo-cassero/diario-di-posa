@@ -337,10 +337,11 @@ function sheetPrenota() {
   const da = RIV.da, a = RIV.a || RIV.da;
   openSheet('Prenota', `
     <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · le giornate restano bloccate per te finché non confermo.</div>
-    ${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza'], ['sopralluogo', 'Sopralluogo / misure']], 'posa'))}
+    <div class="small muted">Compila quello che sai: nessun campo è obbligatorio, il resto ce lo diciamo a voce.</div>
+    ${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza']], 'posa'))}
     <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
-      <div class="g2">${F('Cliente finale', inp('pcliente', '', 'text', 'required'))}${F('Telefono cliente', inp('ptel', '', 'tel', 'required'))}</div>
-      ${F('Indirizzo del cantiere', inp('pind', '', 'text', 'required placeholder="Via, civico, comune"'))}
+      <div class="g2">${F('Cliente finale', inp('pcliente', ''))}${F('Telefono cliente', inp('ptel', '', 'tel'))}</div>
+      ${F('Indirizzo del cantiere', inp('pind', '', 'text', 'placeholder="Via, civico, comune"'))}
       <div class="g2">${SCHEDA.slice(0, 3).map(([k, l, t]) => F(l, inp('ps_' + k, '', t === 'testo' ? 'text' : t))).join('')}</div>
     </div>
     <div class="fieldset"><span class="fs-t">Accesso al cantiere</span>
@@ -525,7 +526,7 @@ function sheetPrevRiv() {
   const L = LISTINO_RIV();
   openSheet('Richiesta di preventivo', `
     <div class="fieldset"><span class="fs-t">Cantiere</span>
-      ${F('Luogo del cantiere', inp('rv_luogo', '', 'text', 'required placeholder="Comune e indirizzo"'))}
+      ${F('Luogo del cantiere', inp('rv_luogo', '', 'text', 'placeholder="Comune e indirizzo"'))}
       <div class="g2">${F('Cliente finale', inp('rv_cliente', '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', '', 'tel', 'placeholder="Facoltativo"'))}</div>
       <div class="g2">${F('Piano', sel('rv_piano', PIANI.map(p => [p, p]), 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], ''))}</div>
       ${tog('rv_tiro', 'Serve il tiro al piano', false, 'si segna da solo se il piano è alto e non c\'è ascensore')}
@@ -535,10 +536,10 @@ function sheetPrevRiv() {
       <button type="button" class="btn sm" data-act="rvAdd">+ Tipologia</button>
     </div>
     ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3"></textarea>`)}
-    <div class="small muted">Il prezzo te lo manda l'installatore con il preventivo.</div>`,
+    <div class="small muted">Nessun campo è obbligatorio. Il prezzo te lo manda l'installatore con il preventivo.</div>`,
   async fd => {
     const d = leggiPrevRiv(fd);
-    if (!d.righe.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Aggiungi almeno una tipologia con la quantità' });
+    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
     await store.rpc('chiedi_preventivo', { dati: d });
     toast('Richiesta inviata: ti arriva il preventivo'); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
   }, { saveLabel: 'Invia richiesta' });
