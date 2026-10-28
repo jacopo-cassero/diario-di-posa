@@ -745,6 +745,7 @@ function rCantieri() {
   const pass = tutti.filter(s => !s.oggi.length && !s.prossimo).sort((a, b) => String(b.ultimo?.d || '').localeCompare(String(a.ultimo?.d || '')));
   return `<div class="row between"><h2>Cantieri</h2></div>
   <div class="notice small"><b>Su CarPlay:</b> con l'iPhone collegato all'auto, tocca <b>Mappe</b>, <b>Google Maps</b> o <b>Waze</b> e il percorso parte sullo schermo dell'auto. Con <b>Aggiungi al Calendario</b> il lavoro compare anche nell'app Calendario di CarPlay, con l'indirizzo pronto per la navigazione.</div>
+  ${boxCalendario()}
   <label class="f"><span class="sr">Cerca</span><input id="cercaCantiere" type="search" placeholder="Cerca per indirizzo o cliente…" value="${esc(UI.cercaCant || '')}" autocomplete="off"></label>
   <div id="listaCantieri" class="stack">
     ${oggi.length ? `<h3>Oggi</h3>${oggi.map(s => rigaCantiere(s, 'oggi')).join('')}` : ''}
@@ -753,6 +754,18 @@ function rCantieri() {
     ${!tutti.length ? `<div class="empty"><b>${q ? 'Nessun cantiere trovato.' : 'Nessun cantiere ancora.'}</b><span class="small">Compaiono qui gli indirizzi delle pose e degli interventi.</span></div>` : ''}
   </div>`;
 }
+/** Calendario in abbonamento: l'iPhone lo rilegge da solo e lo mostra anche su CarPlay. */
+const urlCalendario = t => `${(CFG.supabaseUrl || 'https://uolcdcvszeeaeoviovjb.supabase.co').replace(/\/$/, '')}/functions/v1/calendario?t=${t}`;
+function boxCalendario() {
+  const t = S.impostazioni?.calendario?.token;
+  if (!t) return `<div class="panel stack"><b>Calendario sempre aggiornato</b><div class="small muted">Aggiunge pose, interventi e impegni al Calendario dell'iPhone (e quindi a CarPlay) e lo tiene aggiornato da solo, senza aggiungere i lavori uno per uno.</div><div class="row"><button type="button" class="btn sm primary" data-act="calAttiva">Attiva</button></div></div>`;
+  const u = urlCalendario(t);
+  return `<div class="panel stack"><b>Calendario sempre aggiornato</b>
+    <div class="small muted">Tocca <b>Iscriviti</b> sull'iPhone e conferma: il calendario «Diario di Posa» compare nell'app Calendario e su CarPlay e si aggiorna da solo (l'iPhone lo rilegge ogni tanto, di solito entro un'ora).</div>
+    <div class="row"><a class="btn sm primary" href="${esc(u.replace(/^https:/, 'webcal:'))}">Iscriviti sull'iPhone</a><button type="button" class="btn sm" data-act="calCopia">Copia indirizzo</button></div>
+    <div class="small muted">L'indirizzo è personale: chi lo ha vede i tuoi appuntamenti. Se lo hai dato a qualcuno per sbaglio, <button type="button" class="linkbtn" data-act="calNuovo">cambia codice</button> (il vecchio smette di funzionare) oppure <button type="button" class="linkbtn" data-act="calSpegni">disattiva</button>.</div></div>`;
+}
+const nuovoToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
 /** File .ics di un lavoro, da aprire con il Calendario dell'iPhone (visibile anche su CarPlay). */
 function icsLavoro(kind, x) {
   const G = IMP().giornata, pad = n => String(n).padStart(2, '0');
@@ -2058,6 +2071,9 @@ document.addEventListener('click', async e => {
     case 'mcSu': { const r = b.closest('.mcampo'); if (r.previousElementSibling) r.parentElement.insertBefore(r, r.previousElementSibling); break; }
     case 'mcGiu': { const r = b.closest('.mcampo'); if (r.nextElementSibling) r.parentElement.insertBefore(r.nextElementSibling, r); break; }
     case 'mcRm': b.closest('.mcampo').remove(); break;
+    case 'calAttiva': case 'calNuovo': salvaImp({ calendario: { token: nuovoToken(), creato: TODAY } }); toast(a === 'calNuovo' ? 'Codice cambiato: iscriviti di nuovo sull\'iPhone' : 'Calendario attivato'); render(); break;
+    case 'calSpegni': salvaImp({ calendario: null }); toast('Calendario disattivato'); render(); break;
+    case 'calCopia': { const u = urlCalendario(S.impostazioni?.calendario?.token || ''); try { await navigator.clipboard.writeText(u); toast('Indirizzo copiato'); } catch { prompt('Copia questo indirizzo', u); } break; }
     case 'icsJob': {
       const x = S[arg].find(r => r.id === id); if (!x) break;
       const file = new File([icsLavoro(arg, x)], `${arg === 'lavori' ? 'posa' : 'intervento'}-${String(x.cliente || 'cliente').replace(/[^\w]+/g, '-')}.ics`, { type: 'text/calendar' });
