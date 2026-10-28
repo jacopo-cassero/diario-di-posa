@@ -45,18 +45,505 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 
 /* ---------- stato ---------- */
 const CFG = window.DIARIO_CONFIG || {};
-const store = createStore(CFG, () => { render(); aggiornaCalendario(); });
+const store = createStore(CFG, () => { render(); if (GESTORE()) { aggiornaCalendario(); caricaAccessi(); } });
 const S = store.S;
 const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi'].includes(h)) UI.tab = h;
   if (h === 'fatture') { UI.tab = 'conti'; UI.seg = 'fatt'; }
   if (h === 'magazzino') { UI.tab = 'conti'; UI.seg = 'mag'; }
 }
 readHash();
 window.addEventListener('hashchange', () => { readHash(); render(); });
+
+/* =====================================================================
+   ACCESSI: titolari, rivenditori e dipendenti
+   ===================================================================== */
+const RUOLI = [['titolare', 'Titolare', 'vede e modifica tutto, come te'], ['rivenditore', 'Rivenditore', 'vede solo libero/occupato e prenota le giornate libere'], ['dipendente', 'Dipendente', 'vede solo i lavori assegnati a lui, senza prezzi']];
+const nomeRuolo = k => (RUOLI.find(r => r[0] === k) || [k, k])[1];
+const GESTORE = () => ['proprietario', 'titolare'].includes(store.st.ruolo);
+const piuGiorni = (k, n) => iso(new Date(pd(k).getTime() + n * 864e5));
+const INVITO = (() => { let c = ''; try { c = new URLSearchParams(location.search).get('invito') || ''; if (c) localStorage.setItem('ddp:invito', c); else c = localStorage.getItem('ddp:invito') || ''; } catch {} return c; })();
+if (INVITO && !location.hash) UI.authView = 'richiesta';
+const linkApp = codice => `${location.origin}${location.pathname}${codice ? `?invito=${codice}` : ''}`;
+const telWa = t => { let d = String(t || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); if (d.length === 10 && d.startsWith('3')) d = '39' + d; return d; };
+
+/* festività nazionali italiane (giorni chiusi per i rivenditori) */
+function festivi(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mese = Math.floor((h + l - 7 * m + 114) / 31), giorno = ((h + l - 7 * m + 114) % 31) + 1;
+  const pasquetta = iso(new Date(y, mese - 1, giorno + 1));
+  return new Set(['01-01', '01-06', '04-25', '05-01', '06-02', '08-15', '11-01', '12-08', '12-25', '12-26'].map(x => `${y}-${x}`).concat(pasquetta));
+}
+
+/* ---------- scheda cantiere compilata dal rivenditore ---------- */
+const SCHEDA = [
+  ['referente', 'Referente in cantiere', 'testo'], ['telReferente', 'Telefono referente', 'tel'],
+  ['email', 'Email del cliente', 'email'],
+  ['piano', 'Piano', ['Piano terra', '1° piano', '2° piano', '3° piano', '4° piano', '5° piano o più', 'Su più piani']],
+  ['ascensore', 'Ascensore', ['Sì', 'No']],
+  ['tiro', 'Tiro al piano', ['Non serve', 'Serve, con le scale', 'Serve gru o montacarichi', 'Da valutare']],
+  ['parcheggio', 'Parcheggio', ['Comodo, davanti al cantiere', 'Vicino', 'Difficile', 'ZTL o serve permesso']],
+  ['materialeDove', 'Il materiale', ['È già in cantiere', 'Arriva con il rivenditore', 'Da ritirare in magazzino']],
+  ['smaltimento', 'Smaltimento vecchi serramenti', ['Sì', 'No']],
+  ['orari', 'Orari o vincoli di accesso', 'testo'],
+];
+const TIPI_MAT = POSIZIONI['verbale-collaudo'].campi.prod1_tipo.opz;
+function schedaTesto(p) {
+  const s = p.scheda || {};
+  const mat = (s.materiale || []).filter(r => r.tipo || r.qta).map(r => `${n2(r.qta) || ''} ${r.tipo || ''}${r.note ? ' (' + r.note + ')' : ''}`.trim());
+  return [
+    p.cliente && `Cliente finale: ${p.cliente}`, p.telefono && `Tel. ${p.telefono}`,
+    ...SCHEDA.filter(([k]) => s[k]).map(([k, l]) => `${l}: ${s[k]}`),
+    mat.length && `Materiale: ${mat.join(', ')}`, s.misure && `Misure e dettagli: ${s.misure}`,
+    s.descrizione && `Lavoro: ${s.descrizione}`, s.note && `Note: ${s.note}`,
+  ].filter(Boolean).join('\n');
+}
+const rigaMat = (r = {}) => `<div class="matr g3"><select name="pm_tipo" aria-label="Tipologia"><option value="">Tipologia…</option>${TIPI_MAT.map(o => `<option ${o === r.tipo ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select><input name="pm_qta" type="number" inputmode="numeric" placeholder="Q.tà" value="${esc(r.qta || '')}" aria-label="Quantità"><input name="pm_note" placeholder="Note (misure, colore…)" value="${esc(r.note || '')}" aria-label="Note"></div>`;
+
+/* ---------- stato condiviso per chi gestisce ---------- */
+const ACC = { membri: [], richieste: [], pren: [], t: 0, ok: null, err: '' };
+async function caricaAccessi(forza) {
+  if (store.st.auth !== 'in' || !GESTORE() || store.st.mode === 'demo') return;
+  if (!forza && Date.now() - ACC.t < 30000) return;
+  ACC.t = Date.now();
+  try {
+    const [m, r, p] = await Promise.all([
+      store.tabella('membri').select('*').order('creato'),
+      store.tabella('richieste_accesso').select('*').eq('stato', 'nuova').order('creato'),
+      store.tabella('prenotazioni').select('*').gte('data_fine', piuGiorni(TODAY, -60)).order('data'),
+    ]);
+    for (const x of [m, r, p]) if (x.error) throw x.error;
+    ACC.membri = m.data; ACC.richieste = r.data; ACC.pren = p.data; ACC.ok = true; ACC.err = '';
+  } catch (e) { console.warn(e); ACC.ok = false; ACC.err = /relation|does not exist|schema cache|not find/i.test(e.message || '') ? 'manca' : 'rete'; }
+  render();
+}
+store.onAccessi = () => caricaAccessi(true);
+const dipendenti = () => ACC.membri.filter(m => m.ruolo === 'dipendente' && m.stato === 'attivo');
+const nomeMembro = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.nome || m.email) : 'Dipendente'; };
+const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length;
+
+/** Avviso in cima al calendario quando ci sono richieste da guardare. */
+function avvisoAccessi() {
+  const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length;
+  if (!r && !p) return '';
+  return `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} dei rivenditori da confermare`, r && `<b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>`;
+}
+
+/* ---------- squadra sui lavori ---------- */
+function campoSquadra(x = {}) {
+  const dip = dipendenti(); const sc = new Set(x.assegnati || []);
+  const vecchi = [...sc].filter(id => !dip.some(d => d.user_id === id));
+  if (!dip.length && !vecchi.length) return '';
+  return `<div class="fieldset"><span class="fs-t">Squadra</span>
+    <div class="squadra">${[...dip.map(d => [d.user_id, d.nome || d.email]), ...vecchi.map(id => [id, nomeMembro(id)])].map(([id, n]) => `<label class="chipcheck"><input type="checkbox" name="squadra" value="${esc(id)}" ${sc.has(id) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('')}</div>
+    <div class="small muted">I dipendenti scelti vedono questo lavoro nel loro calendario (senza prezzi).</div>
+    ${rapportiSquadra(x)}</div>`;
+}
+function rapportiSquadra(x) {
+  const R = Object.values(x.lavoroSquadra || {});
+  if (!R.length) return '';
+  return `<div class="stack">${R.map(r => `<div class="squadrar"><div class="row between"><b>${esc(r.nome || 'Dipendente')}</b>${r.fatto ? '<span class="chip ok">Fatto</span>' : '<span class="chip">In corso</span>'}</div>
+    <div class="small muted">${[n2(r.ore) ? num(r.ore, 2) + ' ore' : '', r.aggiornato ? 'aggiornato ' + new Date(r.aggiornato).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''].filter(Boolean).join(' · ')}</div>
+    ${r.note ? `<div class="small">${esc(r.note)}</div>` : ''}
+    ${(r.foto || []).length ? `<div class="thumbs">${r.foto.map(f => `<a href="#" data-act="apriFile" data-arg="${esc(f)}"><img data-file="${esc(f)}" alt="Foto dal cantiere"></a>`).join('')}</div>` : ''}</div>`).join('')}</div>`;
+}
+/** Tiene i dati scritti dai dipendenti quando il titolare salva il lavoro. */
+function conSquadra(kind, id, d, fd) {
+  d.assegnati = fd.getAll('squadra').map(String);
+  const cur = id && S[kind].find(x => x.id === id);
+  if (cur?.lavoroSquadra) d.lavoroSquadra = cur.lavoroSquadra;
+  if (cur?.prenotazioneId) { d.prenotazioneId = cur.prenotazioneId; d.clienteFinale = cur.clienteFinale; }
+  return d;
+}
+
+/* ---------- pagina Accessi (titolare) ---------- */
+function rAccessi() {
+  const a = S.impostazioni?.accessi || {};
+  if (store.st.mode === 'demo') return `<h2>Accessi</h2><div class="empty">Gli accessi funzionano dopo il collegamento al database.</div>`;
+  if (ACC.ok === false && ACC.err === 'manca') return `<h2>Accessi</h2><div class="notice"><b>Manca un passaggio su Supabase.</b> Lancia lo script <code>accessi.sql</code> nel SQL Editor del progetto (te l'ho mandato in chat), poi riapri questa pagina.</div>`;
+  if (ACC.ok === null) { caricaAccessi(true); return `<h2>Accessi</h2><div class="empty">Caricamento…</div>`; }
+  const link = a.codice ? linkApp(a.codice) : '';
+  const rich = ACC.richieste;
+  const prenR = ACC.pren.filter(p => p.stato === 'richiesta');
+  const prenC = ACC.pren.filter(p => p.stato === 'confermata' && p.data_fine >= TODAY);
+  const perRuolo = RUOLI.map(([k, l]) => [k, l, ACC.membri.filter(m => m.ruolo === k)]);
+  return `<div class="row between"><h2>Accessi</h2><button class="btn primary" data-act="accNuovo" type="button">${svg('plus')} Persona</button></div>
+  ${ACC.ok === false ? `<div class="notice small">Non riesco a leggere gli accessi: controlla la rete.</div>` : ''}
+  <section class="panel stack"><b>Link per scaricare l'app e chiedere l'accesso</b>
+    ${link ? `<div class="small muted">Chi apre questo link può installare l'app e chiederti l'accesso. Entra solo chi approvi tu, con il ruolo che scegli.</div>
+      <div class="linkbox num small">${esc(link)}</div>
+      <div class="row"><button class="btn sm primary" data-act="accCondividi" type="button">Condividi link</button><button class="btn sm" data-act="accCopia" type="button">Copia</button><button class="btn sm" data-act="accLinkNuovo" type="button">Cambia link</button><button class="btn sm" data-act="accChiudi" type="button">Chiudi richieste</button></div>`
+    : `<div class="small muted">Crea un link da mandare a rivenditori, dipendenti e soci: aprendolo possono installare l'app e chiederti l'accesso.</div><div class="row"><button class="btn sm primary" data-act="accApri" type="button">Crea il link</button></div>`}
+    <div class="g2">${F('Preavviso minimo per le prenotazioni', selN('accPre', [[1, '1 giorno'], [2, '2 giorni'], [3, '3 giorni'], [5, '5 giorni'], [7, '1 settimana'], [14, '2 settimane']], a.preavviso ?? 2))}${F('I rivenditori vedono', selN('accMesi', [[1, '1 mese avanti'], [2, '2 mesi avanti'], [3, '3 mesi avanti'], [4, '4 mesi avanti'], [6, '6 mesi avanti'], [12, '1 anno avanti']], a.mesi ?? 4))}</div>
+  </section>
+  ${prenR.length ? `<section class="stack"><h3>Prenotazioni da confermare</h3>${prenR.map(p => cardPren(p, true)).join('')}</section>` : ''}
+  ${rich.length ? `<section class="stack"><h3>Richieste di accesso</h3>${rich.map(r => `<div class="card"><div class="row between"><span class="t">${esc(r.nome)}${r.azienda ? ' · ' + esc(r.azienda) : ''}</span><span class="chip">${r.ruolo === 'altro' ? 'da decidere' : nomeRuolo(r.ruolo)}</span></div>
+      <div class="small muted">${esc(r.email)}${r.telefono ? ' · ' + esc(r.telefono) : ''} · ${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</div>
+      ${r.messaggio ? `<div class="small">${esc(r.messaggio)}</div>` : ''}
+      <div class="row"><button class="btn sm primary" data-act="accDai" data-id="${r.id}" type="button">Dai accesso</button><button class="btn sm" data-act="accRifiuta" data-id="${r.id}" type="button">Rifiuta</button></div></div>`).join('')}</section>` : ''}
+  <section class="stack"><h3>Persone con accesso</h3>
+    ${perRuolo.map(([k, l, L]) => L.length ? `<div class="panel"><div class="fs-t">${L.length > 1 ? { titolare: 'Titolari', rivenditore: 'Rivenditori', dipendente: 'Dipendenti' }[k] : l}</div>${L.map(m => `<div class="list-line" role="button" tabindex="0" data-act="accMembro" data-id="${m.user_id}"><div><b>${esc(m.nome || m.email)}</b><div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div></div><span class="chip ${m.stato === 'attivo' ? 'ok' : 'bad'}">${m.stato === 'attivo' ? (m.cambio_password ? 'primo accesso' : 'attivo') : 'sospeso'}</span></div>`).join('')}</div>` : '').join('') || `<div class="empty small">Ancora nessuno. Manda il link o tocca <b>+ Persona</b>.</div>`}
+  </section>
+  ${prenC.length ? `<section class="stack"><h3>Prenotazioni confermate</h3>${prenC.map(p => cardPren(p, false)).join('')}</section>` : ''}`;
+}
+function cardPren(p, azioni) {
+  const r = ACC.membri.find(m => m.user_id === p.rivenditore);
+  const giorni = p.data_fine > p.data ? `dal ${fmtD(p.data, { day: 'numeric', month: 'short' })} al ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'long', day: 'numeric', month: 'long' });
+  return `<div class="card"><div class="row between"><span class="t">${esc(r?.azienda || r?.nome || 'Rivenditore')}</span><span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></div>
+    <div class="small"><b>${giorni}</b> · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
+    <details class="small"><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>
+    ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.lavoro_id ? `<button class="linkbtn small" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}</div>`;
+}
+const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
+function sheetDaiAccesso(r = {}) {
+  openSheet(r.id ? 'Dai accesso' : 'Nuova persona', `
+    <div class="g2">${F('Nome e cognome', inp('anome', r.nome, 'text', 'required'))}${F('Azienda', inp('aazienda', r.azienda))}</div>
+    <div class="g2">${F('Email (per accedere)', inp('aemail', r.email, 'email', 'required'))}${F('Telefono', inp('atel', r.telefono, 'tel'))}</div>
+    <div class="fieldset"><span class="fs-t">Che accesso gli dai</span>${RUOLI.map(([k, l, d]) => `<label class="radiorow"><input type="radio" name="aruolo" value="${k}" ${k === (['rivenditore', 'dipendente'].includes(r.ruolo) ? r.ruolo : 'rivenditore') ? 'checked' : ''}><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
+    ${F('Password provvisoria', inp('apw', pwProvvisoria(), 'text', 'required minlength="8" autocomplete="off"'))}
+    <div class="small muted">Al primo accesso gli chiede di sceglierne una sua. Dopo il salvataggio ti preparo il messaggio con email e password da mandargli.</div>`,
+  async fd => {
+    const email = String(fd.get('aemail')).trim().toLowerCase(), pw = String(fd.get('apw')).trim(), ruolo = fd.get('aruolo');
+    if (pw.length < 8) throw Object.assign(new Error('pw'), { userMsg: 'La password provvisoria deve avere almeno 8 caratteri' });
+    const acc = await store.creaAccount(email, pw);
+    await store.rpc('aggiungi_membro', { email, ruolo, nome: String(fd.get('anome')).trim(), azienda: String(fd.get('aazienda')).trim(), telefono: String(fd.get('atel')).trim(), provvisoria: !acc.esistente, richiesta: r.id || null });
+    await caricaAccessi(true);
+    setTimeout(() => sheetCredenziali({ nome: String(fd.get('anome')).trim(), email, pw: acc.esistente ? '' : pw, ruolo, tel: String(fd.get('atel')).trim(), conferma: acc.conferma }), 50);
+  }, { saveLabel: 'Crea accesso' });
+}
+function sheetCredenziali(c) {
+  const t = [`Ciao ${c.nome.split(' ')[0]}, ti ho dato l'accesso al Diario di Posa di ${AZ().ragioneSociale || 'Cassero Installazioni'} come ${nomeRuolo(c.ruolo).toLowerCase()}.`, '',
+    `1. Apri: ${linkApp('')}`, `   Su iPhone: Condividi › Aggiungi alla schermata Home, così l'hai come app.`,
+    c.conferma ? `2. Ti arriva un'email per confermare l'indirizzo: apri il link che contiene.` : '',
+    `${c.conferma ? '3' : '2'}. Accedi con:`, `   Email: ${c.email}`, c.pw ? `   Password provvisoria: ${c.pw}` : `   la password che usi già con questa email`,
+    c.pw ? `Al primo accesso ti chiede di sceglierne una tua. Poi resti collegato.` : ''].filter(x => x !== '').join('\n');
+  openSheet('Accesso creato', `<div class="notice small">${c.pw ? 'Manda questo messaggio alla persona: contiene la password provvisoria.' : 'Questa email aveva già un account: entra con la password che usa già.'}</div>
+    <pre class="cred" id="credTxt">${esc(t)}</pre>
+    <div class="row">${navigator.share ? `<button type="button" class="btn primary" data-act="credShare">Invia…</button>` : ''}${c.tel ? `<a class="btn" href="https://wa.me/${telWa(c.tel)}?text=${encodeURIComponent(t)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}<a class="btn" href="mailto:${esc(c.email)}?subject=${encodeURIComponent('Accesso al Diario di Posa')}&body=${encodeURIComponent(t)}">Email</a><button type="button" class="btn" data-act="credCopia">Copia</button></div>`, null);
+}
+function sheetMembro(m) {
+  openSheet(m.nome || m.email, `
+    <div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div>
+    <div class="fieldset"><span class="fs-t">Accesso</span>${RUOLI.map(([k, l, d]) => `<label class="radiorow"><input type="radio" name="mruolo" value="${k}" ${k === m.ruolo ? 'checked' : ''}><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
+    ${tog('mattivo', 'Accesso attivo', m.stato === 'attivo', 'spento: non vede più niente finché non lo riattivi')}
+    <div class="g2">${F('Nome', inp('mnome2', m.nome))}${F('Telefono', inp('mtel2', m.telefono, 'tel'))}</div>`,
+  async fd => {
+    const { error } = await store.tabella('membri').update({ ruolo: fd.get('mruolo'), stato: fd.get('mattivo') ? 'attivo' : 'sospeso', nome: String(fd.get('mnome2')).trim(), telefono: String(fd.get('mtel2')).trim() }).eq('user_id', m.user_id);
+    if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a salvare' });
+    toast('Accesso aggiornato'); caricaAccessi(true);
+  }, { del: async () => { const { error } = await store.tabella('membri').delete().eq('user_id', m.user_id); if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a togliere l\'accesso' }); toast('Accesso tolto'); caricaAccessi(true); } });
+}
+async function confermaPren(p) {
+  const r = ACC.membri.find(m => m.user_id === p.rivenditore) || {};
+  const chi = r.azienda || r.nome || 'Rivenditore';
+  const s = p.scheda || {};
+  const testo = schedaTesto(p);
+  const mat = (s.materiale || []).filter(x => x.tipo || x.qta).map(x => `${n2(x.qta) || ''} ${x.tipo || ''}`.trim()).join(', ');
+  const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', amm: 'da_cons' };
+  base.clienteId = assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
+  let kind, d;
+  if (p.tipo === 'posa') { kind = 'lavori'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: 'pezzo', righe: [], installato: mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · ') }; }
+  else { kind = 'interventi'; d = { ...base, data: TODAY, dataProg: p.data, stato: 'programmato', urgenza: 'normale', descrizione: `${p.tipo === 'sopralluogo' ? 'SOPRALLUOGO\n' : ''}${testo}` }; }
+  const id = store.put(kind, null, d);
+  const { error } = await store.tabella('prenotazioni').update({ stato: 'confermata', lavoro_id: id, aggiornato: new Date().toISOString() }).eq('id', p.id);
+  if (error) { store.drop(kind, id); throw Object.assign(error, { userMsg: 'Non sono riuscito a confermare, riprova' }); }
+  toast(`Confermata: ${p.tipo === 'posa' ? 'posa' : 'intervento'} in calendario`);
+  await caricaAccessi(true);
+  return { kind, id };
+}
+
+/* ---------- vista RIVENDITORE ---------- */
+const RIV = { mese: TODAY.slice(0, 7), occ: new Set(), mesiCaricati: new Set(), mie: [], da: '', a: '', carico: false, err: '' };
+async function caricaRiv(forza) {
+  const A = store.st.accesso;
+  if (forza) { RIV.mesiCaricati.clear(); RIV.occ.clear(); }
+  try {
+    const da = RIV.mese + '-01', a = iso(new Date(+RIV.mese.slice(0, 4), +RIV.mese.slice(5, 7) + 1, 0));
+    if (!RIV.mesiCaricati.has(RIV.mese)) {
+      const occ = await store.rpc('disponibilita', { da, a: piuGiorni(a, 7) });
+      (occ || []).forEach(g => RIV.occ.add(String(g).slice(0, 10)));
+      RIV.mesiCaricati.add(RIV.mese);
+    }
+    const { data, error } = await store.tabella('prenotazioni').select('*').order('data', { ascending: false }).limit(60);
+    if (error) throw error;
+    RIV.mie = data; RIV.err = '';
+  } catch (e) { console.warn(e); RIV.err = e.userMsg || 'Non riesco a leggere il calendario: controlla la rete.'; }
+  RIV.carico = true; render(); void A;
+}
+function statoGiorno(k) {
+  const A = store.st.accesso, dow = pd(k).getDay();
+  const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
+  if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
+  if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
+  if (RIV.occ.has(k)) return ['occ', 'Occupato'];
+  if (k < piuGiorni(TODAY, A.preavviso ?? 2)) return ['no', k < TODAY ? '' : 'Preavviso troppo breve'];
+  const max = new Date(pd(TODAY)); max.setMonth(max.getMonth() + (A.mesi ?? 4));
+  if (k > iso(max)) return ['no', 'Non ancora prenotabile'];
+  return ['lib', 'Libero'];
+}
+function rRivenditore() {
+  const A = store.st.accesso;
+  if (!RIV.carico) { caricaRiv(); return `<div class="empty">Caricamento del calendario…</div>`; }
+  const [y, m] = RIV.mese.split('-').map(Number);
+  const first = new Date(y, m - 1, 1), off = (first.getDay() + 6) % 7, dim = new Date(y, m, 0).getDate();
+  let cells = ['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(d => `<div class="dow">${d}</div>`).join('');
+  for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
+  for (let d = 1; d <= dim; d++) {
+    const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l] = statoGiorno(k);
+    const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
+    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl">${s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
+  }
+  const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
+  const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
+  const vecchie = RIV.mie.filter(p => !attive.includes(p)).slice(0, 10);
+  return `<div class="rivhead"><div><div class="small muted">Calendario di</div><h2>${esc(A.installatore || 'Cassero Installazioni')}</h2></div>${A.telefonoInstallatore ? `<a class="btn sm" href="tel:${esc(A.telefonoInstallatore)}">Chiama</a>` : ''}</div>
+  <div class="small muted">Ciao ${esc(A.azienda || A.nome || '')}: le giornate <b>libere</b> si possono prenotare. Tocca il primo giorno e, se ti servono più giorni, l'ultimo. Ogni prenotazione la confermo io.</div>
+  ${RIV.err ? `<div class="notice small">${esc(RIV.err)}</div>` : ''}
+  <section class="stack">
+    <div class="cal-head"><button class="iconbtn" data-act="rivMese" data-arg="-1" aria-label="Mese precedente" type="button" ${RIV.mese <= TODAY.slice(0, 7) ? 'disabled' : ''}>${svg('l')}</button><h2>${monthName(RIV.mese)}</h2><button class="iconbtn" data-act="rivMese" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
+    <div class="cal rivcal">${cells}</div>
+    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
+    ${RIV.da ? `<div class="selbar"><div><b>${RIV.a && RIV.a !== RIV.da ? `Dal ${fmtD(RIV.da, { day: 'numeric', month: 'short' })} al ${fmtD(RIV.a, { day: 'numeric', month: 'short' })}` : fmtD(RIV.da, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div class="small">${lavorative} ${lavorative === 1 ? 'giornata' : 'giornate'} di lavoro${RIV.a ? '' : ' · tocca un altro giorno per prenderne di più'}</div></div><div class="row"><button class="btn sm" data-act="rivAnnullaSel" type="button">Annulla</button><button class="btn sm primary" data-act="rivPrenota" type="button">Prenota</button></div></div>` : ''}
+  </section>
+  <section class="stack"><h3>Le tue prenotazioni</h3>
+    ${attive.map(cardMiaPren).join('') || `<div class="empty small">Nessuna prenotazione in corso.</div>`}
+    ${vecchie.length ? `<details><summary class="small muted">Precedenti e annullate</summary><div class="stack">${vecchie.map(cardMiaPren).join('')}</div></details>` : ''}
+  </section>
+  <div class="row between small muted"><span>${esc(store.st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`;
+}
+function giorniLavorativi(da, a) {
+  const g = store.st.accesso.giorni || [1, 2, 3, 4, 5], out = [];
+  for (let k = da; k <= a; k = piuGiorni(k, 1)) if (g.includes(pd(k).getDay()) && !festivi(+k.slice(0, 4)).has(k)) out.push(k);
+  return out;
+}
+function cardMiaPren(p) {
+  const st = { richiesta: ['warn', 'Da confermare'], confermata: ['ok', 'Confermata'], rifiutata: ['bad', 'Non disponibile'], annullata: ['', 'Annullata'] }[p.stato];
+  return `<div class="card"><div class="row between"><span class="t">${p.data_fine > p.data ? `${fmtD(p.data, { day: 'numeric', month: 'short' })} – ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'short', day: 'numeric', month: 'short' })}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+    <div class="small muted">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]} · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
+    ${p.risposta ? `<div class="small">Risposta: ${esc(p.risposta)}</div>` : ''}
+    ${p.stato === 'richiesta' ? `<button class="linkbtn small" data-act="rivAnnulla" data-id="${p.id}" type="button">Annulla la richiesta</button>` : ''}</div>`;
+}
+function sheetPrenota() {
+  const da = RIV.da, a = RIV.a || RIV.da;
+  openSheet('Prenota', `
+    <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · le giornate restano bloccate per te finché non confermo.</div>
+    ${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza'], ['sopralluogo', 'Sopralluogo / misure']], 'posa'))}
+    <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
+      <div class="g2">${F('Cliente finale', inp('pcliente', '', 'text', 'required'))}${F('Telefono cliente', inp('ptel', '', 'tel', 'required'))}</div>
+      ${F('Indirizzo del cantiere', inp('pind', '', 'text', 'required placeholder="Via, civico, comune"'))}
+      <div class="g2">${SCHEDA.slice(0, 3).map(([k, l, t]) => F(l, inp('ps_' + k, '', t === 'testo' ? 'text' : t))).join('')}</div>
+    </div>
+    <div class="fieldset"><span class="fs-t">Accesso al cantiere</span>
+      <div class="g2">${SCHEDA.slice(3, 9).map(([k, l, o]) => F(l, sel('ps_' + k, [['', '—'], ...o.map(x => [x, x])], ''))).join('')}</div>
+      ${F(SCHEDA[9][1], inp('ps_orari', '', 'text', 'placeholder="Es. dopo le 9, chiavi dal vicino, ZTL fino alle 10"'))}
+    </div>
+    <div class="fieldset"><span class="fs-t">Materiale da posare</span>
+      <div id="pmat" class="stack">${rigaMat()}${rigaMat()}</div>
+      <button type="button" class="btn sm" data-act="pmAdd">+ Riga</button>
+      ${F('Misure e dettagli', `<textarea id="f_pmisure" name="pmisure" rows="2" placeholder="Misure, colori, tipo di posa, controtelai…"></textarea>`)}
+    </div>
+    ${F('Lavoro da fare', `<textarea id="f_pdescr" name="pdescr" rows="3" placeholder="Cosa c'è da fare, cosa togliere, finiture…"></textarea>`)}
+    ${F('Note per l\'installatore', `<textarea id="f_pnote" name="pnote" rows="2"></textarea>`)}`,
+  async fd => {
+    const scheda = Object.fromEntries(SCHEDA.map(([k]) => [k, String(fd.get('ps_' + k) || '').trim()]).filter(([, v]) => v));
+    const mt = fd.getAll('pm_tipo'), mq = fd.getAll('pm_qta'), mn = fd.getAll('pm_note');
+    scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
+    scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim(); scheda.note = String(fd.get('pnote') || '').trim();
+    await store.rpc('prenota', { da, a, tipo: fd.get('ptipo'), cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
+    RIV.da = RIV.a = ''; toast('Prenotazione inviata: ti confermo appena possibile');
+    await caricaRiv(true);
+  }, { saveLabel: 'Invia prenotazione' });
+}
+
+/* ---------- vista DIPENDENTE ---------- */
+const DIP = { lavori: [], moduli: [], carico: false, err: '' };
+async function caricaDip() {
+  try {
+    const [l, m] = await Promise.all([store.rpc('miei_lavori', { da: piuGiorni(TODAY, -21), a: piuGiorni(TODAY, 180) }), store.rpc('miei_moduli')]);
+    DIP.lavori = l || []; DIP.moduli = m || []; DIP.err = '';
+  } catch (e) { console.warn(e); DIP.err = e.userMsg || 'Non riesco a leggere i lavori: controlla la rete.'; }
+  DIP.carico = true; render();
+}
+const fineLav = x => x.dataFine && x.dataFine > x.data ? x.dataFine : x.data;
+function rDipendente() {
+  const A = store.st.accesso;
+  if (!DIP.carico) { caricaDip(); return `<div class="empty">Caricamento dei tuoi lavori…</div>`; }
+  const L = DIP.lavori;
+  const oggiL = L.filter(x => x.data <= TODAY && fineLav(x) >= TODAY);
+  const pross = L.filter(x => x.data > TODAY);
+  const fatti = L.filter(x => fineLav(x) < TODAY).reverse();
+  return `<div class="rivhead"><div><div class="small muted">Ciao ${esc((A.nome || '').split(' ')[0])}</div><h2>I tuoi lavori</h2></div><button class="btn sm" data-act="dipAggiorna" type="button">Aggiorna</button></div>
+  ${DIP.err ? `<div class="notice small">${esc(DIP.err)}</div>` : ''}
+  <section class="stack"><h3>Oggi</h3>${oggiL.map(cardDip).join('') || '<div class="empty small">Oggi niente in calendario per te.</div>'}</section>
+  <section class="stack"><h3>Prossimi</h3>${pross.map(cardDip).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}</section>
+  ${fatti.length ? `<section class="stack"><h3>Ultimi giorni</h3>${fatti.slice(0, 15).map(cardDip).join('')}</section>` : ''}
+  <section class="stack"><h3>Moduli che hai compilato</h3>${DIP.moduli.map(m => `<div class="card" role="button" tabindex="0" data-act="dipMod" data-id="${esc(m.id)}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || '')} · ${fmtD(m.data)}</div></div>`).join('') || '<div class="empty small">Ancora nessuno: li compili dal lavoro, con il tasto Modulo.</div>'}</section>
+  <div class="row between small muted"><span>${esc(store.st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`;
+}
+function cardDip(x) {
+  const mio = x.mio || {};
+  const giorni = x.dataFine && x.dataFine > x.data ? `dal ${fmtD(x.data, { weekday: 'short', day: 'numeric', month: 'short' })} al ${fmtD(x.dataFine, { weekday: 'short', day: 'numeric', month: 'short' })}` : fmtD(x.data, { weekday: 'long', day: 'numeric', month: 'long' });
+  const voci = (x.voci || []).filter(v => v.descr);
+  const altri = (x.squadra || []).map(s => s.nome).filter(n => n && n !== store.st.accesso.nome);
+  return `<div class="card dipcard"><div class="row between"><span class="t">${x.kind === 'lavori' ? 'Posa' : 'Intervento'} · ${esc(x.cliente || '')}</span>${mio.fatto ? '<span class="chip ok">Fatto</span>' : x.urgente ? '<span class="chip bad">Urgente</span>' : ''}</div>
+    <div class="small"><b>${giorni}</b></div>
+    ${x.indirizzo ? `<div class="small">${svg('pin', 'i')} ${esc(x.indirizzo)}</div>` : ''}
+    ${x.telefono ? `<div class="small"><a href="tel:${esc(x.telefono)}">${esc(x.telefono)}</a></div>` : ''}
+    ${voci.length ? `<div class="small">${voci.map(v => `${num(v.qta)} ${esc(v.unita || '')} ${esc(v.descr)}`).join(' · ')}</div>` : x.installato ? `<div class="small">${esc(x.installato)}</div>` : ''}
+    ${x.descrizione ? `<div class="small prewrap">${esc(x.descrizione)}</div>` : ''}
+    ${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}
+    ${(x.materiali || []).length ? `<div class="small muted">Materiale: ${x.materiali.map(m => `${esc(m.nome)} ${num(m.qta)}`).join(', ')}</div>` : ''}
+    ${altri.length ? `<div class="small muted">Con: ${altri.map(esc).join(', ')}</div>` : ''}
+    ${mio.ore || mio.note ? `<div class="small muted">Tu: ${mio.ore ? num(mio.ore, 2) + ' ore' : ''}${mio.note ? ' · ' + esc(mio.note) : ''}</div>` : ''}
+    ${x.indirizzo ? bottoniNav(x.indirizzo) : ''}
+    <div class="row"><button class="btn sm primary" data-act="dipSegna" data-arg="${x.kind}" data-id="${esc(x.id)}" type="button">Ore e foto</button><button class="btn sm" data-act="dipModulo" data-arg="${x.kind}" data-id="${esc(x.id)}" type="button">Modulo</button></div></div>`;
+}
+let dipFoto = [];
+function sheetSegna(x) {
+  const mio = x.mio || {};
+  dipFoto = [...(mio.foto || [])];
+  const ore = mio.ore ?? oreGiornata(store.st.accesso.giornata && store.st.accesso.giornata.inizio ? store.st.accesso.giornata : IMP().giornata);
+  openSheet(`${x.cliente || 'Lavoro'}`, `
+    <div class="g2">${F('Ore lavorate', inp('dore', ore, 'number'))}<div class="f"><span>&nbsp;</span>${tog('dfatto', 'Lavoro finito', !!mio.fatto)}</div></div>
+    ${F('Note per il titolare', `<textarea id="f_dnote" name="dnote" rows="3" placeholder="Cosa hai fatto, cosa manca, problemi…">${esc(mio.note || '')}</textarea>`)}
+    <div class="fieldset"><span class="fs-t">Foto del cantiere</span><div class="thumbs" id="dipThumbs">${dipFoto.map(f => `<img data-file="${esc(f)}" alt="">`).join('')}</div>
+      <label class="btn sm">${svg('cam', 'i')} Aggiungi foto<input type="file" id="dipFotoIn" accept="image/*" multiple hidden></label></div>`,
+  async fd => {
+    await store.rpc('segna_lavoro', { k: x.kind, rid: x.id, dati: { ore: n2(fd.get('dore')), fatto: !!fd.get('dfatto'), note: String(fd.get('dnote') || '').trim(), foto: dipFoto } });
+    toast('Inviato al titolare'); caricaDip();
+  }, { saveLabel: 'Invia' });
+}
+async function aggiungiFotoDip(files) {
+  for (const f of files) {
+    try {
+      toast('Carico la foto…');
+      const blob = await rimpicciolisci(f);
+      const p = await store.uploadFile(blob, 'foto.jpg'); dipFoto.push(p);
+      $('#dipThumbs')?.insertAdjacentHTML('beforeend', `<img data-file="${esc(p)}" alt="">`);
+      hydrateFiles($('#dipThumbs'));
+    } catch (e) { toast(e.userMsg || 'Foto non caricata'); }
+  }
+  toast(`${files.length === 1 ? 'Foto pronta' : 'Foto pronte'}: tocca Invia`);
+}
+function rimpicciolisci(file) {
+  return new Promise(res => {
+    const im = new Image(); const u = URL.createObjectURL(file);
+    im.onload = () => { const s = Math.min(1, 1600 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = im.width * s; c.height = im.height * s; c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(u); c.toBlob(b => res(b || file), 'image/jpeg', 0.8); };
+    im.onerror = () => res(file); im.src = u;
+  });
+}
+
+/* ---------- senza accesso / primo accesso ---------- */
+function rSenzaAccesso() {
+  const sosp = store.st.ruolo === 'sospeso';
+  return `<div class="auth"><h2>${sosp ? 'Accesso sospeso' : 'Accesso in attesa'}</h2>
+    <div class="panel stack"><div>${sosp ? 'Il tuo accesso è stato sospeso. Se pensi sia un errore, chiama il titolare.' : `L'account <b>${esc(store.st.email)}</b> non ha ancora un accesso. Se hai già mandato la richiesta, aspetta la conferma: ti arriva un messaggio con le istruzioni.`}</div>
+    <div class="row"><button class="btn" data-act="accRicontrolla" type="button">Ricontrolla</button><button class="btn" data-act="logout" type="button">Esci</button></div></div></div>`;
+}
+function rCambioPw() {
+  return `<div class="auth"><h2>Scegli la tua password</h2>
+    <form class="panel" id="cambioPwForm"><div class="small muted">Stai usando una password provvisoria. Scegline una tua: la userai d'ora in poi su tutti i dispositivi.</div>
+      <label class="f"><span>Nuova password</span><input name="pw1" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label class="f"><span>Ripeti la password</span><input name="pw2" type="password" autocomplete="new-password" minlength="8" required></label>
+      ${UI.authErr ? `<div class="err">${esc(UI.authErr)}</div>` : ''}
+      <button class="btn primary" type="submit">Salva e continua</button></form></div>`;
+}
+function rRichiesta() {
+  const inst = !(window.navigator.standalone || matchMedia('(display-mode: standalone)').matches) && /iphone|ipad/i.test(navigator.userAgent);
+  return `<div class="auth">
+    <h2>Richiedi l'accesso</h2>
+    ${inst ? `<div class="notice small"><b>Per averla come app:</b> tocca <b>Condividi</b> in Safari › <b>Aggiungi alla schermata Home</b>.</div>` : ''}
+    <form class="panel" id="richiestaForm">
+      <div class="g2">${F('Nome e cognome', inp('rnome', '', 'text', 'required autocomplete="name"'))}${F('Azienda', inp('razienda', '', 'text', 'autocomplete="organization"'))}</div>
+      <div class="g2">${F('Email', inp('remail', '', 'email', 'required autocomplete="email"'))}${F('Telefono', inp('rtel', '', 'tel', 'autocomplete="tel"'))}</div>
+      ${F('Sei un…', sel('rruolo', [['rivenditore', 'Rivenditore'], ['dipendente', 'Dipendente / collaboratore'], ['altro', 'Altro']], 'rivenditore'))}
+      ${F('Messaggio (facoltativo)', `<textarea id="f_rmsg" name="rmsg" rows="2"></textarea>`)}
+      ${UI.authErr ? `<div class="err">${esc(UI.authErr)}</div>` : ''}${UI.authMsg ? `<div class="notice">${esc(UI.authMsg)}</div>` : ''}
+      <button class="btn primary" type="submit" id="richBtn">Invia richiesta</button>
+    </form>
+    <div class="row between small"><button class="linkbtn" data-act="authView" data-arg="login" type="button">Hai già email e password? Accedi</button></div>
+    <p class="small muted">Riceverai email e password provvisoria quando la richiesta viene accettata.</p></div>`;
+}
+
+document.addEventListener('submit', async e => {
+  if (e.target.id === 'richiestaForm') {
+    e.preventDefault(); const fd = new FormData(e.target); UI.authErr = ''; UI.authMsg = '';
+    const b = $('#richBtn'); b.disabled = true; b.textContent = 'Invio…';
+    try {
+      await store.rpc('richiedi_accesso', { codice: INVITO || null, nome: String(fd.get('rnome')).trim(), azienda: String(fd.get('razienda')).trim(), email: String(fd.get('remail')).trim(), telefono: String(fd.get('rtel')).trim(), ruolo: fd.get('rruolo'), messaggio: String(fd.get('rmsg') || '').trim() });
+      UI.authMsg = 'Richiesta inviata. Quando viene accettata ricevi email e password per entrare.'; e.target.reset();
+    } catch (err) { UI.authErr = err.userMsg || 'Richiesta non inviata, riprova.'; }
+    render(); return;
+  }
+  if (e.target.id === 'cambioPwForm') {
+    e.preventDefault(); const fd = new FormData(e.target); UI.authErr = '';
+    const p1 = String(fd.get('pw1')), p2 = String(fd.get('pw2'));
+    if (p1.length < 8) UI.authErr = 'Almeno 8 caratteri.'; else if (p1 !== p2) UI.authErr = 'Le due password non coincidono.';
+    if (UI.authErr) return render();
+    try { await store.setPassword(p1); await store.rpc('password_cambiata'); await store.leggiAccesso(); toast('Password salvata'); }
+    catch (err) { UI.authErr = err.userMsg || err.message || 'Non riuscito, riprova.'; }
+    render();
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'dipFotoIn') { const fs = [...(t.files || [])]; t.value = ''; aggiungiFotoDip(fs); }
+  if (t.id === 'f_accPre' || t.id === 'f_accMesi') salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), [t.id === 'f_accPre' ? 'preavviso' : 'mesi']: +t.value } });
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, arg = b.dataset.arg, id = b.dataset.id;
+  const imp = S.impostazioni?.accessi || {};
+  const nuovoCodice = () => [...crypto.getRandomValues(new Uint8Array(12))].map(x => x.toString(16).padStart(2, '0')).join('');
+  switch (a) {
+    case 'accApri': case 'accLinkNuovo': salvaImp({ accessi: { ...imp, codice: nuovoCodice() } }); toast(a === 'accApri' ? 'Link creato' : 'Link cambiato: il vecchio non funziona più'); render(); break;
+    case 'accChiudi': salvaImp({ accessi: { ...imp, codice: '' } }); toast('Richieste chiuse: chi ha già l\'accesso continua a entrare'); render(); break;
+    case 'accCopia': try { await navigator.clipboard.writeText(linkApp(imp.codice)); toast('Link copiato'); } catch { prompt('Copia il link', linkApp(imp.codice)); } break;
+    case 'accCondividi': { const u = linkApp(imp.codice); const t = `Ecco il link per il Diario di Posa di ${AZ().ragioneSociale || 'Cassero Installazioni'}: aprilo, aggiungilo alla schermata Home e chiedi l'accesso.`; try { if (navigator.share) await navigator.share({ title: 'Diario di Posa', text: t, url: u }); else { await navigator.clipboard.writeText(`${t}\n${u}`); toast('Messaggio copiato'); } } catch {} break; }
+    case 'accNuovo': sheetDaiAccesso({}); break;
+    case 'accDai': { const r = ACC.richieste.find(x => x.id === id); if (r) sheetDaiAccesso(r); break; }
+    case 'accRifiuta': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per rifiutare'; break; } const { error } = await store.tabella('richieste_accesso').update({ stato: 'rifiutata' }).eq('id', id); toast(error ? 'Non riuscito' : 'Richiesta rifiutata'); caricaAccessi(true); break; }
+    case 'accMembro': { const m = ACC.membri.find(x => x.user_id === id); if (m) sheetMembro(m); break; }
+    case 'credCopia': try { await navigator.clipboard.writeText($('#credTxt').textContent); toast('Messaggio copiato'); } catch { toast('Seleziona il testo e copialo'); } break;
+    case 'credShare': try { await navigator.share({ text: $('#credTxt').textContent }); } catch {} break;
+    case 'prenConferma': { const p = ACC.pren.find(x => x.id === id); if (!p) break; b.disabled = true; try { await confermaPren(p); } catch (err) { toast(err.userMsg || 'Non riuscito'); b.disabled = false; } break; }
+    case 'prenRifiuta': {
+      const p = ACC.pren.find(x => x.id === id); if (!p) break;
+      openSheet('Rifiuta la prenotazione', `${F('Motivo (lo vede il rivenditore)', inp('pmotivo', '', 'text', 'placeholder="Es. quel giorno non riesco, proponi un\'altra data"'))}`, async fd => {
+        const { error } = await store.tabella('prenotazioni').update({ stato: 'rifiutata', risposta: String(fd.get('pmotivo') || '').trim(), aggiornato: new Date().toISOString() }).eq('id', p.id);
+        if (error) throw Object.assign(error, { userMsg: 'Non riuscito' }); toast('Prenotazione rifiutata: le giornate tornano libere'); caricaAccessi(true);
+      }, { saveLabel: 'Rifiuta' }); break;
+    }
+    case 'prenApri': { const p = ACC.pren.find(x => x.id === id); const l = p && S.lavori.find(x => x.id === p.lavoro_id); const i = p && S.interventi.find(x => x.id === p.lavoro_id); if (l) sheetLav(l); else if (i) sheetInt(i); else toast('Il lavoro non c\'è più nel calendario'); break; }
+    case 'apriFile': e.preventDefault(); { const u = await store.fileUrl(arg); if (u) window.open(u, '_blank', 'noopener'); } break;
+    case 'accRicontrolla': await store.leggiAccesso(); render(); if (['nessuno', 'sospeso'].includes(store.st.ruolo)) toast('Ancora nessun accesso'); else store.refresh(); break;
+    // rivenditore
+    case 'rivMese': RIV.mese = shiftMonth(RIV.mese, +arg); RIV.carico = RIV.mesiCaricati.has(RIV.mese); render(); break;
+    case 'rivGiorno': {
+      const [s] = statoGiorno(arg);
+      if (RIV.da && !RIV.a && arg === RIV.da) { RIV.da = ''; render(); break; }
+      if (s !== 'lib') { if (s === 'occ') toast('Giornata già occupata'); else if (s === 'chiuso') toast('Giornata non lavorativa'); else if (s === 'mia') toast('Questa giornata è già tua'); else toast(statoGiorno(arg)[1] || 'Non prenotabile'); break; }
+      if (!RIV.da || RIV.a || arg < RIV.da) { RIV.da = arg; RIV.a = ''; render(); break; }
+      for (let k = piuGiorni(RIV.da, 1); k < arg; k = piuGiorni(k, 1)) { const [sk] = statoGiorno(k); if (sk === 'occ' || sk === 'mia') { toast('In mezzo c\'è una giornata occupata: scegli date vicine'); RIV.da = arg; RIV.a = ''; render(); return; } }
+      if (giorniLavorativi(RIV.da, arg).length > 11) { toast('Al massimo due settimane per prenotazione'); break; }
+      RIV.a = arg; render(); break;
+    }
+    case 'rivAnnullaSel': RIV.da = RIV.a = ''; render(); break;
+    case 'rivPrenota': if (RIV.da) sheetPrenota(); break;
+    case 'pmAdd': $('#pmat').insertAdjacentHTML('beforeend', rigaMat()); break;
+    case 'rivAnnulla': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per annullare'; break; } try { await store.rpc('annulla_prenotazione', { pid: id }); toast('Richiesta annullata'); caricaRiv(true); } catch (err) { toast(err.userMsg); } break; }
+    // dipendente
+    case 'dipAggiorna': DIP.carico = false; render(); break;
+    case 'dipSegna': { const x = DIP.lavori.find(l => l.id === id && l.kind === arg); if (x) sheetSegna(x); break; }
+    case 'dipModulo': { const x = DIP.lavori.find(l => l.id === id && l.kind === arg); if (!x) break; sheetScegliModello({ cliente: x.cliente, indirizzo: x.indirizzo, telefono: x.telefono, data: x.dataFine || x.data, dataLavoro: x.dataFine || x.data, descrizione: x.installato || x.descrizione, righe: (x.voci || []).map(v => ({ descr: v.descr, qta: v.qta, unita: v.unita })), ref: { kind: x.kind, id: x.id } }); break; }
+    case 'dipMod': { const m = DIP.moduli.find(x => x.id === id); if (m && ufficiale(m.modelloId)) sheetModuloU(m, false); break; }
+  }
+});
+
 
 /* ---------- magazzino ---------- */
 function moveStock(items, sign, withCost) {
@@ -89,11 +576,13 @@ function render() {
   TODAY = oggi();
   const st = store.st;
   const logged = st.auth === 'in' || st.auth === 'demo';
-  $('#tabsNav').hidden = !logged;
-  $('#menuBtn').hidden = !logged;
+  const pieno = logged && (st.auth === 'demo' || GESTORE());
+  $('#tabsNav').hidden = !pieno;
+  $('#menuBtn').hidden = !pieno;
+  document.body.dataset.ruolo = logged ? st.ruolo || '' : '';
   $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}</button>`).join('');
   const pend = store.pending();
-  $('#sync').innerHTML = st.mode === 'demo' ? '<span class="st off">Prova</span>'
+  $('#sync').innerHTML = logged && !pieno ? '' : st.mode === 'demo' ? '<span class="st off">Prova</span>'
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
     : st.syncing || pend ? '<span class="st busy">Sincronizzo</span>' : '<span class="st">Sincronizzato</span>';
   $('#matlist').innerHTML = S.magazzino.map(m => `<option value="${esc(m.nome)}"></option>`).join('');
@@ -102,10 +591,15 @@ function render() {
   if (st.auth === 'checking') { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
 
+  if (st.accesso?.cambio_password) { $('#main').innerHTML = rCambioPw(); return; }
+  if (st.ruolo === 'rivenditore') { $('#main').innerHTML = rRivenditore(); return; }
+  if (st.ruolo === 'dipendente') { $('#main').innerHTML = rDipendente(); hydrateFiles($('#main')); return; }
+  if (st.ruolo === 'nessuno' || st.ruolo === 'sospeso') { $('#main').innerHTML = rSenzaAccesso(); return; }
+  if (!GESTORE()) { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -118,6 +612,7 @@ async function hydrateFiles(root) {
 
 /* ---------- accesso ---------- */
 function rAuth() {
+  if (UI.authView === 'richiesta' && store.st.auth !== 'recovery') return rRichiesta();
   const v = store.st.auth === 'recovery' ? 'newpw' : UI.authView;
   const title = { login: 'Accedi', signup: 'Crea il tuo account', reset: 'Recupera la password', newpw: 'Scegli una nuova password' }[v];
   return `<div class="auth">
@@ -130,10 +625,10 @@ function rAuth() {
       <button class="btn primary" type="submit" id="authBtn">${{ login: 'Accedi', signup: 'Crea account', reset: 'Mandami il link', newpw: 'Salva password' }[v]}</button>
     </form>
     <div class="row between small">
-      ${v === 'login' ? `<button class="linkbtn" data-act="authView" data-arg="signup" type="button">Prima volta? Crea l'account</button><button class="linkbtn" data-act="authView" data-arg="reset" type="button">Password dimenticata</button>` : ''}
+      ${v === 'login' ? `<button class="linkbtn" data-act="authView" data-arg="richiesta" type="button">Non hai un accesso? Richiedilo</button><button class="linkbtn" data-act="authView" data-arg="reset" type="button">Password dimenticata</button>` : ''}
       ${v === 'signup' || v === 'reset' ? `<button class="linkbtn" data-act="authView" data-arg="login" type="button">Ho già un account: accedi</button>` : ''}
     </div>
-    <p class="small muted">I tuoi dati sono visibili solo a te, su tutti i dispositivi in cui accedi con questa email.</p>
+    <p class="small muted">Si entra solo con l'accesso dato dal titolare. Dopo il primo accesso resti collegato su questo dispositivo.</p>
   </div>`;
 }
 document.addEventListener('submit', async e => {
@@ -251,7 +746,7 @@ function rCal() {
   const di = INT.filter(i => i.dataProg === UI.day);
   const de = evDel(UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
-  return `${rTodo()}
+  return `${avvisoAccessi()}${rTodo()}
   ${empty ? `<div class="empty"><b>Il diario è vuoto.</b><span>Tocca un giorno e segna la prima posa, oppure carica alcuni dati di esempio per vedere come funziona. Gli esempi si cancellano con un tocco.</span><button class="btn" data-act="seed" type="button">Carica dati di esempio</button></div>` : ''}
   <section class="stack">
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
@@ -446,7 +941,7 @@ function sheetScegliModello(ctx = {}) {
     ${ctx.cliente ? `<div class="small muted">Per <b>${esc(ctx.cliente)}</b>${ctx.indirizzo ? ' · ' + esc(ctx.indirizzo) : ''}: i dati si compilano da soli.</div>` : ''}
     <div class="stack">${modelli().map(m => `<button type="button" class="modchoice" data-act="modNuovo" data-arg="${esc(m.id)}">${svg('clip2')}<span><b>${esc(m.nome)}</b><small>${esc(m.descr || `${(m.campi || []).length} campi`)}</small></span><span class="go">›</span></button>`).join('')}</div>
     <div class="small muted">I quattro moduli Cassero escono nel PDF identici agli originali, con i dati scritti nelle caselle.</div>
-    <button type="button" class="btn sm" data-act="modelloNuovo">+ Crea un modello tuo</button>`, null);
+    ${GESTORE() ? '<button type="button" class="btn sm" data-act="modelloNuovo">+ Crea un modello tuo</button>' : ''}`, null);
 }
 let modEdit = null;
 function campoModulo(c, val) {
@@ -551,7 +1046,7 @@ function rModuli() {
   const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data)));
   return `<div class="row between"><h2>Moduli</h2><button class="btn primary" data-act="modScegli" type="button">${svg('plus')} Nuovo</button></div>
   <section class="stack"><h3>Compilati</h3>
-    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo e consenso foto e video: si compilano qui, si firmano sullo schermo e diventano il tuo PDF.</span></div>`}
+    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}${m.autoreNome ? ' · compilato da ' + esc(m.autoreNome) : ''}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo e consenso foto e video: si compilano qui, si firmano sullo schermo e diventano il tuo PDF.</span></div>`}
   </section>
   <section class="stack"><div class="row between"><h3>Modelli</h3><button class="btn sm" data-act="modelloNuovo" type="button">${svg('plus')} Modello</button></div>
     <div class="panel">${modelli().map(m => `<div class="list-line"><div><b>${esc(m.nome)}</b><div class="small muted">${m.ufficiale ? 'Modulo Cassero · grafica originale' : `${(m.campi || []).length} campi · creato da te`}</div></div>${m.ufficiale ? `<button class="btn sm" data-act="modNuovo" data-arg="${esc(m.id)}" type="button">Compila</button>` : `<button class="btn sm" data-act="editModello" data-arg="${esc(m.id)}" type="button">Modifica</button>`}</div>`).join('')}</div>
@@ -640,7 +1135,7 @@ function sheetModuloU(mod, isNew) {
   openSheet(m.nome, `<div class="small muted">${esc(m.descr)} · il PDF esce con la grafica originale.</div>${corpo}
     ${m.id === 'rapporto-assistenza' ? '<div class="small muted">Tempo, manodopera (35 €/h oltre la prima ora, a mezz\'ore), trasferta e totale si calcolano da soli; se correggi un importo a mano, resta il tuo.</div>' : ''}`,
   async fd => { salvaModuloU(fd); toast('Modulo salvato'); }, {
-    del: isNew ? null : async () => { store.drop('moduli', mod.id); toast('Modulo eliminato'); },
+    del: isNew || !GESTORE() ? null : async () => { store.drop('moduli', mod.id); toast('Modulo eliminato'); },
     extra: `<button type="button" class="btn dark" data-act="modPdf">PDF</button>`,
   });
   aggiornaCliInfoModulo();
@@ -662,9 +1157,15 @@ function salvaModuloU(fd) {
   const valori = leggiValoriU(fd);
   const cliente = String(fd.get('mcliente') || '').trim();
   const firme = campiUfficiali(m).filter(c => c.t === 'firma');
-  const d = { ...stripId(mod), modelloId: m.id, ufficiale: true, titolo: m.nome, valori, toccati, cliente, clienteId: cliente ? assicuraCliente(cliente) : '',
+  const dip = !GESTORE() && store.st.mode !== 'demo';
+  const d = { ...stripId(mod), modelloId: m.id, ufficiale: true, titolo: m.nome, valori, toccati, cliente, clienteId: cliente && !dip ? assicuraCliente(cliente) : '',
     stato: firme.every(f => valori[f.n]) ? 'firmato' : 'bozza', data: valori.data_intervento || valori.data_collaudo || valori.data || mod.data || TODAY };
-  const id = store.put('moduli', isNew ? null : mod.id, d);
+  let id;
+  if (dip) {
+    id = mod.id || (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36));
+    delete d.autore; delete d.autoreNome;
+    store.rpc('salva_modulo_dipendente', { mid: id, dati: d }).then(() => caricaDip()).catch(err => toast(err.userMsg || 'Modulo non salvato: controlla la rete'));
+  } else id = store.put('moduli', isNew ? null : mod.id, d);
   modEdit = { ...modEdit, mod: { id, ...d }, isNew: false };
   return modEdit.mod;
 }
@@ -813,7 +1314,8 @@ function menuHtml() {
   <div class="dr-sec">Sezioni</div>
   ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
   ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
-  ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'verbali, rilievi, dichiarazioni con firma', UI.tab === 'moduli')}
+  ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${daFareAccessi() ? ` <span class="badge">${daFareAccessi()}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
   ${item('setGiornata', '', 'clock', 'Giornata e orari', `${G.inizio}–${G.fine} · ${descrGiorni(G.giorni)} · ${num(oreGiornata(G))} ore`)}
@@ -1206,6 +1708,8 @@ function sheetLav(l, prefill) {
     <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
     <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
+    ${l.clienteFinale ? `<div class="small muted">Cliente finale: <b>${esc(l.clienteFinale)}</b></div>` : ''}
+    ${campoSquadra(l)}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
     <div class="g3">
       ${F('Ore impiegate', inp('ore', l.ore, 'number'))}
@@ -1252,6 +1756,7 @@ function sheetLav(l, prefill) {
     if (!isNew) moveStock(l.materiali, +1);
     moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente);
+    conSquadra('lavori', isNew ? null : l.id, d, fd);
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (isNew && d.preventivoId) {
       const p = S.preventivi.find(x => x.id === d.preventivoId);
@@ -1290,6 +1795,7 @@ function sheetInt(i, day) {
     <div class="cliline small" id="cliInfo"></div>
     ${F('Telefono', inp('telefono', i.telefono, 'tel'))}
     ${F('Indirizzo', inp('indirizzo', i.indirizzo))}
+    ${campoSquadra(i)}
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
@@ -1308,6 +1814,7 @@ function sheetInt(i, day) {
     if (!isNew) moveStock(i.materiali, +1);
     moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
+    conSquadra('interventi', isNew ? null : i.id, d, fd);
     store.put('interventi', isNew ? null : i.id, d);
     toast('Intervento salvato');
   }, {
@@ -2055,7 +2562,7 @@ document.addEventListener('click', async e => {
         const saved = salvaModuloU(new FormData(form)); const m = modEdit.uff;
         let bytes; try { bytes = creaModuloUfficiale({ mod: saved, modello: m, sfondo: await sfondoModulo(m.id) }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
         const nome = `${m.nome} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
-        mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || saved, false)); break;
+        mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || DIP.moduli.find(x => x.id === saved.id) || saved, false)); break;
       }
       const saved = salvaModulo(new FormData($('#sheetForm')));
       let bytes; try { bytes = creaModulo({ mod: { ...saved, clienteDati: trovaCliente(saved.cliente) || {} }, azienda: AZ(), immagini: IMG }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
@@ -2124,7 +2631,7 @@ document.addEventListener('click', async e => {
     case 'unseed': unseed(); render(); break;
     case 'csv': csv(arg); break;
     case 'pushOn': case 'pushTest': pushOn(); break;
-    case 'logout': await store.logout(); UI.tab = 'cal'; render(); break;
+    case 'logout': await store.logout(); UI.tab = 'cal'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '' }); RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
   }
 });
 document.addEventListener('keydown', e => {
@@ -2181,4 +2688,5 @@ document.addEventListener('input', e => {
 caricaImmagini();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn(e));
 render();
+
 store.init().then(render);

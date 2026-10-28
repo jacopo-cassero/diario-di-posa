@@ -12,11 +12,11 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now()
 
 export function createStore(cfg, onChange) {
   const cloud = !!(cfg && cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase);
-  let sb = null, uid = null, channel = null;
+  let sb = null, uid = null, owner = null, channel = null;
   const recs = new Map();          // "kind/id" -> {kind, id, data}
   let outbox = [];                 // modifiche non ancora inviate
   const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], modelli: [], moduli: [], furgone: {}, listino: null, azienda: null, impostazioni: null };
-  const st = { mode: cloud ? 'cloud' : 'demo', auth: cloud ? 'checking' : 'demo', email: '', online: navigator.onLine, syncing: false, lastSync: null, error: '' };
+  const st = { ruolo: cloud ? '' : 'proprietario', accesso: {}, mode: cloud ? 'cloud' : 'demo', auth: cloud ? 'checking' : 'demo', email: '', online: navigator.onLine, syncing: false, lastSync: null, error: '' };
   const urlCache = new Map();
 
   const key = n => `ddp:${n}:${uid || 'demo'}`;
@@ -40,14 +40,17 @@ export function createStore(cfg, onChange) {
     rebuild();
   }
 
+  const gestore = () => st.ruolo === 'proprietario' || st.ruolo === 'titolare';
   async function refresh() {
     if (!sb || !uid || !navigator.onLine) return;
+    await leggiAccesso();
+    if (!gestore()) { onChange && onChange(); return; }
     st.syncing = true; onChange && onChange();
     try {
       await flush();
       const rows = [];
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await sb.from('records').select('kind,id,data,deleted').eq('user_id', uid).range(from, from + 999);
+        const { data, error } = await sb.from('records').select('kind,id,data,deleted').eq('user_id', owner).range(from, from + 999);
         if (error) throw error;
         rows.push(...data);
         if (data.length < 1000) break;
@@ -72,10 +75,10 @@ export function createStore(cfg, onChange) {
   function flush() {
     if (flushing) return flushing;
     flushing = (async () => {
-      while (sb && uid && navigator.onLine && outbox.length) {
+      while (sb && uid && owner && gestore() && navigator.onLine && outbox.length) {
         const op = outbox[0];
         const { error } = await sb.from('records').upsert({
-          user_id: uid, kind: op.kind, id: op.id, data: op.data || {}, deleted: !!op.deleted, updated_at: new Date().toISOString(),
+          user_id: owner, kind: op.kind, id: op.id, data: op.data || {}, deleted: !!op.deleted, updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id,kind,id' });
         if (error) { st.error = 'Alcune modifiche non sono ancora state inviate.'; console.warn(error); break; }
         outbox.shift(); persist();
@@ -86,23 +89,47 @@ export function createStore(cfg, onChange) {
   }
 
   function applyRemote(row) {
-    if (!row || row.user_id !== uid) return;
+    if (!row || row.user_id !== owner) return;
     const k = row.kind + '/' + row.id;
     if (outbox.some(o => o.kind + '/' + o.id === k)) return;
     if (row.deleted) recs.delete(k); else recs.set(k, { kind: row.kind, id: row.id, data: row.data });
     changed();
   }
 
-  async function startSession(session) {
-    uid = session.user.id; st.email = session.user.email || ''; st.auth = 'in';
-    loadLocal(); onChange && onChange();
-    refresh();
+  /** Chi è collegato: proprietario, titolare, rivenditore, dipendente (o nessun accesso). */
+  async function leggiAccesso() {
+    if (!sb || !uid) return;
+    if (navigator.onLine) {
+      const { data, error } = await sb.rpc('mio_accesso');
+      if (!error && data) { st.accesso = data; ls.set(`ddp:accesso:${uid}`, data); }
+      else if (error && /function|schema cache|does not exist/i.test(error.message || '')) { st.accesso = { ruolo: 'proprietario', titolare: uid, vecchio: true }; }
+    }
+    const prima = owner;
+    // senza rete al primo avvio: chi ha già dati su questo dispositivo è il proprietario
+    if (!st.accesso.ruolo && ls.get(`ddp:cache:${uid}`, []).length) st.accesso = { ruolo: 'proprietario', titolare: uid };
+    st.ruolo = st.accesso.ruolo || 'nessuno';
+    owner = st.accesso.titolare || uid;
+    if (gestore() && owner !== prima) ascolta();
+  }
+  function ascolta() {
     try {
       channel && sb.removeChannel(channel);
-      channel = sb.channel('records-' + uid)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'records', filter: `user_id=eq.${uid}` }, p => applyRemote(p.new && p.new.kind ? p.new : null))
+      channel = sb.channel('records-' + owner)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'records', filter: `user_id=eq.${owner}` }, p => applyRemote(p.new && p.new.kind ? p.new : null))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'prenotazioni' }, () => api.onAccessi && api.onAccessi())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'richieste_accesso' }, () => api.onAccessi && api.onAccessi())
         .subscribe();
     } catch (e) { console.warn(e); }
+  }
+  async function startSession(session) {
+    uid = session.user.id; st.email = session.user.email || ''; owner = null;
+    st.accesso = ls.get(`ddp:accesso:${uid}`, {}); st.ruolo = st.accesso.ruolo || '';
+    owner = st.accesso.titolare || null;
+    if (!st.ruolo) { st.auth = 'checking'; onChange && onChange(); await leggiAccesso(); }
+    st.auth = 'in';
+    loadLocal(); onChange && onChange();
+    if (owner && gestore()) ascolta();
+    refresh();
   }
 
   const api = {
@@ -114,7 +141,7 @@ export function createStore(cfg, onChange) {
       if (!cloud) { loadLocal(); onChange && onChange(); return; }
       sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
       sb.auth.onAuthStateChange((ev, session) => {
-        if (ev === 'SIGNED_OUT') { uid = null; st.auth = 'out'; recs.clear(); rebuild(); onChange && onChange(); }
+        if (ev === 'SIGNED_OUT') { uid = null; owner = null; st.ruolo = ''; st.accesso = {}; st.auth = 'out'; recs.clear(); rebuild(); onChange && onChange(); }
         else if (ev === 'PASSWORD_RECOVERY') { st.auth = 'recovery'; onChange && onChange(); }
         else if (session && session.user.id !== uid) startSession(session);
       });
@@ -141,6 +168,24 @@ export function createStore(cfg, onChange) {
       st.auth = 'in'; onChange && onChange();
     },
     async logout() { if (sb) await sb.auth.signOut(); },
+    leggiAccesso,
+    /** Chiamata a una funzione del database (accessi, prenotazioni, lavori dei dipendenti). */
+    async rpc(nome, args = {}) {
+      if (!sb) throw Object.assign(new Error('demo'), { userMsg: 'Serve il collegamento al database.' });
+      const { data, error } = await sb.rpc(nome, args);
+      if (error) throw Object.assign(new Error(error.message), { userMsg: /fetch|network/i.test(error.message || '') ? 'Serve la connessione: riprova.' : (error.message || 'Operazione non riuscita') });
+      return data;
+    },
+    tabella: nome => sb.from(nome),
+    /** Crea l'account di una nuova persona con una password provvisoria, senza scollegare chi lo crea. */
+    async creaAccount(email, password) {
+      const tmp = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'ddp-nuovo-account' } });
+      const { data, error } = await tmp.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+      if (error && !/registered|exists/i.test(error.message)) throw Object.assign(error, { userMsg: /password/i.test(error.message) ? 'Password provvisoria troppo debole: almeno 8 caratteri.' : error.message });
+      const esistente = !!error || !data.user || (Array.isArray(data.user.identities) && data.user.identities.length === 0);
+      return { esistente, conferma: !esistente && !data.session };
+    },
+    uid: () => uid, owner: () => owner,
     refresh,
 
     put(kind, id, data) {
@@ -169,7 +214,7 @@ export function createStore(cfg, onChange) {
         return id;
       }
       if (!navigator.onLine) throw Object.assign(new Error('offline'), { userMsg: 'Serve la connessione per caricare i file.' });
-      const path = `${uid}/${uuid()}.${ext}`;
+      const path = `${gestore() && owner ? owner : uid}/${uuid()}.${ext}`;
       const { error } = await sb.storage.from('file').upload(path, blob, { contentType: blob.type || 'application/octet-stream', upsert: false });
       if (error) throw Object.assign(error, { userMsg: /size|large/i.test(error.message) ? 'File troppo grande (massimo 50 MB).' : 'Caricamento non riuscito, riprova.' });
       return path;
@@ -192,7 +237,7 @@ export function createStore(cfg, onChange) {
     },
 
     /** Calendario in abbonamento: file .ics nella cartella privata, letto dall'iPhone tramite un link firmato. */
-    calPath: token => uid ? `${uid}/calendario-${token}.ics` : '',
+    calPath: token => owner ? `${owner}/calendario-${token}.ics` : '',
     async caricaCalendario(path, testo) {
       if (!sb || !uid || !navigator.onLine) return false;
       const { error } = await sb.storage.from('file').upload(path, new Blob([testo], { type: 'text/calendar' }), { contentType: 'text/calendar; charset=utf-8', upsert: true, cacheControl: '60' });
@@ -204,7 +249,7 @@ export function createStore(cfg, onChange) {
       if (error) throw error;
       return data.signedUrl;
     },
-    cloud: () => !!(sb && uid),
+    cloud: () => !!(sb && uid && owner),
 
     async savePush(sub) {
       if (!sb || !uid) throw new Error('Accedi prima di attivare le notifiche.');

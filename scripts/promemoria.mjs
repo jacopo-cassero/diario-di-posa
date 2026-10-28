@@ -72,6 +72,44 @@ async function segnaInviato(uid, log) {
 }
 
 let inviate = 0, errori = 0;
+async function manda(uid, payload) {
+  for (const s of subs.filter(x => x.user_id === uid)) {
+    const dove = /apple/.test(s.endpoint) ? 'dispositivo Apple' : 'dispositivo';
+    try { await webpush.sendNotification(s.subscription, payload, { TTL: 6 * 3600 }); inviate++; scrivi(`Notifica inviata a un ${dove}`); }
+    catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) { await del(`/push_subscriptions?endpoint=eq.${encodeURIComponent(s.endpoint)}`); scrivi(`Un ${dove} non è più registrato: rimosso`); }
+      else { errori++; scrivi(`Invio a un ${dove} non riuscito: ${e.statusCode || ''} ${String(e.body || e.message).slice(0, 200)}`); }
+    }
+  }
+}
+
+// Novità degli accessi: richieste di accesso e prenotazioni dei rivenditori (avviso subito, a qualsiasi ora).
+async function leggiSeEsiste(path) {
+  try { const r = await fetch(base + path, { headers }); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function segnaNotificato(tab, ids) {
+  if (!ids.length) return;
+  await fetch(`${base}/${tab}?id=in.(${ids.join(',')})`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ notificato: true }) }).catch(() => {});
+}
+const nuoveRich = await leggiSeEsiste('/richieste_accesso?notificato=eq.false&stato=eq.nuova&select=id,titolare,nome,azienda,ruolo');
+const nuovePren = await leggiSeEsiste('/prenotazioni?notificato=eq.false&stato=eq.richiesta&select=id,titolare,data,data_fine,tipo,cliente,rivenditore');
+const membri = (nuoveRich?.length || nuovePren?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
+const dataIt = s => new Date(s + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || [])].map(x => x.titolare))) {
+  const R = (nuoveRich || []).filter(x => x.titolare === tit), P = (nuovePren || []).filter(x => x.titolare === tit);
+  const righe = [
+    ...P.map(p => { const r = membri.find(m => m.user_id === p.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'}: ${p.tipo} ${p.data_fine > p.data ? `dal ${dataIt(p.data)} al ${dataIt(p.data_fine)}` : `il ${dataIt(p.data)}`}${p.cliente ? ' · ' + p.cliente : ''}`; }),
+    ...R.map(r => `• ${r.nome}${r.azienda ? ' (' + r.azienda + ')' : ''} chiede l'accesso${r.ruolo !== 'altro' ? ' come ' + r.ruolo : ''}`),
+  ];
+  const titolo = P.length ? `${P.length} ${P.length === 1 ? 'prenotazione da confermare' : 'prenotazioni da confermare'}` : `${R.length} ${R.length === 1 ? 'richiesta di accesso' : 'richieste di accesso'}`;
+  const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#accessi', tag: `accessi-${Date.now()}` });
+  // al proprietario e ai titolari attivi
+  for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);
+  await segnaNotificato('richieste_accesso', R.map(x => x.id));
+  await segnaNotificato('prenotazioni', P.map(x => x.id));
+  scrivi(`Accessi: ${R.length} richieste e ${P.length} prenotazioni segnalate`);
+}
+
 for (const uid of users) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
@@ -108,14 +146,7 @@ for (const uid of users) {
       url: momento === 'sera' ? './#cal' : './#cal',
       tag: `promemoria-${momento}-${today}`,
     });
-    for (const s of subs.filter(x => x.user_id === uid)) {
-      const dove = /apple/.test(s.endpoint) ? 'dispositivo Apple' : 'dispositivo';
-      try { await webpush.sendNotification(s.subscription, payload, { TTL: 6 * 3600 }); inviate++; scrivi(`Notifica inviata a un ${dove}`); }
-      catch (e) {
-        if (e.statusCode === 404 || e.statusCode === 410) { await del(`/push_subscriptions?endpoint=eq.${encodeURIComponent(s.endpoint)}`); scrivi(`Un ${dove} non è più registrato: rimosso`); }
-        else { errori++; scrivi(`Invio a un ${dove} non riuscito: ${e.statusCode || ''} ${String(e.body || e.message).slice(0, 200)}`); }
-      }
-    }
+    await manda(uid, payload);
   }
   if (!forza) await segnaInviato(uid, log);
 }
