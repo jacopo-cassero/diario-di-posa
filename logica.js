@@ -20,48 +20,102 @@ export const sum = (a, f) => a.reduce((s, x) => s + (+f(x) || 0), 0);
 export const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'materiale';
 export const eur = n => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(+n || 0);
 
+/** Impostazioni predefinite (salvate per utente, valgono su tutti i dispositivi). */
+export const IMPOSTAZIONI_BASE = {
+  notifiche: {
+    mattino: true, oraMattino: 7,
+    sera: true, oraSera: 19,
+    weekend: false,
+    furgone: true, furgoneGiorni: 30,
+    consuntivi: true, fatture: true, incassi: true,
+    preventivi: true, preventiviGiorni: 7,
+    materiale: true, urgenti: true,
+    programma: true, giornata: true,
+    scontrini: 'settimanale', scontriniGiorno: 5,
+  },
+  giornata: { inizio: '07:30', fine: '17:00', pausa: 60, giorni: [1, 2, 3, 4, 5], precompila: true },
+  analisi: { kpi: true, mensile: true, lavoro: true, voci: true, interventi: true, contabilita: true, spese: true, preventivi: true, clienti: true, trasferte: true, furgone: true, materiale: true, consumo: true },
+};
+/** Impostazioni dell'utente unite ai valori predefiniti. */
+export function impostazioni(S) {
+  const u = (S && S.impostazioni) || {};
+  return {
+    notifiche: { ...IMPOSTAZIONI_BASE.notifiche, ...(u.notifiche || {}) },
+    giornata: { ...IMPOSTAZIONI_BASE.giornata, ...(u.giornata || {}) },
+    analisi: { ...IMPOSTAZIONI_BASE.analisi, ...(u.analisi || {}) },
+  };
+}
+/** Ore di una giornata standard secondo l'orario impostato. */
+export function oreGiornata(g) {
+  const m = t => { const [h, mm] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
+  return Math.max(0, Math.round((m(g.fine) - m(g.inizio) - n2(g.pausa)) / 60 * 100) / 100);
+}
+const GIORNI_SETT = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
+
 /**
  * Elenco delle cose da fare.
- * S = { lavori, interventi, movimenti, magazzino, furgone }
+ * momento: 'app' (riquadro Da fare), 'mattino' (riepilogo), 'sera' (promemoria di fine giornata)
  * Ritorna [{lvl, txt, sub, act, arg}]
  */
-export function promemoria(S, today = oggi()) {
+export function promemoria(S, today = oggi(), momento = 'app') {
   const out = [], f = S.furgone || {};
-  for (const [k, lab] of SCAD) {
-    const d = f[k]; if (!d) continue;
-    const n = daysBetween(today, d);
-    if (n <= 30) out.push({ lvl: n < 0 ? 'bad' : n <= 7 ? 'warn' : 'in', txt: `${lab} furgone ${n < 0 ? `scaduta da ${-n} giorni` : n === 0 ? 'scade oggi' : `scade tra ${n} giorni`}`, sub: d.split('-').reverse().join('/'), act: 'tab', arg: 'van' });
+  const N = impostazioni(S).notifiche, G = impostazioni(S).giornata;
+  const sera = momento === 'sera';
+  // il riepilogo del mattino e il riquadro Da fare contengono le scadenze; la sera solo la giornata
+  if (!sera) {
+    if (N.furgone) {
+      for (const [k, lab] of SCAD) {
+        const d = f[k]; if (!d) continue;
+        const n = daysBetween(today, d);
+        if (n <= n2(N.furgoneGiorni)) out.push({ lvl: n < 0 ? 'bad' : n <= 7 ? 'warn' : 'in', txt: `${lab} furgone ${n < 0 ? `scaduta da ${-n} giorni` : n === 0 ? 'scade oggi' : `scade tra ${n} giorni`}`, sub: d.split('-').reverse().join('/'), act: 'tab', arg: 'van' });
+      }
+      if (n2(f.km) && n2(f.tagliandoKm) && n2(f.tagliandoKm) - n2(f.km) <= 1000)
+        out.push({ lvl: 'warn', txt: 'Tagliando vicino per chilometri', sub: `mancano ${Math.round(n2(f.tagliandoKm) - n2(f.km))} km`, act: 'tab', arg: 'van' });
+    }
+    const all = [
+      ...(S.lavori || []).map(x => ({ ...x, _d: x.dataFine || x.data })),
+      ...(S.interventi || []).filter(i => i.stato === 'completato').map(x => ({ ...x, _d: x.dataProg || x.data, importo: x.costo })),
+    ].filter(x => x._d && x._d <= today && n2(x.importo) > 0);
+    const dc = all.filter(x => (x.amm || 'da_cons') === 'da_cons');
+    if (N.consuntivi && dc.length) out.push({ lvl: 'bad', txt: `${dc.length} ${dc.length === 1 ? 'lavoro da consuntivare' : 'lavori da consuntivare'}`, sub: eur(sum(dc, x => x.importo)), act: 'fatt' });
+    const df = all.filter(x => x.amm === 'cons');
+    if (N.fatture && df.length) out.push({ lvl: 'warn', txt: `${df.length} ${df.length === 1 ? 'fattura da emettere' : 'fatture da emettere'}`, sub: eur(sum(df, x => x.importo)), act: 'fatt' });
+    const di = all.filter(x => x.amm === 'fatt');
+    if (N.incassi && di.length) out.push({ lvl: 'in', txt: `${di.length} ${di.length === 1 ? 'fattura da incassare' : 'fatture da incassare'}`, sub: eur(sum(di, x => x.importo)), act: 'fatt' });
+
+    const low = (S.magazzino || []).filter(m => n2(m.soglia) > 0 && n2(m.qta) <= n2(m.soglia));
+    if (N.materiale && low.length) out.push({ lvl: 'warn', txt: 'Materiale da riordinare', sub: low.map(m => m.nome).slice(0, 3).join(', ') + (low.length > 3 ? ` e altri ${low.length - 3}` : ''), act: 'mag' });
+
+    const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
+    if (N.urgenti && urg.length) out.push({ lvl: 'bad', txt: `${urg.length} ${urg.length === 1 ? 'intervento molto urgente' : 'interventi molto urgenti'} aperti`, sub: urg.map(i => i.cliente).slice(0, 2).join(', '), act: 'tab', arg: 'int' });
+
+    const gg = n2(N.preventiviGiorni) || 7;
+    const attesa = (S.preventivi || []).filter(p => p.stato === 'inviato' && daysBetween(p.dataInvio || p.data || today, today) >= gg);
+    if (N.preventivi && attesa.length) out.push({ lvl: 'warn', txt: `${attesa.length} ${attesa.length === 1 ? 'preventivo senza risposta' : 'preventivi senza risposta'} da più di ${gg} giorni`, sub: attesa.map(p => (p.cliente && p.cliente.nome) || p.numero).slice(0, 3).join(', '), act: 'tab', arg: 'prev' });
   }
-  if (n2(f.km) && n2(f.tagliandoKm) && n2(f.tagliandoKm) - n2(f.km) <= 1000)
-    out.push({ lvl: 'warn', txt: 'Tagliando vicino per chilometri', sub: `mancano ${Math.round(n2(f.tagliandoKm) - n2(f.km))} km`, act: 'tab', arg: 'van' });
 
-  const all = [
-    ...(S.lavori || []).map(x => ({ ...x, _d: x.data })),
-    ...(S.interventi || []).filter(i => i.stato === 'completato').map(x => ({ ...x, _d: x.dataProg || x.data, importo: x.costo })),
-  ].filter(x => x._d && x._d <= today && n2(x.importo) > 0);
-  const dc = all.filter(x => (x.amm || 'da_cons') === 'da_cons');
-  if (dc.length) out.push({ lvl: 'bad', txt: `${dc.length} ${dc.length === 1 ? 'lavoro da consuntivare' : 'lavori da consuntivare'}`, sub: eur(sum(dc, x => x.importo)), act: 'fatt' });
-  const df = all.filter(x => x.amm === 'cons');
-  if (df.length) out.push({ lvl: 'warn', txt: `${df.length} ${df.length === 1 ? 'fattura da emettere' : 'fatture da emettere'}`, sub: eur(sum(df, x => x.importo)), act: 'fatt' });
-  const di = all.filter(x => x.amm === 'fatt');
-  if (di.length) out.push({ lvl: 'in', txt: `${di.length} ${di.length === 1 ? 'fattura da incassare' : 'fatture da incassare'}`, sub: eur(sum(di, x => x.importo)), act: 'fatt' });
+  // programma: al mattino quello di oggi, altrimenti quello di domani
+  if (N.programma) {
+    const giorno = momento === 'mattino' ? today : iso(new Date(pd(today).getTime() + 864e5));
+    const etichetta = momento === 'mattino' ? 'Oggi' : 'Domani';
+    const inRange = (a, b, k) => k >= a && k <= (b || a);
+    const pose = (S.lavori || []).filter(l => inRange(l.data, l.dataFine, giorno));
+    const ints = (S.interventi || []).filter(i => i.dataProg === giorno && i.stato !== 'completato' && i.stato !== 'annullato');
+    const ev = (S.eventi || []).filter(e => e.data === giorno);
+    const NOMI_EV = { ferie: 'inizio ferie', fiera: 'fiera', corso: 'corso', altro: 'impegno' };
+    if (ev.length) out.push({ lvl: 'in', txt: `${etichetta}: ${ev.map(e => e.titolo || NOMI_EV[e.tipo] || 'impegno').join(', ')}`, sub: ev.map(e => [NOMI_EV[e.tipo], e.orario, e.luogo].filter(Boolean).join(' · ')).join(' / '), act: 'day', arg: giorno });
+    if (pose.length || ints.length) out.push({ lvl: 'in', txt: `${etichetta}: ${[pose.length ? `${pose.length} ${pose.length === 1 ? 'posa' : 'pose'}` : '', ints.length ? `${ints.length} ${ints.length === 1 ? 'intervento' : 'interventi'}` : ''].filter(Boolean).join(' e ')}`, sub: [...pose, ...ints].map(x => [x.cliente, x.indirizzo].filter(Boolean).join(', ')).slice(0, 3).join(' / '), act: 'day', arg: giorno });
+  }
 
-  const low = (S.magazzino || []).filter(m => n2(m.soglia) > 0 && n2(m.qta) <= n2(m.soglia));
-  if (low.length) out.push({ lvl: 'warn', txt: 'Materiale da riordinare', sub: low.map(m => m.nome).slice(0, 3).join(', ') + (low.length > 3 ? ` e altri ${low.length - 3}` : ''), act: 'mag' });
-
-  const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
-  if (urg.length) out.push({ lvl: 'bad', txt: `${urg.length} ${urg.length === 1 ? 'intervento molto urgente' : 'interventi molto urgenti'} aperti`, sub: urg.map(i => i.cliente).slice(0, 2).join(', '), act: 'tab', arg: 'int' });
-
-  const attesa = (S.preventivi || []).filter(p => p.stato === 'inviato' && daysBetween(p.dataInvio || p.data || today, today) >= 7);
-  if (attesa.length) out.push({ lvl: 'warn', txt: `${attesa.length} ${attesa.length === 1 ? 'preventivo senza risposta' : 'preventivi senza risposta'} da più di 7 giorni`, sub: attesa.map(p => (p.cliente && p.cliente.nome) || p.numero).slice(0, 3).join(', '), act: 'tab', arg: 'prev' });
-
-  const domani = iso(new Date(pd(today).getTime() + 864e5));
-  const pose = (S.lavori || []).filter(l => l.data === domani);
-  const ints = (S.interventi || []).filter(i => i.dataProg === domani && i.stato !== 'completato' && i.stato !== 'annullato');
-  const evDomani = (S.eventi || []).filter(e => e.data === domani);
-  const NOMI_EV = { ferie: 'inizio ferie', fiera: 'fiera', corso: 'corso', altro: 'impegno' };
-  if (evDomani.length) out.push({ lvl: 'in', txt: `Domani: ${evDomani.map(e => e.titolo || NOMI_EV[e.tipo] || 'impegno').join(', ')}`, sub: evDomani.map(e => [NOMI_EV[e.tipo], e.orario, e.luogo].filter(Boolean).join(' · ')).join(' / '), act: 'day', arg: domani });
-  if (pose.length || ints.length) out.push({ lvl: 'in', txt: `Domani: ${[pose.length ? `${pose.length} ${pose.length === 1 ? 'posa' : 'pose'}` : '', ints.length ? `${ints.length} ${ints.length === 1 ? 'intervento' : 'interventi'}` : ''].filter(Boolean).join(' e ')}`, sub: [...pose, ...ints].map(x => x.cliente).slice(0, 3).join(', '), act: 'day', arg: domani });
+  if (sera) {
+    const dow = pd(today).getDay();
+    const lavorativo = (G.giorni || []).includes(dow);
+    const inFerie = (S.eventi || []).some(e => e.tipo === 'ferie' && today >= e.data && today <= (e.dataFine || e.data));
+    const segnato = (S.lavori || []).some(l => today >= l.data && today <= (l.dataFine || l.data)) || (S.interventi || []).some(i => (i.dataProg || '') === today) || (S.eventi || []).some(e => today >= e.data && today <= (e.dataFine || e.data));
+    if (N.giornata && lavorativo && !inFerie && !segnato) out.push({ lvl: 'warn', txt: 'Non hai ancora segnato il lavoro di oggi', sub: 'Aggiungi la posa o l\'intervento finché te lo ricordi', act: 'day', arg: today });
+    const oggiScontrini = N.scontrini === 'sera' ? lavorativo : N.scontrini === 'settimanale' && dow === n2(N.scontriniGiorno);
+    if (oggiScontrini) out.push({ lvl: 'in', txt: 'Hai scontrini da caricare?', sub: N.scontrini === 'settimanale' ? `Promemoria del ${GIORNI_SETT[dow]}: fotografali in Conti` : 'Fotografali in Conti prima di perderli', act: 'tab', arg: 'conti' });
+  }
   return out;
 }
 

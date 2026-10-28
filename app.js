@@ -1,4 +1,4 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino } from './logica.js';
+import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
 import { creaDocumento, docDaLavoro } from './documento.js';
 import { createStore } from './store.js';
@@ -32,6 +32,9 @@ const ICON = {
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
   prev: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/>',
   cli: '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0"/>',
+  bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2 8 2 8H4s2-2 2-8zM10 21a2 2 0 0 0 4 0"/>',
+  clock: '<path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -82,7 +85,7 @@ function render() {
   const st = store.st;
   const logged = st.auth === 'in' || st.auth === 'demo';
   $('#tabsNav').hidden = !logged;
-  $('#settingsBtn').hidden = !logged;
+  $('#menuBtn').hidden = !logged;
   $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}</button>`).join('');
   const pend = store.pending();
   $('#sync').innerHTML = st.mode === 'demo' ? '<span class="st off">Prova</span>'
@@ -338,6 +341,7 @@ function clientiPrincipali(lav, ints) {
   return `<section class="panel stack"><h3>Clienti principali</h3><div class="bars">${top.map(r => `<div ${r.id ? `role="button" tabindex="0" data-act="editCli" data-id="${r.id}" style="cursor:pointer"` : ''}><div class="bar-l"><span>${esc(r.nome)} <span class="muted small">· ${r.n} ${r.n === 1 ? 'lavoro' : 'lavori'}</span></span><span class="num">${eur(r.imp)} · ${num(r.imp / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${r.imp / max * 100}%"></div></div></div>`).join('')}</div></section>`;
 }
 function rAn() {
+  const A = IMP().analisi;
   const yrs = [...new Set([TODAY.slice(0, 4), ...S.lavori.map(l => (l.data || '').slice(0, 4)), ...S.movimenti.map(m => (m.data || '').slice(0, 4))].filter(Boolean))].sort().reverse();
   const lav = S.lavori.filter(l => inPeriod(l.data) && l.data <= TODAY);
   const ints = S.interventi.filter(i => i.stato === 'completato' && inPeriod(i.dataProg || i.data));
@@ -365,23 +369,274 @@ function rAn() {
   }).filter(r => r.used || r.bought || r.ordini).sort((a, b) => b.used * n2(b.s.costoMedio) - a.used * n2(a.s.costoMedio));
   const inc = lav.filter(l => n2(l.importo) > 0).map(l => ({ l, c: costoMat(l.materiali) })).map(x => ({ ...x, p: x.c / n2(x.l.importo) * 100 }));
   const incMed = inc.length ? sum(inc, x => x.c) / sum(inc, x => x.l.importo) * 100 : 0;
-  return `<div class="row between"><h2>Analisi</h2><div class="row">
+  return `<div class="row between"><h2>Analisi</h2><button class="btn sm" data-act="setAnalisi" type="button">Scegli statistiche</button></div><div class="row">
     <select id="anY" data-change="anY" aria-label="Anno" class="btn sm">${yrs.map(y => `<option ${+y === UI.anYear ? 'selected' : ''}>${y}</option>`).join('')}</select>
     <select id="anM" data-change="anM" aria-label="Mese" class="btn sm"><option value="all">Tutto l'anno</option>${MESI.map((m, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${UI.anMonth === v ? 'selected' : ''}>${m}</option>`; }).join('')}</select></div></div>
+  ${A.kpi ? `
   <div class="kpis"><div class="kpi"><div class="l">Entrate</div><div class="v">${eur(entr)}</div></div><div class="kpi"><div class="l">Uscite</div><div class="v">${eur(usc)}</div></div><div class="kpi ${utile >= 0 ? 'pos' : 'neg'}"><div class="l">Utile</div><div class="v">${eur(utile)}</div></div><div class="kpi"><div class="l">Resa oraria</div><div class="v">${ore ? eur(utile / ore) : '—'}</div></div></div>
   <div class="small muted num">${lav.length} pose · ${ints.length} interventi chiusi · ${num(ore)} ore lavorate · ${num(sum(lav, l => l.pezzi), 0)} serramenti posati</div>
+  ` : ''}
+  ${A.lavoro ? statLavoro(lav, ints) : ''}
+  ${A.mensile ? `
   <section class="panel stack"><div class="row between"><h3>Mese per mese ${UI.anYear}</h3><div class="legend"><span><i class="swatch" style="background:var(--in)"></i> entrate</span><span><i class="swatch" style="background:var(--tape)"></i> uscite</span></div></div>${ch}</section>
+  ` : ''}
+  ${A.voci ? statVoci(lav, ints) : ''}
+  ${A.interventi ? statInterventi() : ''}
+  ${A.contabilita ? statContabilita(lav, ints) : ''}
+  ${A.spese ? `
   <section class="panel stack"><h3>Dove vanno i soldi</h3>${byCat.length ? `<div class="bars">${byCat.map(([k, v]) => `<div><div class="bar-l"><span>${esc(catName(k))}</span><span class="num">${eur(v)} · ${num(v / usc * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f ${k === 'materiale' ? 'tape' : ''}" style="width:${v / maxC * 100}%"></div></div></div>`).join('')}</div>` : '<div class="small muted">Nessuna spesa nel periodo.</div>'}</section>
+  ` : ''}
+  ${A.preventivi ? statPreventivi() : ''}
+  ${A.clienti ? statClienti(lav, ints) : ''}
+  ${A.furgone ? statFurgone(mov, lav, ints) : ''}
+  ${A.trasferte ? statTrasferte(lav, ints) : ''}
+  ${A.materiale ? `
   <section class="stack"><div class="row between"><h3>Quanto incide il materiale</h3><span class="chip ${incMed > 15 ? 'warn' : 'ok'} num">media ${num(incMed)}%</span></div>
     <div class="small muted">Costo del materiale usato in ogni posa (al costo medio di magazzino) rispetto a quanto incassato. Nel periodo: <b class="num">${eur(sum(inc, x => x.c))}</b> di materiale.</div>
     ${inc.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cantiere</th><th class="r">Incasso</th><th class="r">Materiale</th><th class="r">Incidenza</th><th class="r">€ / ora</th></tr></thead><tbody>${inc.sort((a, b) => String(b.l.data).localeCompare(a.l.data)).slice(0, 15).map(x => `<tr><td>${fmtD(x.l.data, { day: 'numeric', month: 'short' })} · ${esc(x.l.cliente)}</td><td class="r num">${eur(x.l.importo)}</td><td class="r num">${eur(x.c)}</td><td class="r num">${num(x.p)}%</td><td class="r num">${n2(x.l.ore) ? eur((n2(x.l.importo) - x.c) / n2(x.l.ore)) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Segna importo e materiale usato nelle pose per vedere l\'incidenza.</div>'}
   </section>
-  ${clientiPrincipali(lav, ints)}
+  ` : ''}
+  ${A.consumo ? `
   <section class="stack"><h3>Consumo e ordini materiale</h3>
     ${matRows.length ? `<div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Usato</th><th class="r">Comprato</th><th class="r">Ordini</th><th class="r">Ordini ogni</th><th>Ultimo</th></tr></thead><tbody>${matRows.map(r => `<tr><td><b>${esc(r.s.nome)}</b></td><td class="r num">${num(r.used)} ${esc(r.s.unita)}</td><td class="r num">${num(r.bought)} ${esc(r.s.unita)}</td><td class="r num">${r.ordini}</td><td class="r num">${r.ogni !== null ? r.ogni + ' gg' : '—'}</td><td class="num">${r.ultimo ? fmtD(r.ultimo, { day: 'numeric', month: 'short' }) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Qui vedrai quanto materiale usi e ogni quanti giorni lo riordini, appena registri acquisti e pose.</div>'}
   </section>
+  ` : ''}
+  ${Object.values(A).some(Boolean) ? '' : `<div class="empty">Nessuna statistica scelta. <button class="btn sm" data-act="setAnalisi" type="button">Scegli cosa vedere</button></div>`}
   <div class="row"><button class="btn sm" data-act="csv" data-arg="movimenti" type="button">Esporta spese (CSV)</button><button class="btn sm" data-act="csv" data-arg="lavori" type="button">Esporta lavori (CSV)</button></div>
   <div class="small muted">I file CSV si aprono con Excel o Numbers: utili per il commercialista.</div>`;
+}
+
+/* ---------- impostazioni condivise (valgono su tutti i dispositivi) ---------- */
+const IMP = () => impostazioni(S);
+function salvaImp(parte) { store.put('cfg', 'impostazioni', { ...(S.impostazioni || {}), ...parte }); }
+const GIORNI_BREVI = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'G'], [5, 'V'], [6, 'S'], [0, 'D']];
+const NOMI_GIORNI = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
+function descrGiorni(g) {
+  const s = [...g].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  const k = s.join(',');
+  if (k === '1,2,3,4,5') return 'lun–ven';
+  if (k === '1,2,3,4,5,6') return 'lun–sab';
+  return s.map(d => NOMI_GIORNI[d].slice(0, 3)).join(', ');
+}
+
+/* ---------- menu laterale ---------- */
+function menuHtml() {
+  const N = IMP().notifiche, G = IMP().giornata, A = IMP().analisi;
+  const attive = Object.values(A).filter(Boolean).length, tot = Object.keys(A).length;
+  const st = store.st;
+  const item = (act, arg, icon, label, sub = '', on = false) => `<button class="dr-item ${on ? 'on' : ''}" data-act="${act}" data-arg="${arg}" type="button">${svg(icon)}<span>${label}${sub ? `<small>${sub}</small>` : ''}</span></button>`;
+  return `<div class="dr-head"><div><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
+  <div class="tape" aria-hidden="true"></div>
+  <div class="dr-sec">Sezioni</div>
+  ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
+  <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
+  ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
+  ${item('setGiornata', '', 'clock', 'Giornata e orari', `${G.inizio}–${G.fine} · ${descrGiorni(G.giorni)} · ${num(oreGiornata(G))} ore`)}
+  ${item('setAnalisi', '', 'an', 'Statistiche da mostrare', `${attive} di ${tot} attive`)}
+  ${item('editListino', '', 'prev', 'Listino prezzi', `${LIST().voci.length} voci · trasferta ${eur(euroKm())}/km`)}
+  ${item('editAzienda', '', 'doc', 'Dati azienda e condizioni', `IVA predefinita: ${ivaOf(AZ().ivaPredefinita)[1]}`)}
+  ${item('editVan', '', 'van', 'Dati del furgone', S.furgone?.targa ? esc(S.furgone.targa) : 'targa e scadenze')}
+  ${item('menuGo', 'set', 'folder', 'Cartelle, account e installazione', '')}
+  <div class="dr-foot small muted">${st.mode === 'demo' ? '' : st.online ? 'Dati sincronizzati sui tuoi dispositivi' : 'Offline: le modifiche partono appena torna la rete'}</div>`;
+}
+function apriMenu() {
+  $('#drawerPanel').innerHTML = menuHtml();
+  $('#drawer').hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => $('#drawer').classList.add('aperto')));
+}
+function chiudiMenu() {
+  const d = $('#drawer'); if (d.hidden) return;
+  d.classList.remove('aperto');
+  setTimeout(() => { d.hidden = true; }, 220);
+}
+
+/* ---------- notifiche ---------- */
+const nomeDispositivo = ua => /iphone/i.test(ua) ? 'iPhone' : /ipad/i.test(ua) ? 'iPad' : /android/i.test(ua) ? 'Android' : /macintosh|mac os/i.test(ua) ? 'Mac' : /windows/i.test(ua) ? 'Computer Windows' : 'Dispositivo';
+const tog = (nome, label, on, sub = '') => `<label class="tog"><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span><input type="checkbox" role="switch" name="${nome}" id="f_${nome}" ${on ? 'checked' : ''}></label>`;
+const selN = (nome, opts, val) => `<select name="${nome}" id="f_${nome}">${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(val) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+function statoDispositivo() {
+  const ps = pushState();
+  return ps === 'granted' ? `<div class="row between"><span class="ok-t">${svg('bell', 'i')} Attive su questo dispositivo</span><div class="row"><button class="btn sm" data-act="pushProva" type="button">Prova</button><button class="btn sm" data-act="pushOn" type="button">Riattiva</button></div></div>`
+    : ps === 'install' ? `<div><b>Prima aggiungi l'app alla schermata Home.</b> Su iPhone e iPad le notifiche funzionano solo così: in Safari tocca <b>Condividi</b> › <b>Aggiungi alla schermata Home</b>, poi apri l'app dall'icona.</div>`
+    : ps === 'notready' ? `<div class="small muted">Le notifiche si attivano dopo il collegamento al database.</div>`
+    : ps === 'denied' ? `<div class="small">Hai bloccato le notifiche su questo dispositivo. Riattivale da Impostazioni › Notifiche › Posa.</div>`
+    : ps === 'unsupported' ? `<div class="small muted">Questo browser non supporta le notifiche.</div>`
+    : `<div class="row between"><span>Non ancora attive qui</span><button class="btn primary sm" data-act="pushOn" type="button">Attiva su questo dispositivo</button></div>`;
+}
+async function caricaDispositivi() {
+  const box = $('#devList'); if (!box) return;
+  let mio = '';
+  try { const reg = await navigator.serviceWorker?.ready; mio = (await reg?.pushManager?.getSubscription())?.endpoint || ''; } catch {}
+  const lista = await store.listPush().catch(() => []);
+  if (!$('#devList')) return;
+  box.innerHTML = lista.length ? `<div class="small muted">Ricevono le notifiche:</div>${lista.map(d => `<div class="dev"><span>${svg('bell', 'i')} <b>${nomeDispositivo(d.device || '')}</b>${d.endpoint === mio ? ' <span class="chip ok">questo</span>' : ''}<small>dal ${fmtD((d.created_at || '').slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' })}</small></span><button class="btn sm ghost" data-act="devRm" data-arg="${esc(d.endpoint)}" type="button">Togli</button></div>`).join('')}`
+    : '<div class="small muted">Nessun dispositivo riceve ancora le notifiche.</div>';
+}
+function sheetNotifiche() {
+  const N = IMP().notifiche;
+  const ore = (da, a) => Array.from({ length: a - da + 1 }, (_, i) => [da + i, `${da + i}:00`]);
+  openSheet('Notifiche e promemoria', `
+    <div class="fieldset"><span class="fs-t">Su questo dispositivo</span>${statoDispositivo()}<div id="devList" class="stack"></div></div>
+    <div class="fieldset"><span class="fs-t">Quando</span>
+      <div class="togrow">${tog('mattino', 'Riepilogo del mattino', N.mattino, 'scadenze, fatture e lavori di oggi')}${selN('oraMattino', ore(5, 11), N.oraMattino)}</div>
+      <div class="togrow">${tog('sera', 'Promemoria della sera', N.sera, 'giornata da segnare, scontrini, programma di domani')}${selN('oraSera', ore(15, 22), N.oraSera)}</div>
+      ${tog('weekend', 'Anche sabato e domenica', N.weekend)}
+      <div class="small muted">L'orario può slittare di qualche minuto.</div>
+    </div>
+    <div class="fieldset"><span class="fs-t">Furgone</span>
+      <div class="togrow">${tog('furgone', 'Scadenze del furgone', N.furgone, 'assicurazione, bollo, revisione, tagliando')}${selN('furgoneGiorni', [[7, '7 gg prima'], [15, '15 gg prima'], [30, '30 gg prima'], [60, '60 gg prima']], N.furgoneGiorni)}</div>
+    </div>
+    <div class="fieldset"><span class="fs-t">Lavoro e giornata</span>
+      ${tog('programma', 'Programma del giorno', N.programma, 'pose, interventi, ferie, fiere e corsi')}
+      ${tog('giornata', 'Giornata da segnare', N.giornata, 'la sera, se in un giorno lavorativo non hai segnato niente')}
+      ${tog('urgenti', 'Interventi molto urgenti', N.urgenti)}
+    </div>
+    <div class="fieldset"><span class="fs-t">Contabilità</span>
+      ${tog('consuntivi', 'Lavori da consuntivare', N.consuntivi)}
+      ${tog('fatture', 'Fatture da emettere', N.fatture, 'consuntivo inviato, fattura non ancora fatta')}
+      ${tog('incassi', 'Fatture da incassare', N.incassi)}
+      <div class="togrow">${tog('preventivi', 'Preventivi senza risposta', N.preventivi)}${selN('preventiviGiorni', [[3, 'dopo 3 gg'], [5, 'dopo 5 gg'], [7, 'dopo 7 gg'], [10, 'dopo 10 gg'], [15, 'dopo 15 gg']], N.preventiviGiorni)}</div>
+      <div class="g2" style="margin-top:6px">${F('Promemoria scontrini', selN('scontrini', [['mai', 'Mai'], ['sera', 'Ogni sera lavorativa'], ['settimanale', 'Una volta a settimana']], N.scontrini))}<label class="f" id="wrapScG" ${N.scontrini === 'settimanale' ? '' : 'hidden'}><span>Il giorno</span>${selN('scontriniGiorno', GIORNI_BREVI.map(([d]) => [d, NOMI_GIORNI[d]]), N.scontriniGiorno)}</label></div>
+    </div>
+    <div class="fieldset"><span class="fs-t">Magazzino</span>${tog('materiale', 'Materiale da riordinare', N.materiale, 'quando scende sotto la scorta minima')}</div>
+    <div class="small muted">Le stesse scelte valgono per il riquadro "Da fare" del calendario.</div>`,
+  async fd => {
+    const n = { ...N };
+    for (const k of ['mattino', 'sera', 'weekend', 'furgone', 'programma', 'giornata', 'urgenti', 'consuntivi', 'fatture', 'incassi', 'preventivi', 'materiale']) n[k] = !!fd.get(k);
+    for (const k of ['oraMattino', 'oraSera', 'furgoneGiorni', 'preventiviGiorni', 'scontriniGiorno']) n[k] = +fd.get(k);
+    n.scontrini = fd.get('scontrini');
+    salvaImp({ notifiche: n });
+    toast('Notifiche salvate su tutti i dispositivi');
+  });
+  caricaDispositivi();
+}
+async function pushProva() {
+  try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Diario di Posa', { body: 'Le notifiche funzionano su questo dispositivo.', icon: 'icone/icona-192.png', tag: 'prova' }); toast('Notifica di prova mostrata'); }
+  catch { toast('Non sono riuscito a mostrare la notifica'); }
+}
+
+/* ---------- giornata e orari ---------- */
+function sheetGiornata() {
+  const G = IMP().giornata;
+  openSheet('Giornata e orari', `
+    <div class="fieldset"><span class="fs-t">Orario di lavoro</span>
+      <div class="g3">${F('Inizio', inp('ginizio', G.inizio, 'time'))}${F('Fine', inp('gfine', G.fine, 'time'))}${F('Pausa', selN('gpausa', [[0, 'nessuna'], [30, '30 min'], [45, '45 min'], [60, '1 ora'], [90, '1 ora e ½'], [120, '2 ore']], G.pausa))}</div>
+      <div class="small"><b id="oreStd">${num(oreGiornata(G))} ore</b> di lavoro in una giornata</div>
+    </div>
+    <div class="fieldset"><span class="fs-t">Giorni lavorativi</span>
+      <div class="giorni-sett">${GIORNI_BREVI.map(([d, l]) => `<label title="${NOMI_GIORNI[d]}"><input type="checkbox" name="ggiorni" value="${d}" ${G.giorni.includes(d) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <div class="small muted">Servono per le pose su più giorni (si saltano i giorni non lavorativi), per il promemoria della giornata e per le statistiche di occupazione.</div>
+    </div>
+    ${tog('gprecompila', 'Precompila le ore nelle nuove pose', G.precompila, 'ore della giornata × giorni di lavoro')}`,
+  async fd => {
+    const giorni = fd.getAll('ggiorni').map(Number);
+    if (!giorni.length) throw Object.assign(new Error('giorni'), { userMsg: 'Scegli almeno un giorno lavorativo' });
+    salvaImp({ giornata: { inizio: fd.get('ginizio') || '07:30', fine: fd.get('gfine') || '17:00', pausa: +fd.get('gpausa'), giorni, precompila: !!fd.get('gprecompila') } });
+    toast('Orari salvati su tutti i dispositivi');
+  });
+}
+
+/* ---------- statistiche da mostrare ---------- */
+const SEZIONI_ANALISI = [
+  ['Generale', [['kpi', 'Entrate, uscite e utile', 'con resa oraria'], ['mensile', 'Grafico mese per mese', 'entrate e uscite']]],
+  ['Lavoro', [['lavoro', 'Giorni lavorati e rendimento', 'occupazione, incasso al giorno, pezzi al giorno'], ['voci', 'Cosa posi di più', 'le voci del listino più usate'], ['interventi', 'Interventi', 'quanti, quanti urgenti, tempi di risposta']]],
+  ['Contabilità', [['contabilita', 'Situazione incassi', 'da consuntivare, da fatturare, da incassare, pagato'], ['spese', 'Dove vanno i soldi', 'spese per categoria'], ['preventivi', 'Preventivi', 'valore, accettati, tasso di accettazione']]],
+  ['Clienti', [['clienti', 'Clienti', 'principali, nuovi, privati / rivenditori / imprese']]],
+  ['Furgone e trasferte', [['furgone', 'Costi del furgone', 'carburante e manutenzione, costo per giorno'], ['trasferte', 'Trasferte', 'km fatturati e ricavi']]],
+  ['Materiale', [['materiale', 'Incidenza del materiale', 'sul prezzo di ogni posa'], ['consumo', 'Consumo e ordini', 'quanto usi e ogni quanto ricompri']]],
+];
+function sheetAnalisi() {
+  const A = IMP().analisi;
+  openSheet('Statistiche da mostrare', `
+    <div class="small muted">Scegli cosa vedere nella sezione Analisi. Vale su tutti i tuoi dispositivi.</div>
+    ${SEZIONI_ANALISI.map(([g, voci]) => `<div class="fieldset"><span class="fs-t">${g}</span>${voci.map(([k, l, s]) => tog('an_' + k, l, A[k], s)).join('')}</div>`).join('')}`,
+  async fd => {
+    const a = {}; SEZIONI_ANALISI.forEach(([, v]) => v.forEach(([k]) => { a[k] = !!fd.get('an_' + k); }));
+    salvaImp({ analisi: a }); toast('Statistiche aggiornate');
+  });
+}
+
+/* ---------- statistiche aggiuntive ---------- */
+function giorniLavorabili() {
+  const G = IMP().giornata;
+  const da = UI.anMonth === 'all' ? `${UI.anYear}-01-01` : `${UI.anYear}-${UI.anMonth}-01`;
+  const fineP = UI.anMonth === 'all' ? `${UI.anYear}-12-31` : iso(new Date(UI.anYear, +UI.anMonth, 0));
+  const a = fineP < TODAY ? fineP : TODAY;
+  let n = 0;
+  for (let d = pd(da); iso(d) <= a; d.setDate(d.getDate() + 1)) {
+    const k = iso(d);
+    if (G.giorni.includes(d.getDay()) && !S.eventi.some(e => e.tipo === 'ferie' && inEv(e, k))) n++;
+  }
+  return n;
+}
+const tile = (l, v, cls = '') => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+function statLavoro(lav, ints) {
+  const giorni = new Set();
+  lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g)));
+  ints.forEach(i => giorni.add(i.dataProg || i.data));
+  const nG = giorni.size, disp = giorniLavorabili();
+  const incasso = sum(lav, l => l.importo) + sum(ints, i => i.costo);
+  const ore = sum(lav, l => l.ore) + sum(ints, i => i.ore), pezzi = sum(lav, l => l.pezzi);
+  const aOre = lav.filter(l => calcoloDi(l) === 'ore').length;
+  return `<section class="panel stack"><h3>Giorni lavorati e rendimento</h3>
+    <div class="kpis">${tile('Giorni lavorati', `${nG}${disp ? `<span class="small muted"> / ${disp}</span>` : ''}`)}${tile('Occupazione', disp ? Math.round(nG / disp * 100) + '%' : '—')}${tile('Incasso al giorno', nG ? eur(incasso / nG) : '—')}${tile('Resa oraria', ore ? eur(incasso / ore) : '—')}</div>
+    <div class="kpis">${tile('Pezzi posati', num(pezzi, 0))}${tile('Pezzi al giorno', nG ? num(pezzi / nG) : '—')}${tile('Ore lavorate', num(ore))}${tile('Giornate a ore', `${aOre}<span class="small muted"> / ${lav.length}</span>`)}</div>
+    <div class="small muted">L'occupazione confronta i giorni lavorati con i giorni lavorativi del periodo, ferie escluse.</div></section>`;
+}
+function statVoci(lav, ints) {
+  const m = new Map();
+  for (const x of [...lav, ...ints]) for (const r of x.righe || []) {
+    if (['km', 'ora'].includes(r.voce) || r.unita === 'ora' || !r.descr) continue;
+    const k = r.descr; const v = m.get(k) || { q: 0, e: 0 };
+    v.q += n2(r.qta); v.e += totaleRiga(r, LIST()); m.set(k, v);
+  }
+  const top = [...m.entries()].sort((a, b) => b[1].e - a[1].e).slice(0, 8);
+  if (!top.length) return `<section class="panel stack"><h3>Cosa posi di più</h3><div class="small muted">Compare quando usi le voci del listino nelle pose.</div></section>`;
+  const max = top[0][1].e || 1;
+  return `<section class="panel stack"><h3>Cosa posi di più</h3><div class="bars">${top.map(([k, v]) => `<div><div class="bar-l"><span>${esc(k)} <span class="muted small">· ${num(v.q, 1)}</span></span><span class="num">${eur(v.e)}</span></div><div class="bar-t"><div class="bar-f tape" style="width:${v.e / max * 100}%"></div></div></div>`).join('')}</div></section>`;
+}
+function statInterventi() {
+  const L = S.interventi.filter(i => inPeriod(i.data));
+  const chiusi = L.filter(i => i.stato === 'completato');
+  const urg = L.filter(i => i.urgenza && i.urgenza !== 'normale');
+  const attese = L.filter(i => i.dataProg && i.data).map(i => Math.max(0, (pd(i.dataProg) - pd(i.data)) / 864e5));
+  return `<section class="panel stack"><h3>Interventi</h3><div class="kpis">${tile('Richiesti', L.length)}${tile('Completati', chiusi.length)}${tile('Urgenti', L.length ? Math.round(urg.length / L.length * 100) + '%' : '—')}${tile('Attesa media', attese.length ? num(sum(attese, x => x) / attese.length) + ' gg' : '—')}</div>
+    <div class="small muted">Incasso medio per intervento: <b>${chiusi.length ? eur(sum(chiusi, i => i.costo) / chiusi.length) : '—'}</b>. L'attesa è il tempo tra la richiesta e il giorno dell'intervento.</div></section>`;
+}
+function statContabilita(lav, ints) {
+  const jobs = [...lav.map(l => ({ a: l.amm, v: n2(l.importo) })), ...ints.map(i => ({ a: i.amm, v: n2(i.costo) }))];
+  const tot = sum(jobs, j => j.v) || 1;
+  const righe = AMM.map(([k, l, c]) => ({ l, c, v: sum(jobs.filter(j => (j.a || 'da_cons') === k), j => j.v), n: jobs.filter(j => (j.a || 'da_cons') === k).length }));
+  return `<section class="panel stack"><h3>Situazione incassi</h3><div class="bars">${righe.map(r => `<div><div class="bar-l"><span>${r.l} <span class="muted small">· ${r.n}</span></span><span class="num">${eur(r.v)} · ${num(r.v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f st-${r.c || 'x'}" style="width:${r.v / tot * 100}%"></div></div></div>`).join('')}</div>
+    <div class="small muted">Lavori del periodo per stato. Da incassare in tutto: <b>${eur(sum(righe.slice(0, 3), r => r.v))}</b>.</div></section>`;
+}
+function statPreventivi() {
+  const P = S.preventivi.filter(p => inPeriod(p.data));
+  const v = p => totPrev(p).imponibile;
+  const acc = P.filter(p => p.stato === 'accettato'), rif = P.filter(p => p.stato === 'rifiutato'), att = P.filter(p => p.stato === 'inviato');
+  return `<section class="panel stack"><h3>Preventivi</h3><div class="kpis">${tile('Fatti', P.length)}${tile('Valore', eur(sum(P, v)))}${tile('Accettati', `${acc.length}<span class="small muted"> · ${eur(sum(acc, v))}</span>`)}${tile('Tasso', acc.length + rif.length ? Math.round(acc.length / (acc.length + rif.length) * 100) + '%' : '—')}</div>
+    <div class="small muted">In attesa di risposta: <b>${att.length}</b> (${eur(sum(att, v))}). Valore medio: <b>${P.length ? eur(sum(P, v) / P.length) : '—'}</b>. Importi IVA esclusa.</div></section>`;
+}
+function statClienti(lav, ints) {
+  const attivi = new Set([...lav, ...ints].map(x => x.clienteId || normNome(x.cliente)).filter(Boolean));
+  const nuovi = S.clienti.filter(c => c.creato && inPeriod(c.creato));
+  const perTipo = TIPI_CLIENTE.map(([k, l]) => [l, sum([...lav.map(x => [x, x.importo]), ...ints.map(x => [x, x.costo])].filter(([x]) => ((cliDi(x) || {}).tipo || 'finale') === k), ([, v]) => n2(v))]);
+  const tot = sum(perTipo, x => x[1]) || 1;
+  return `<section class="panel stack"><h3>Clienti</h3><div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">${tile('Clienti con lavori', attivi.size)}${tile('Nuovi in rubrica', nuovi.length)}</div>
+    <div class="bars">${perTipo.map(([l, v]) => `<div><div class="bar-l"><span>${l}</span><span class="num">${eur(v)} · ${num(v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${v / tot * 100}%"></div></div></div>`).join('')}</div></section>
+  ${clientiPrincipali(lav, ints)}`;
+}
+function statTrasferte(lav, ints) {
+  const km = [...lav, ...ints].map(x => (x.righe || []).find(r => r.voce === 'km')).filter(Boolean);
+  const tot = sum(km, r => r.qta), ric = sum(km, r => totaleRiga(r, LIST()));
+  return `<section class="panel stack"><h3>Trasferte</h3><div class="kpis">${tile('Km fatturati', num(tot, 0))}${tile('Ricavo', eur(ric))}${tile('Lavori con trasferta', km.length)}${tile('Km medi', km.length ? num(tot / km.length, 0) : '—')}</div></section>`;
+}
+function statFurgone(mov, lav, ints) {
+  const sp = mov.filter(m => m.tipo !== 'entrata' && ['furgone', 'carburante'].includes(m.categoria));
+  const carb = sum(sp.filter(m => m.categoria === 'carburante'), m => m.importo), manut = sum(sp.filter(m => m.categoria === 'furgone'), m => m.importo);
+  const giorni = new Set(); lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g))); ints.forEach(i => giorni.add(i.dataProg || i.data));
+  const entr = sum(lav, l => l.importo) + sum(ints, i => i.costo);
+  return `<section class="panel stack"><h3>Costi del furgone</h3><div class="kpis">${tile('Carburante', eur(carb))}${tile('Manutenzione e tasse', eur(manut))}${tile('Al giorno lavorato', giorni.size ? eur((carb + manut) / giorni.size) : '—')}${tile('Sul fatturato', entr ? num((carb + manut) / entr * 100, 1) + '%' : '—')}</div></section>`;
 }
 
 /* ---------- impostazioni e cartelle ---------- */
@@ -412,14 +667,7 @@ function rSet() {
     <div class="row between"><span>Listino prezzi ${esc(LIST().anno || '')} · <b class="num">${LIST().voci.length}</b> voci</span><button class="btn sm" data-act="editListino" type="button">Modifica listino</button></div>
     <div class="row between"><span class="small">Dati azienda, IVA predefinita (<b>${esc(ivaOf(AZ().ivaPredefinita)[1])}</b>), termini e condizioni</span><button class="btn sm" data-act="editAzienda" type="button">Modifica</button></div>
   </div></section>
-  <section class="stack"><h3>Notifiche</h3><div class="panel stack">
-    ${ps === 'granted' ? `<div class="row between"><span>Notifiche attive su questo dispositivo. Ogni mattina ricevi le cose da fare.</span><button class="btn sm" data-act="pushTest" type="button">Riattiva</button></div>`
-      : ps === 'install' ? `<div><b>Prima aggiungi l'app alla schermata Home.</b> Su iPhone e iPad le notifiche funzionano solo così:</div><ol class="ios-steps"><li>In Safari tocca il pulsante <b>Condividi</b> (il quadrato con la freccia).</li><li>Scegli <b>Aggiungi alla schermata Home</b>.</li><li>Apri l'app dall'icona e torna qui.</li></ol>`
-      : ps === 'notready' ? `<div class="small muted">Le notifiche si attivano dopo il collegamento al database (vedi la guida di installazione).</div>`
-      : ps === 'denied' ? `<div class="small">Hai bloccato le notifiche. Riattivale da Impostazioni › Notifiche › Posa.</div>`
-      : ps === 'unsupported' ? `<div class="small muted">Questo browser non supporta le notifiche.</div>`
-      : `<div class="row between"><span>Ricevi ogni mattina scadenze del furgone, fatture e lavori del giorno dopo.</span><button class="btn primary sm" data-act="pushOn" type="button">Attiva notifiche</button></div>`}
-  </div></section>
+  <section class="stack"><h3>Notifiche</h3><div class="panel stack">${statoDispositivo()}<button class="btn" data-act="setNotifiche" type="button">${svg('bell')} Scegli notifiche e orari</button></div></section>
   ${!standalone() ? `<section class="stack"><h3>Installa come app</h3><div class="panel small"><ol class="ios-steps"><li><b>iPhone e iPad:</b> in Safari tocca <b>Condividi</b> › <b>Aggiungi alla schermata Home</b>.</li><li><b>Mac:</b> in Safari menu <b>File › Aggiungi al Dock</b>.</li></ol></div></section>` : ''}
   <section class="stack"><h3>Account</h3><div class="panel row between">
     ${store.st.mode === 'demo' ? '<span class="small muted">Modalità prova, senza account.</span>' : `<span class="small">Collegato come <b>${esc(store.st.email)}</b>${store.st.lastSync ? `<br><span class="muted">Ultima sincronizzazione ${store.st.lastSync.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}</span><button class="btn sm" data-act="logout" type="button">Esci</button>`}
@@ -528,7 +776,7 @@ function giorniPosa(l) {
   const out = [];
   for (let d = pd(da); iso(d) <= a && out.length < 366; d.setDate(d.getDate() + 1)) {
     const k = iso(d), dow = d.getDay();
-    if (l.soloFeriali !== false && (dow === 0 || dow === 6) && k !== da && k !== a) continue;
+    if (l.soloFeriali !== false && !IMP().giornata.giorni.includes(dow) && k !== da && k !== a) continue;
     out.push(k);
   }
   return out;
@@ -546,6 +794,7 @@ function aggiornaGiorni() {
   info.classList.toggle('err', !!(a && a < da));
   const lk = $('#f_km')?.closest('label')?.querySelector('span'); if (lk) lk.textContent = g > 1 ? 'Km al giorno' : 'Trasferta km';
   const lo = $('#f_ore')?.closest('label')?.querySelector('span'); if (lo) lo.textContent = g > 1 ? 'Ore impiegate (totali)' : 'Ore impiegate';
+  const fo = $('#f_ore'); if (fo && fo.dataset.auto === '1' && a >= da) fo.value = Math.round(oreGiornata(IMP().giornata) * g * 100) / 100;
 }
 const rigaKm = (km, euro) => ({ voce: 'km', descr: 'Trasferta', unita: 'km', qta: km, prezzo: euro, magg: '' });
 const conKm = (righe, fd) => { const km = n2(fd.get('km')); return km > 0 ? [...righe, rigaKm(km, n2(fd.get('euroKm')))] : righe; };
@@ -570,7 +819,7 @@ function sheetLav(l, prefill) {
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     <div class="cliline small" id="cliInfo"></div>
     <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
-    <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta sabato e domenica</label></div>
+    <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
     <div class="g3">
@@ -630,6 +879,7 @@ function sheetLav(l, prefill) {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
   });
+  if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
   aggiornaGiorni();
   const pz = $('#f_pezzi');
   if (pz) pz.dataset.auto = !n2(l.pezzi) || Math.abs(n2(l.pezzi) - contaPezzi(l.righe)) < 0.01 ? '1' : '0';
@@ -1352,6 +1602,7 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   if (b.tagName === 'A') return;
   const a = b.dataset.act, arg = b.dataset.arg, id = b.dataset.id;
+  if (b.closest('#drawer') && a !== 'menu') chiudiMenu();
   if (e.target.closest('.card a')) return;
   const go = () => { render(); window.scrollTo({ top: 0 }); };
   switch (a) {
@@ -1399,6 +1650,14 @@ document.addEventListener('click', async e => {
       break;
     case 'seed': seed(); render(); break;
     case 'newCli': sheetCliente(null); break;
+    case 'menu': apriMenu(); break;
+    case 'menuClose': chiudiMenu(); break;
+    case 'menuGo': UI.tab = arg; if (arg !== 'cal') UI.calCli = null; try { history.replaceState(null, '', '#' + arg); } catch {} render(); window.scrollTo({ top: 0 }); break;
+    case 'setNotifiche': sheetNotifiche(); break;
+    case 'setGiornata': sheetGiornata(); break;
+    case 'setAnalisi': sheetAnalisi(); break;
+    case 'pushProva': pushProva(); break;
+    case 'devRm': { b.disabled = true; let mio = ''; try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); mio = sub?.endpoint || ''; if (mio === arg) await sub.unsubscribe(); } catch {} await store.removePush(arg); toast('Dispositivo tolto dalle notifiche'); caricaDispositivi(); break; }
     case 'newEv': sheetEvento(null, arg); break;
     case 'editEv': sheetEvento(S.eventi.find(x => x.id === id)); break;
     case 'evTipo': document.querySelectorAll('.evseg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); $('#f_etipo').value = arg; break;
@@ -1446,6 +1705,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet();
+  else if (e.key === 'Escape') chiudiMenu();
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card[role="button"]')) { e.preventDefault(); e.target.click(); }
 });
 document.addEventListener('change', e => {
@@ -1462,6 +1722,8 @@ document.addEventListener('change', e => {
   if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
   if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
+  if (t.id === 'f_scontrini') { $('#wrapScG').hidden = t.value !== 'settimanale'; return; }
+  if (t.id === 'f_gpausa' && $('#oreStd')) { $('#oreStd').textContent = num(oreGiornata({ inizio: $('#f_ginizio').value, fine: $('#f_gfine').value, pausa: t.value })) + ' ore'; return; }
   if (['f_data', 'f_dataFine', 'f_soloFeriali'].includes(t.id) && $('#giorniInfo')) { aggiornaGiorni(); aggiornaTotali(); }
   if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }
   if (t.classList && t.classList.contains('cmChk')) { aggiornaCM(); return; }
@@ -1480,7 +1742,9 @@ document.addEventListener('input', e => {
   }
   if (t.id === 'f_importo' || t.id === 'f_costo') { if ($('#righe .riga') || $('#f_calcolo')?.value === 'ore') t.dataset.auto = '0'; aggiornaTotali(); return; }
   if (t.id === 'f_pezzi') { t.dataset.auto = '0'; return; }
+  if (t.id === 'f_ore') t.dataset.auto = '0';
   if (['f_data', 'f_dataFine'].includes(t.id) && $('#giorniInfo')) { aggiornaGiorni(); aggiornaTotali(); return; }
+  if (['f_ginizio', 'f_gfine'].includes(t.id) && $('#oreStd')) { $('#oreStd').textContent = num(oreGiornata({ inizio: $('#f_ginizio').value, fine: $('#f_gfine').value, pausa: $('#f_gpausa').value })) + ' ore'; return; }
   if (['f_ore', 'f_tariffa', 'f_km', 'f_euroKm'].includes(t.id)) { aggiornaTotali(); return; }
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });

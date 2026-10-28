@@ -20,12 +20,10 @@
 <body>
 <header class="top">
   <div class="top-in">
+    <button class="iconbtn menubtn" id="menuBtn" data-act="menu" aria-label="Apri il menu" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <h1 class="brand">Diario di Posa<small>SERRAMENTI · POSA IN OPERA</small></h1>
     <div class="top-actions">
       <div class="sync" id="sync"></div>
-      <button class="iconbtn" id="settingsBtn" data-act="tab" data-arg="set" aria-label="Impostazioni e cartelle" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h5l2 2h11v10H3z"/></svg>
-      </button>
     </div>
   </div>
   <div class="tape" aria-hidden="true"></div>
@@ -36,6 +34,8 @@
 <nav class="tabs" aria-label="Sezioni" id="tabsNav" hidden>
   <div class="tabs-in" id="tabs"></div>
 </nav>
+
+<div class="drawer" id="drawer" hidden><div class="drawer-bg" data-act="menuClose"></div><nav class="drawer-panel" id="drawerPanel" aria-label="Menu"></nav></div>
 
 <div class="sheet" id="sheet" hidden>
   <form class="sheet-card" id="sheetForm" autocomplete="off" novalidate>

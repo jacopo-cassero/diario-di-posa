@@ -15,16 +15,16 @@ export function createStore(cfg, onChange) {
   let sb = null, uid = null, channel = null;
   const recs = new Map();          // "kind/id" -> {kind, id, data}
   let outbox = [];                 // modifiche non ancora inviate
-  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], furgone: {}, listino: null, azienda: null };
+  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], furgone: {}, listino: null, azienda: null, impostazioni: null };
   const st = { mode: cloud ? 'cloud' : 'demo', auth: cloud ? 'checking' : 'demo', email: '', online: navigator.onLine, syncing: false, lastSync: null, error: '' };
   const urlCache = new Map();
 
   const key = n => `ddp:${n}:${uid || 'demo'}`;
   function rebuild() {
     for (const k of KINDS) S[k] = [];
-    S.furgone = {}; S.listino = null; S.azienda = null;
+    S.furgone = {}; S.listino = null; S.azienda = null; S.impostazioni = null;
     for (const r of recs.values()) {
-      if (r.kind === 'cfg') { if (['furgone', 'listino', 'azienda'].includes(r.id)) S[r.id] = { ...r.data }; continue; }
+      if (r.kind === 'cfg') { if (['furgone', 'listino', 'azienda', 'impostazioni'].includes(r.id)) S[r.id] = { ...r.data }; continue; }
       if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
     }
   }
@@ -196,6 +196,11 @@ export function createStore(cfg, onChange) {
       const j = sub.toJSON();
       const { error } = await sb.from('push_subscriptions').upsert({ user_id: uid, endpoint: j.endpoint, subscription: j, device: navigator.userAgent.slice(0, 200) }, { onConflict: 'endpoint' });
       if (error) throw error;
+    },
+    async listPush() {
+      if (!sb || !uid) return [];
+      const { data, error } = await sb.from('push_subscriptions').select('endpoint,device,created_at').order('created_at');
+      return error ? [] : data;
     },
     async removePush(endpoint) {
       if (sb && uid) await sb.from('push_subscriptions').delete().eq('endpoint', endpoint);

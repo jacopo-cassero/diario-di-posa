@@ -3,7 +3,7 @@
 // Se qualcosa non va, scrive il motivo (senza chiavi) in .github/stato-promemoria.txt.
 import fs from 'fs';
 import webpush from 'web-push';
-import { promemoria, oggi } from '../logica.js';
+import { promemoria, oggi, impostazioni } from '../logica.js';
 
 const ESITO = '.github/stato-promemoria.txt';
 const log = [];
@@ -57,9 +57,19 @@ async function del(path) { await fetch(base + path, { method: 'DELETE', headers 
 
 const forza = process.argv.includes('--prova');
 const today = oggi();
+const ora = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hour12: false }).format(new Date()) % 24;
+const dow = new Date(today + 'T12:00:00').getDay();
 const subs = await get('/push_subscriptions?select=endpoint,user_id,subscription');
 const users = [...new Set(subs.map(s => s.user_id))];
-scrivi(`${today}: ${subs.length} dispositivi, ${users.length} utenti`);
+scrivi(`${today} ore ${ora}: ${subs.length} dispositivi, ${users.length} utenti`);
+
+/** Ricorda quali promemoria sono già partiti oggi, per non mandarli due volte. */
+async function segnaInviato(uid, log) {
+  await fetch(base + '/records?on_conflict=user_id,kind,id', {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ user_id: uid, kind: 'cfg', id: 'notifiche-log', data: log, deleted: false, updated_at: new Date().toISOString() }),
+  }).catch(e => scrivi('Registro invii non aggiornato: ' + e.message));
+}
 
 let inviate = 0, errori = 0;
 for (const uid of users) {
@@ -69,29 +79,45 @@ for (const uid of users) {
     rows.push(...page);
     if (page.length < 1000) break;
   }
-  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], preventivi: [], eventi: [], furgone: {} };
+  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], preventivi: [], eventi: [], furgone: {}, impostazioni: null };
+  let log = {};
   for (const r of rows) {
-    if (r.kind === 'cfg') { if (r.id === 'furgone') S.furgone = r.data; }
+    if (r.kind === 'cfg') { if (r.id === 'furgone') S.furgone = r.data; if (r.id === 'impostazioni') S.impostazioni = r.data; if (r.id === 'notifiche-log') log = r.data || {}; }
     else if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
   }
-  const todo = promemoria(S, today);
-  scrivi(`Cose da fare per un utente: ${todo.length}`);
-  if (!todo.length && !forza) continue;
-  const urgenti = todo.filter(t => t.lvl === 'bad').length;
-  const payload = JSON.stringify({
-    title: todo.length ? `Diario di Posa · ${todo.length} ${todo.length === 1 ? 'cosa da fare' : 'cose da fare'}${urgenti ? ' (' + urgenti + ' urgenti)' : ''}` : 'Diario di Posa · notifiche attive',
-    body: todo.length ? todo.slice(0, 5).map(t => '• ' + t.txt).join('\n') : 'Le notifiche funzionano. Ogni mattina ti scrivo solo se c\'è qualcosa da fare.',
-    url: './#cal',
-    tag: 'promemoria-' + today,
-  });
-  for (const s of subs.filter(x => x.user_id === uid)) {
-    const dove = /apple/.test(s.endpoint) ? 'dispositivo Apple' : 'dispositivo';
-    try { await webpush.sendNotification(s.subscription, payload, { TTL: 6 * 3600 }); inviate++; scrivi(`Notifica inviata a un ${dove}`); }
-    catch (e) {
-      if (e.statusCode === 404 || e.statusCode === 410) { await del(`/push_subscriptions?endpoint=eq.${encodeURIComponent(s.endpoint)}`); scrivi(`Un ${dove} non è più registrato: rimosso`); }
-      else { errori++; scrivi(`Invio a un ${dove} non riuscito: ${e.statusCode || ''} ${String(e.body || e.message).slice(0, 200)}`); }
+  const N = impostazioni(S).notifiche;
+  const festivo = dow === 0 || dow === 6;
+  // quali promemoria tocca mandare adesso
+  const momenti = [];
+  if (forza) momenti.push('mattino');
+  else {
+    if (N.mattino && ora >= +N.oraMattino && ora < 23 && log.mattino !== today && (N.weekend || !festivo)) momenti.push('mattino');
+    if (N.sera && ora >= +N.oraSera && log.sera !== today && (N.weekend || !festivo)) momenti.push('sera');
+  }
+  if (!momenti.length) { scrivi('Niente da mandare adesso per un utente'); continue; }
+  for (const momento of momenti) {
+    const todo = promemoria(S, today, momento);
+    scrivi(`Promemoria ${momento}: ${todo.length} voci`);
+    log[momento] = today;
+    if (!todo.length && !forza) continue;
+    const urgenti = todo.filter(t => t.lvl === 'bad').length;
+    const titolo = momento === 'sera' ? 'Fine giornata' : 'Buongiorno';
+    const payload = JSON.stringify({
+      title: todo.length ? `${titolo} · ${todo.length} ${todo.length === 1 ? 'cosa da fare' : 'cose da fare'}${urgenti ? ' (' + urgenti + ' urgenti)' : ''}` : 'Diario di Posa · notifiche attive',
+      body: todo.length ? todo.slice(0, 6).map(t => '• ' + t.txt).join('\n') : 'Le notifiche funzionano. Ti scrivo solo quando c\'è qualcosa da fare.',
+      url: momento === 'sera' ? './#cal' : './#cal',
+      tag: `promemoria-${momento}-${today}`,
+    });
+    for (const s of subs.filter(x => x.user_id === uid)) {
+      const dove = /apple/.test(s.endpoint) ? 'dispositivo Apple' : 'dispositivo';
+      try { await webpush.sendNotification(s.subscription, payload, { TTL: 6 * 3600 }); inviate++; scrivi(`Notifica inviata a un ${dove}`); }
+      catch (e) {
+        if (e.statusCode === 404 || e.statusCode === 410) { await del(`/push_subscriptions?endpoint=eq.${encodeURIComponent(s.endpoint)}`); scrivi(`Un ${dove} non è più registrato: rimosso`); }
+        else { errori++; scrivi(`Invio a un ${dove} non riuscito: ${e.statusCode || ''} ${String(e.body || e.message).slice(0, 200)}`); }
+      }
     }
   }
+  if (!forza) await segnaInviato(uid, log);
 }
 if (errori && !inviate) fine(1, 'nessuna notifica è stata consegnata');
 fine(0);
