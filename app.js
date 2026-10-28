@@ -735,7 +735,7 @@ function rigaCantiere(s, quando) {
   return `<div class="card cant"><div class="row between"><span class="t">${esc(s.indirizzo)}</span>${j ? `<span class="chip ${quando === 'oggi' ? 'warn' : quando === 'prossimi' ? 'in' : ''}">${quando === 'oggi' ? 'Oggi' : fmtD(j.d, { day: 'numeric', month: 'short' })}</span>` : ''}</div>
     <div class="small muted">${esc(s.clienti.join(', '))} · ${s.lavori.length} ${s.lavori.length === 1 ? 'lavoro' : 'lavori'}${j ? ` · ${j.tipo.toLowerCase()}` : ''}</div>
     ${bottoniNav(s.indirizzo)}
-    ${j && quando !== 'passati' ? `<div class="links"><button type="button" class="linkbtn" data-act="${j.kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${j.x.id}">Apri il lavoro</button><button type="button" class="linkbtn" data-act="icsJob" data-arg="${j.kind}" data-id="${j.x.id}">Aggiungi al Calendario</button></div>` : ''}
+    ${j && quando !== 'passati' ? `<div class="links"><button type="button" class="linkbtn" data-act="${j.kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${j.x.id}">Apri il lavoro</button></div>` : ''}
   </div>`;
 }
 function rCantieri() {
@@ -745,7 +745,7 @@ function rCantieri() {
   const pross = tutti.filter(s => !s.oggi.length && s.prossimo).sort((a, b) => a.prossimo.d.localeCompare(b.prossimo.d));
   const pass = tutti.filter(s => !s.oggi.length && !s.prossimo).sort((a, b) => String(b.ultimo?.d || '').localeCompare(String(a.ultimo?.d || '')));
   return `<div class="row between"><h2>Cantieri</h2></div>
-  <div class="notice small"><b>Su CarPlay:</b> con l'iPhone collegato all'auto, tocca <b>Mappe</b>, <b>Google Maps</b> o <b>Waze</b> e il percorso parte sullo schermo dell'auto. Con <b>Aggiungi al Calendario</b> il lavoro compare anche nell'app Calendario di CarPlay, con l'indirizzo pronto per la navigazione.</div>
+  <div class="notice small"><b>Su CarPlay:</b> con l'iPhone collegato all'auto, tocca <b>Mappe</b>, <b>Google Maps</b> o <b>Waze</b> e il percorso parte sullo schermo dell'auto. Con il calendario «Diario di Posa» qui sotto trovi tutti i lavori anche nell'app Calendario di CarPlay, con l'indirizzo pronto per la navigazione.</div>
   ${boxCalendario()}
   <label class="f"><span class="sr">Cerca</span><input id="cercaCantiere" type="search" placeholder="Cerca per indirizzo o cliente…" value="${esc(UI.cercaCant || '')}" autocomplete="off"></label>
   <div id="listaCantieri" class="stack">
@@ -787,27 +787,6 @@ async function attivaCalendario(cambio) {
   const url = await store.linkCalendario(path);
   salvaImp({ calendario: { path, url, creato: TODAY } });
   if (cambio && vecchio) store.removeFile(vecchio).catch(() => {});
-}
-/** File .ics di un lavoro, da aprire con il Calendario dell'iPhone (visibile anche su CarPlay). */
-function icsLavoro(kind, x) {
-  const G = IMP().giornata, pad = n => String(n).padStart(2, '0');
-  const hm = s => String(s || '07:30').replace(':', '') + '00';
-  const escI = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-  const giorni = kind === 'lavori' ? giorniPosa(x) : [x.dataProg || x.data];
-  const ora = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  const fineInt = () => { const h = +hm(G.inizio).slice(0, 2) + 2; return pad(Math.min(h, 23)) + hm(G.inizio).slice(2); };
-  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Diario di Posa//IT', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
-  giorni.forEach((g, i) => {
-    const d = g.replaceAll('-', '');
-    L.push('BEGIN:VEVENT', `UID:${kind}-${x.id}-${g}@diario-di-posa`, `DTSTAMP:${ora}`,
-      `SUMMARY:${escI(`${kind === 'lavori' ? 'Posa' : 'Intervento'} · ${x.cliente || 'Cliente'}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
-      `DTSTART;TZID=Europe/Rome:${d}T${hm(G.inizio)}`, `DTEND;TZID=Europe/Rome:${d}T${kind === 'lavori' ? hm(G.fine) : fineInt()}`,
-      ...(x.indirizzo ? [`LOCATION:${escI(x.indirizzo)}`] : []),
-      `DESCRIPTION:${escI([kind === 'lavori' ? x.installato : x.descrizione, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
-      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Partenza per il cantiere', 'TRIGGER:-PT30M', 'END:VALARM', 'END:VEVENT');
-  });
-  L.push('END:VCALENDAR');
-  return L.join('\r\n') + '\r\n';
 }
 
 /* ---------- impostazioni condivise (valgono su tutti i dispositivi) ---------- */
@@ -2096,14 +2075,6 @@ document.addEventListener('click', async e => {
     case 'calAttiva': case 'calNuovo': try { b.disabled = true; await attivaCalendario(a === 'calNuovo'); toast(a === 'calNuovo' ? 'Link cambiato: iscriviti di nuovo sull\'iPhone' : 'Calendario pronto: ora tocca «Iscriviti sull\'iPhone»'); } catch (err) { toast(err.userMsg || 'Non sono riuscito, riprova'); } render(); break;
     case 'calSpegni': { const pth = S.impostazioni?.calendario?.path; salvaImp({ calendario: null }); if (pth) store.removeFile(pth).catch(() => {}); toast('Calendario disattivato: puoi toglierlo anche dall\'iPhone'); render(); break; }
     case 'calCopia': { const u = S.impostazioni?.calendario?.url || ''; try { await navigator.clipboard.writeText(u); toast('Indirizzo copiato'); } catch { prompt('Copia questo indirizzo', u); } break; }
-    case 'icsJob': {
-      const x = S[arg].find(r => r.id === id); if (!x) break;
-      const file = new File([icsLavoro(arg, x)], `${arg === 'lavori' ? 'posa' : 'intervento'}-${String(x.cliente || 'cliente').replace(/[^\w]+/g, '-')}.ics`, { type: 'text/calendar' });
-      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), target: '_blank', rel: 'noopener' });
-      if (!/iphone|ipad/i.test(navigator.userAgent)) a.download = file.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      toast('Conferma con "Aggiungi" nel Calendario'); break;
-    }
     case 'menuClose': chiudiMenu(); break;
     case 'menuGo': UI.tab = arg; if (arg !== 'cal') UI.calCli = null; try { history.replaceState(null, '', '#' + arg); } catch {} render(); window.scrollTo({ top: 0 }); break;
     case 'setNotifiche': sheetNotifiche(); break;
