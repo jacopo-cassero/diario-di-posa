@@ -181,7 +181,9 @@ function rAccessi() {
     : `<div class="small muted">Crea un link da mandare a rivenditori, dipendenti e soci: aprendolo possono installare l'app e chiederti l'accesso.</div><div class="row"><button class="btn sm primary" data-act="accApri" type="button">Crea il link</button></div>`}
     <div class="g2">${F('Preavviso minimo per le prenotazioni', selN('accPre', [[1, '1 giorno'], [2, '2 giorni'], [3, '3 giorni'], [5, '5 giorni'], [7, '1 settimana'], [14, '2 settimane']], a.preavviso ?? 2))}${F('I rivenditori vedono', selN('accMesi', [[1, '1 mese avanti'], [2, '2 mesi avanti'], [3, '3 mesi avanti'], [4, '4 mesi avanti'], [6, '6 mesi avanti'], [12, '1 anno avanti']], a.mesi ?? 4))}</div>
     ${tog('accListino', 'I rivenditori vedono il listino', a.listino !== false, 'lo consultano e lo scaricano in PDF; serve anche per la stima dei preventivi')}
-    <div class="row"><button class="btn sm" data-act="listinoPdf" type="button">${svg('doc', 'i')} Listino in PDF</button></div>
+    <div class="fieldset"><span class="fs-t">Listino in PDF da scaricare</span>
+      <div class="small muted">${a.listinoPdf ? `Stanno scaricando il tuo PDF, caricato il ${fmtD(a.listinoPdf)}.` : 'Ora scaricano il listino creato dall\'app. Carica il tuo PDF per far scaricare quello.'}</div>
+      <div class="row"><button class="btn sm" data-act="listinoPdf" type="button">${svg('doc', 'i')} Vedi</button><label class="btn sm primary">${a.listinoPdf ? 'Sostituisci il PDF' : 'Carica il tuo PDF'}<input type="file" id="listinoPdfIn" accept="application/pdf,.pdf" hidden></label>${a.listinoPdf ? '<button class="btn sm" data-act="listinoPdfTogli" type="button">Togli</button>' : ''}</div></div>
   </section>
   ${ACC_PREV.L.length ? `<section class="stack"><h3>Richieste di preventivo</h3>${ACC_PREV.L.map(cardRichPrev).join('')}</section>` : ''}
   ${prenR.length ? `<section class="stack"><h3>Prenotazioni da confermare</h3>${prenR.map(p => cardPren(p, true)).join('')}</section>` : ''}
@@ -491,10 +493,10 @@ function rRivPreventivo() {
   const P = RIV.prev || [];
   const ST = { nuova: ['warn', 'Inviata'], in_lavorazione: ['warn', 'In preparazione'], inviato: ['ok', 'Preventivo pronto'], chiusa: ['', 'Chiusa'] };
   return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="rivPrevNuovo" type="button">${svg('plus')} Richiedi</button></div>
-  <div class="small muted">Scrivi tipologie e quantità, luogo, piano e se c'è da smontare o smurare: vedi subito una stima e la richiesta arriva all'installatore, che ti manda il preventivo.</div>
+  <div class="small muted">Scrivi tipologie e quantità, luogo, piano e se c'è da smontare o smurare: la richiesta arriva all'installatore, che ti manda il preventivo con il prezzo.</div>
   ${RIV.listinoErr && !RIV.prev ? `<div class="notice small">${esc(RIV.listinoErr)}</div>` : ''}
   <section class="stack">${P.map(r => { const st = ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
-    <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz${r.stima ? ' · stima ' + eur(r.stima) : ''}</div>
+    <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz</div>
     ${r.risposta ? `<div class="small">${esc(r.risposta)}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
@@ -525,22 +527,34 @@ function sheetPrevRiv() {
       ${F('Luogo del cantiere', inp('rv_luogo', '', 'text', 'required placeholder="Comune e indirizzo"'))}
       <div class="g2">${F('Cliente finale', inp('rv_cliente', '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', '', 'tel', 'placeholder="Facoltativo"'))}</div>
       <div class="g2">${F('Piano', sel('rv_piano', PIANI.map(p => [p, p]), 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], ''))}</div>
-      ${tog('rv_tiro', 'Tiro al piano', false, 'si segna da solo se il piano è alto e non c\'è ascensore')}
+      ${tog('rv_tiro', 'Serve il tiro al piano', false, 'si segna da solo se il piano è alto e non c\'è ascensore')}
     </div>
     <div class="fieldset"><span class="fs-t">Tipologie e quantità</span>
       <div id="rvRighe" class="stack">${rigaPrevRiv(L)}${rigaPrevRiv(L)}</div>
       <button type="button" class="btn sm" data-act="rvAdd">+ Tipologia</button>
     </div>
     ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3"></textarea>`)}
-    <div class="fieldset stima"><span class="fs-t">Stima</span><div id="stimaRiv"></div></div>`,
+    <div class="small muted">Il prezzo te lo manda l'installatore con il preventivo.</div>`,
   async fd => {
     const d = leggiPrevRiv(fd);
     if (!d.righe.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Aggiungi almeno una tipologia con la quantità' });
-    d.stima = Math.round(stimaPrev(d, L).totale * 100) / 100;
     await store.rpc('chiedi_preventivo', { dati: d });
     toast('Richiesta inviata: ti arriva il preventivo'); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
   }, { saveLabel: 'Invia richiesta' });
-  aggiornaStimaRiv();
+}
+/** Scarica un PDF dall'archivio e lo mostra con i tasti Invia / Apri / Scarica. */
+async function apriPdfRemoto(path, nome) {
+  try {
+    toast('Apro il PDF…');
+    const u = await store.fileUrl(path); if (!u) return false;
+    const r = await fetch(u); if (!r.ok) return false;
+    mostraPdf(new Uint8Array(await r.arrayBuffer()), nome, 'Listino', null); return true;
+  } catch { return false; }
+}
+async function caricaListinoPdf(f) {
+  if (!/pdf$/i.test(f.type) && !/\.pdf$/i.test(f.name)) { toast('Scegli un file PDF'); return; }
+  try { toast('Carico il PDF…'); await store.caricaFisso('listino-rivenditori.pdf', f.type ? f : new Blob([f], { type: 'application/pdf' })); salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listinoPdf: TODAY } }); toast('Listino caricato: i rivenditori scaricano il tuo PDF'); render(); }
+  catch (e) { toast(e.userMsg || 'Caricamento non riuscito'); }
 }
 async function pdfListino(listino, azienda, nome) {
   await caricaImmagini();
@@ -559,7 +573,6 @@ function cardRichPrev(r) {
   return `<div class="card"><div class="row between"><span class="t">${esc(m.azienda || m.nome || 'Rivenditore')}</span><span class="chip ${r.stato === 'nuova' ? 'warn' : ''}">${r.stato === 'nuova' ? 'Nuova' : 'In preparazione'}</span></div>
     <div class="small"><b>${esc(r.indirizzo || '')}</b>${r.piano ? ' · ' + esc(r.piano) : ''}${r.ascensore ? ' · ascensore ' + esc(r.ascensore.toLowerCase()) : ''}${r.tiro ? ' · tiro al piano' : ''}${r.cliente ? ' · ' + esc(r.cliente) : ''}</div>
     <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}
-    ${r.stima ? `<div class="small muted">Stima vista dal rivenditore: ${eur(r.stima)}</div>` : ''}
     <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
 }
 function preventivoDaRichiesta(r) {
@@ -586,6 +599,7 @@ document.addEventListener('change', e => {
   if (t.name === 'rv_piano' || t.name === 'rv_asc') { const tiro = $('#f_rv_tiro'); if (tiro && !tiro.dataset.toccato) { const p = $('#f_rv_piano').value, a = $('#f_rv_asc').value; tiro.checked = p !== 'Piano terra' && a !== 'Sì'; } aggiornaStimaRiv(); }
   if (t.name === 'rv_tiro') { t.dataset.toccato = '1'; aggiornaStimaRiv(); }
   if (t.closest && t.closest('#rvRighe')) aggiornaStimaRiv();
+  if (t.id === 'listinoPdfIn') { const f = t.files && t.files[0]; t.value = ''; if (f) caricaListinoPdf(f); }
   if (t.id === 'f_accListino') salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listino: t.checked } });
 });
 document.addEventListener('click', async e => {
@@ -593,11 +607,13 @@ document.addEventListener('click', async e => {
   const a = b.dataset.act, id = b.dataset.id;
   switch (a) {
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
-    case 'rivListinoPdf': { const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
+    case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
+    {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
     case 'rvAdd': $('#rvRighe').insertAdjacentHTML('beforeend', rigaPrevRiv(LISTINO_RIV())); break;
     case 'rvRm': { const box = $('#rvRighe'); if (box.children.length > 1) b.closest('.prevriga').remove(); else b.closest('.prevriga').querySelectorAll('select,input').forEach(x => { x.value = ''; }); aggiornaStimaRiv(); break; }
-    case 'listinoPdf': { const L = LIST(); await pdfListino(L, AZ(), `Listino posa ${L.anno || ''}.pdf`); break; }
+    case 'listinoPdf': { if (S.impostazioni?.accessi?.listinoPdf && await apriPdfRemoto(`${store.owner()}/listino-rivenditori.pdf`, 'Listino rivenditori.pdf')) break; const L = LIST(); await pdfListino(L, AZ(), `Listino posa ${L.anno || ''}.pdf`); break; }
+    case 'listinoPdfTogli': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per togliere'; break; } await store.removeFile(`${store.owner()}/listino-rivenditori.pdf`).catch(() => {}); salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listinoPdf: '' } }); toast('PDF tolto: i rivenditori scaricano quello creato dall\'app'); render(); break; }
     case 'richPrevCrea': {
       const r = ACC_PREV.L.find(x => x.id === id); if (!r) break;
       const esiste = r.preventivo_id && S.preventivi.find(p => p.id === r.preventivo_id);

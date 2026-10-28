@@ -220,6 +220,16 @@ export function createStore(cfg, onChange) {
       if (error) throw Object.assign(error, { userMsg: /size|large/i.test(error.message) ? 'File troppo grande (massimo 50 MB).' : 'Caricamento non riuscito, riprova.' });
       return path;
     },
+    /** Carica un file in un posto fisso della cartella del titolare (es. il listino PDF), sostituendo il precedente. */
+    async caricaFisso(nome, blob) {
+      if (!sb || !owner) throw Object.assign(new Error('demo'), { userMsg: 'Serve il collegamento al database.' });
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { userMsg: 'Serve la connessione per caricare il file.' });
+      const path = `${owner}/${nome}`;
+      const { error } = await sb.storage.from('file').upload(path, blob, { contentType: blob.type || 'application/pdf', upsert: true, cacheControl: '60' });
+      if (error) throw Object.assign(error, { userMsg: /size|large/i.test(error.message) ? 'File troppo grande (massimo 50 MB).' : 'Caricamento non riuscito, riprova.' });
+      urlCache.delete(path);
+      return path;
+    },
     async fileUrl(path) {
       if (!path) return '';
       if (path.startsWith('demo:')) return ls.get('ddp:files:demo', {})[path] || '';
