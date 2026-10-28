@@ -51,7 +51,7 @@ const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'apert
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste'].includes(h)) UI.tab = h;
   if (h === 'fatture') { UI.tab = 'conti'; UI.seg = 'fatt'; }
   if (h === 'magazzino') { UI.tab = 'conti'; UI.seg = 'mag'; }
 }
@@ -125,13 +125,15 @@ async function caricaAccessi(forza) {
 store.onAccessi = () => caricaAccessi(true);
 const dipendenti = () => ACC.membri.filter(m => m.ruolo === 'dipendente' && m.stato === 'attivo');
 const nomeMembro = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.nome || m.email) : 'Dipendente'; };
+const nRichieste = () => ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(r => r.stato === 'nuova').length;
 const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(r => r.stato === 'nuova').length;
 
 /** Avviso in cima al calendario quando ci sono richieste da guardare. */
 function avvisoAccessi() {
   const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length, q = ACC_PREV.L.filter(x => x.stato === 'nuova').length;
   if (!r && !p && !q) return '';
-  return `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} dei rivenditori da confermare`, q && `<b>${q}</b> ${q === 1 ? 'richiesta' : 'richieste'} di preventivo`, r && `<b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>`;
+  return (p || q ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="richieste">${svg('cal', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} da confermare`, q && `<b>${q}</b> ${q === 1 ? 'richiesta' : 'richieste'} di preventivo`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>` : '')
+    + (r ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span><b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso</span><span class="go">›</span></button>` : '');
 }
 
 /* ---------- squadra sui lavori ---------- */
@@ -185,8 +187,7 @@ function rAccessi() {
       <div class="small muted">${a.listinoPdf ? `Stanno scaricando il tuo PDF, caricato il ${fmtD(a.listinoPdf)}.` : 'Ora scaricano il listino creato dall\'app. Carica il tuo PDF per far scaricare quello.'}</div>
       <div class="row"><button class="btn sm" data-act="listinoPdf" type="button">${svg('doc', 'i')} Vedi</button><label class="btn sm primary">${a.listinoPdf ? 'Sostituisci il PDF' : 'Carica il tuo PDF'}<input type="file" id="listinoPdfIn" accept="application/pdf,.pdf" hidden></label>${a.listinoPdf ? '<button class="btn sm" data-act="listinoPdfTogli" type="button">Togli</button>' : ''}</div></div>
   </section>
-  ${ACC_PREV.L.length ? `<section class="stack"><h3>Richieste di preventivo</h3>${ACC_PREV.L.map(cardRichPrev).join('')}</section>` : ''}
-  ${prenR.length ? `<section class="stack"><h3>Prenotazioni da confermare</h3>${prenR.map(p => cardPren(p, true)).join('')}</section>` : ''}
+  ${prenR.length || ACC_PREV.L.length ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="richieste">${svg('cal', 'i')} <span>Prenotazioni e preventivi dei rivenditori sono nella pagina <b>Richieste</b></span><span class="go">›</span></button>` : ''}
   ${rich.length ? `<section class="stack"><h3>Richieste di accesso</h3>${rich.map(r => `<div class="card"><div class="row between"><span class="t">${esc(r.nome)}${r.azienda ? ' · ' + esc(r.azienda) : ''}</span><span class="chip">${r.ruolo === 'altro' ? 'da decidere' : nomeRuolo(r.ruolo)}</span></div>
       <div class="small muted">${esc(r.email)}${r.telefono ? ' · ' + esc(r.telefono) : ''} · ${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</div>
       ${r.messaggio ? `<div class="small">${esc(r.messaggio)}</div>` : ''}
@@ -194,14 +195,36 @@ function rAccessi() {
   <section class="stack"><h3>Persone con accesso</h3>
     ${perRuolo.map(([k, l, L]) => L.length ? `<div class="panel"><div class="fs-t">${L.length > 1 ? { titolare: 'Titolari', rivenditore: 'Rivenditori', dipendente: 'Dipendenti' }[k] : l}</div>${L.map(m => `<div class="list-line" role="button" tabindex="0" data-act="accMembro" data-id="${m.user_id}"><div><b>${esc(m.nome || m.email)}</b><div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div></div><span class="chip ${m.stato === 'attivo' ? 'ok' : 'bad'}">${m.stato === 'attivo' ? (m.cambio_password ? 'primo accesso' : 'attivo') : 'sospeso'}</span></div>`).join('')}</div>` : '').join('') || `<div class="empty small">Ancora nessuno. Manda il link o tocca <b>+ Persona</b>.</div>`}
   </section>
-  ${prenC.length ? `<section class="stack"><h3>Prenotazioni confermate</h3>${prenC.map(p => cardPren(p, false)).join('')}</section>` : ''}`;
+`;
+}
+/* ---------- pagina Richieste: prenotazioni e preventivi dei rivenditori ---------- */
+function rRichieste() {
+  if (store.st.mode === 'demo') return `<h2>Richieste</h2><div class="empty">Le richieste dei rivenditori arrivano dopo il collegamento al database.</div>`;
+  if (ACC.ok === false && ACC.err === 'manca') return `<h2>Richieste</h2><div class="notice">Manca lo script <code>accessi.sql</code> su Supabase.</div>`;
+  if (ACC.ok === null) { caricaAccessi(true); return `<h2>Richieste</h2><div class="empty">Caricamento…</div>`; }
+  const seg = UI.richSeg || 'pren', f = UI.richFiltro || 'da';
+  const P = ACC.pren, Q = ACC_PREV.L;
+  const nDa = P.filter(p => p.stato === 'richiesta').length, nQ = Q.filter(r => r.stato === 'nuova').length;
+  const filtri = [['da', 'Da confermare', p => p.stato === 'richiesta'], ['conf', 'Confermate', p => p.stato === 'confermata' && p.data_fine >= TODAY], ['arch', 'Archivio', p => !(p.stato === 'richiesta' || (p.stato === 'confermata' && p.data_fine >= TODAY))]];
+  const [, lf, fn] = filtri.find(x => x[0] === f) || filtri[0];
+  const L = P.filter(fn).sort((a, b) => f === 'arch' ? b.data.localeCompare(a.data) : a.data.localeCompare(b.data));
+  return `<div class="row between"><h2>Richieste</h2><button class="btn sm" data-act="richAggiorna" type="button">Aggiorna</button></div>
+  <div class="seg" role="tablist"><button type="button" data-act="richSeg" data-arg="pren" aria-pressed="${seg === 'pren'}">Prenotazioni${nDa ? ` <span class="badge">${nDa}</span>` : ''}</button><button type="button" data-act="richSeg" data-arg="prev" aria-pressed="${seg === 'prev'}">Preventivi${nQ ? ` <span class="badge">${nQ}</span>` : ''}</button></div>
+  ${seg === 'pren' ? `
+    <div class="chips">${filtri.map(([k, l, fx]) => `<button type="button" class="chipf" data-act="richFiltro" data-arg="${k}" aria-pressed="${f === k}">${l} <span class="num">${P.filter(fx).length}</span></button>`).join('')}</div>
+    <section class="stack">${L.map(p => cardPren(p, p.stato === 'richiesta')).join('') || `<div class="empty small">${f === 'da' ? 'Nessuna prenotazione da confermare.' : f === 'conf' ? 'Nessuna prenotazione confermata in arrivo.' : 'Archivio vuoto.'}</div>`}</section>
+    <div class="small muted">L'archivio mostra le prenotazioni degli ultimi due mesi: rifiutate, annullate dal rivenditore e già passate.</div>`
+  : `<section class="stack">${Q.map(cardRichPrev).join('') || '<div class="empty small">Nessuna richiesta di preventivo aperta.</div>'}</section>
+    <div class="small muted">Le richieste archiviate o con il preventivo già inviato non compaiono più qui.</div>`}`;
 }
 function cardPren(p, azioni) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore);
   const giorni = p.data_fine > p.data ? `dal ${fmtD(p.data, { day: 'numeric', month: 'short' })} al ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'long', day: 'numeric', month: 'long' });
   return `<div class="card"><div class="row between"><span class="t">${esc(r?.azienda || r?.nome || 'Rivenditore')}</span><span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></div>
-    <div class="small"><b>${giorni}</b> · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
-    <details class="small"><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>
+    <div class="small"><b>${giorni}</b>${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.indirizzo ? ' · ' + esc(p.indirizzo) : ''}</div>
+    ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
+    ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
+    ${schedaTesto(p) ? `<details class="small" ${azioni ? 'open' : ''}><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>` : '<div class="small muted">Nessun dettaglio del cantiere.</div>'}
     ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.lavoro_id ? `<button class="linkbtn small" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}</div>`;
 }
 const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
@@ -608,6 +631,9 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const a = b.dataset.act, id = b.dataset.id;
   switch (a) {
+    case 'richSeg': UI.richSeg = b.dataset.arg; render(); break;
+    case 'richFiltro': UI.richFiltro = b.dataset.arg; render(); break;
+    case 'richAggiorna': await caricaAccessi(true); toast('Aggiornato'); break;
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
@@ -788,7 +814,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -1504,7 +1530,8 @@ function menuHtml() {
   ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
   ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
-  ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${daFareAccessi() ? ` <span class="badge">${daFareAccessi()}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'richieste', 'cal', `Richieste${nRichieste() ? ` <span class="badge">${nRichieste()}</span>` : ''}`, 'prenotazioni e preventivi dei rivenditori', UI.tab === 'richieste')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${ACC.richieste.length ? ` <span class="badge">${ACC.richieste.length}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
   ${item('setGiornata', '', 'clock', 'Giornata e orari', `${G.inizio}–${G.fine} · ${descrGiorni(G.giorni)} · ${num(oreGiornata(G))} ore`)}

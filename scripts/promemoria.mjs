@@ -104,7 +104,7 @@ for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuovi
     ...R.map(r => `• ${r.nome}${r.azienda ? ' (' + r.azienda + ')' : ''} chiede l'accesso${r.ruolo !== 'altro' ? ' come ' + r.ruolo : ''}`),
   ];
   const titolo = Q.length && !P.length ? `${Q.length} ${Q.length === 1 ? 'richiesta di preventivo' : 'richieste di preventivo'}` : P.length ? `${P.length} ${P.length === 1 ? 'prenotazione da confermare' : 'prenotazioni da confermare'}` : `${R.length} ${R.length === 1 ? 'richiesta di accesso' : 'richieste di accesso'}`;
-  const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#accessi', tag: `accessi-${Date.now()}` });
+  const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: P.length || Q.length ? './#richieste' : './#accessi', tag: `accessi-${Date.now()}` });
   // al proprietario e ai titolari attivi
   for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);
   await segnaNotificato('richieste_accesso', R.map(x => x.id));

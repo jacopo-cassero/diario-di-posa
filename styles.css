@@ -437,3 +437,9 @@ details > summary{cursor:pointer;color:var(--muted);padding:2px 0}
 .stima #stimaRiv{display:flex;flex-direction:column;gap:4px}
 .stimatot{border-top:1px solid var(--line);padding-top:6px;margin-top:2px;font-size:1.05rem}
 .list-line .r{text-align:right;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chipf{border:1.5px solid var(--line);background:var(--surface);color:var(--fg);border-radius:99px;padding:6px 12px;font:inherit;font-weight:600;font-size:.88rem;cursor:pointer}
+.chipf .num{color:var(--muted);margin-left:2px}
+.chipf[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.chipf[aria-pressed="true"] .num{color:inherit;opacity:.75}
+.seg .badge{margin-left:4px}
