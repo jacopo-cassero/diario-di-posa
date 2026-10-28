@@ -1,6 +1,7 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
 import { creaDocumento, docDaLavoro } from './documento.js';
+import { MODELLI_BASE, TIPI_CAMPO, creaModulo } from './moduli.js';
 import { createStore } from './store.js';
 
 /* ---------- utilità ---------- */
@@ -35,6 +36,8 @@ const ICON = {
   bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2 8 2 8H4s2-2 2-8zM10 21a2 2 0 0 0 4 0"/>',
   clock: '<path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
+  clip2: '<path d="M8 4h8v3H8zM6 5H5v16h14V5h-1M8.5 12l2 2 4-4M8.5 17h7"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -46,7 +49,7 @@ const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'apert
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || h === 'set') UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli'].includes(h)) UI.tab = h;
   if (h === 'fatture') { UI.tab = 'conti'; UI.seg = 'fatt'; }
   if (h === 'magazzino') { UI.tab = 'conti'; UI.seg = 'mag'; }
 }
@@ -100,7 +103,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -406,6 +409,245 @@ function rAn() {
   <div class="small muted">I file CSV si aprono con Excel o Numbers: utili per il commercialista.</div>`;
 }
 
+/* ---------- moduli compilabili ---------- */
+const modelli = () => {
+  const mie = new Map(S.modelli.map(m => [m.id, m]));
+  return [
+    ...MODELLI_BASE.map(b => mie.has(b.id) ? { ...mie.get(b.id), id: b.id, base: true, modificato: true } : { ...b, base: true }),
+    ...S.modelli.filter(m => !MODELLI_BASE.some(b => b.id === m.id)).map(m => ({ ...m, mio: true })),
+  ];
+};
+let modCtx = {};
+function ctxDa(kind, x) {
+  if (kind === 'clienti') return { cliente: x.nome, clienteId: x.id, indirizzo: x.indirizzo, telefono: x.telefono };
+  const c = cliDi(x) || {};
+  const base = { cliente: x.cliente || '', clienteId: x.clienteId || c.id || '', indirizzo: x.indirizzo || c.indirizzo || '', telefono: x.telefono || c.telefono || '', ore: x.ore, ref: { kind, id: x.id } };
+  return kind === 'lavori' ? { ...base, data: x.dataFine || x.data, lavori: x.installato } : { ...base, data: x.dataProg || x.data, descrizione: x.descrizione };
+}
+function valoriIniziali(campi, ctx) {
+  const v = {};
+  for (const c of campi) {
+    if (c.valore) v[c.id] = c.valore;
+    if (c.auto === 'posatore') v[c.id] = AZ().ragioneSociale;
+    else if (c.auto && ctx[c.auto] != null && ctx[c.auto] !== '') v[c.id] = c.auto === 'ore' ? n2(ctx.ore) || '' : ctx[c.auto];
+    if (c.tipo === 'data' && !v[c.id]) v[c.id] = ctx.data || TODAY;
+  }
+  return v;
+}
+function sheetScegliModello(ctx = {}) {
+  modCtx = ctx;
+  openSheet('Nuovo modulo', `
+    ${ctx.cliente ? `<div class="small muted">Per <b>${esc(ctx.cliente)}</b>${ctx.indirizzo ? ' · ' + esc(ctx.indirizzo) : ''}: i dati si compilano da soli.</div>` : ''}
+    <div class="stack">${modelli().map(m => `<button type="button" class="modchoice" data-act="modNuovo" data-arg="${esc(m.id)}">${svg('clip2')}<span><b>${esc(m.nome)}</b><small>${esc(m.descr || `${(m.campi || []).length} campi`)}</small></span><span class="go">›</span></button>`).join('')}</div>
+    <button type="button" class="btn sm" data-act="modelloNuovo">+ Crea un modello tuo</button>`, null);
+}
+let modEdit = null;
+function campoModulo(c, val) {
+  const n = 'm_' + c.id;
+  switch (c.tipo) {
+    case 'titolo': return `<h3 class="modtit">${esc(c.label)}</h3>`;
+    case 'nota': return `<p class="modnota small">${esc(c.label)}</p>`;
+    case 'testolungo': return F(esc(c.label), `<textarea id="f_${n}" name="${n}">${esc(val || '')}</textarea>`);
+    case 'numero': return F(esc(c.label), inp(n, val, 'number'));
+    case 'data': return F(esc(c.label), inp(n, val, 'date'));
+    case 'scelta': return F(esc(c.label), sel(n, [['', 'Scegli…'], ...(c.opzioni || []).map(o => [o, o])], val || ''));
+    case 'check': return tog(n, esc(c.label), !!val);
+    case 'si_no': return `<div class="f"><span>${esc(c.label)}</span><div class="seg sino" role="group">${[['si', 'Sì'], ['no', 'No']].map(([k, l]) => `<button type="button" data-act="siNo" data-arg="${k}" data-for="${n}" aria-pressed="${val === k}">${l}</button>`).join('')}</div><input type="hidden" id="f_${n}" name="${n}" value="${esc(val || '')}"></div>`;
+    case 'tabella': {
+      const cols = c.colonne || ['Voce'];
+      const righe = Array.isArray(val) && val.length ? val : [cols.map(() => '')];
+      return `<div class="fieldset"><span class="fs-t">${esc(c.label)}</span><div class="mtab" id="tab_${c.id}" style="--cols:${cols.length}"><div class="mtr mth">${cols.map(h => `<span>${esc(h)}</span>`).join('')}<span></span></div>${righe.map(r => rigaTab(cols, r)).join('')}</div><button type="button" class="btn sm" data-act="tabRiga" data-arg="${c.id}">+ Riga</button></div>`;
+    }
+    case 'firma': return `<div class="firma"><div class="row between"><span class="fs-t">${esc(c.label)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val || '')}"><div class="small muted">Firma qui con il dito</div></div>`;
+    default: return F(esc(c.label), inp(n, val));
+  }
+}
+const rigaTab = (cols, r = []) => `<div class="mtr">${cols.map((h, j) => `<input value="${esc(r[j] || '')}" aria-label="${esc(h)}">`).join('')}<button type="button" data-act="tabRm" aria-label="Togli riga">×</button></div>`;
+function sheetModulo(mod, isNew) {
+  modEdit = { mod, isNew };
+  const firme = (mod.campi || []).filter(c => c.tipo === 'firma');
+  openSheet(mod.titolo || 'Modulo', `
+    ${campoCliente('mcliente', 'Cliente', mod.cliente)}
+    <div class="cliline small" id="cliInfo"></div>
+    ${(mod.campi || []).map(c => campoModulo(c, (mod.valori || {})[c.id])).join('')}`,
+  async fd => { salvaModulo(fd); toast('Modulo salvato'); }, {
+    del: isNew ? null : async () => { store.drop('moduli', mod.id); toast('Modulo eliminato'); },
+    extra: `<button type="button" class="btn dark" data-act="modPdf">PDF</button>`,
+  });
+  aggiornaCliInfoModulo();
+  requestAnimationFrame(initFirme);
+  if (firme.length) $('#sheetBody').addEventListener('touchmove', e => { if (e.target.classList?.contains('pad')) e.preventDefault(); }, { passive: false });
+}
+function aggiornaCliInfoModulo() {
+  const box = $('#cliInfo'); const el = $('#f_mcliente'); if (!box || !el) return;
+  const c = trovaCliente(el.value); box.innerHTML = !el.value.trim() ? '' : c ? `${svg('cli', 'i')} In rubrica · ${tipoCliente(c.tipo)}${c.telefono ? ' · ' + esc(c.telefono) : ''}` : `${svg('cli', 'i')} Cliente nuovo: lo aggiungo alla rubrica quando salvi`;
+  box.classList.toggle('nuovo', !c);
+}
+function salvaModulo(fd) {
+  const { mod, isNew } = modEdit;
+  const valori = {};
+  for (const c of mod.campi || []) {
+    const n = 'm_' + c.id;
+    if (['titolo', 'nota'].includes(c.tipo)) continue;
+    if (c.tipo === 'check') valori[c.id] = !!fd.get(n);
+    else if (c.tipo === 'tabella') valori[c.id] = [...document.querySelectorAll(`#tab_${c.id} .mtr:not(.mth)`)].map(r => [...r.querySelectorAll('input')].map(i => i.value.trim())).filter(r => r.some(Boolean));
+    else valori[c.id] = String(fd.get(n) ?? '').trim();
+  }
+  const firme = (mod.campi || []).filter(c => c.tipo === 'firma');
+  const cliente = String(fd.get('mcliente') || '').trim();
+  const d = { ...stripId(mod), valori, cliente, clienteId: cliente ? assicuraCliente(cliente) : '', stato: firme.length && firme.every(f => valori[f.id]) ? 'firmato' : 'bozza' };
+  const dataCampo = (mod.campi || []).find(c => c.tipo === 'data');
+  d.data = (dataCampo && valori[dataCampo.id]) || mod.data || TODAY;
+  const id = store.put('moduli', isNew ? null : mod.id, d);
+  modEdit = { mod: { id, ...d }, isNew: false };
+  return modEdit.mod;
+}
+function initFirme() {
+  document.querySelectorAll('canvas.pad').forEach(cv => {
+    if (cv.dataset.pronto) return; cv.dataset.pronto = '1';
+    const ratio = Math.min(window.devicePixelRatio || 1, 2), w = cv.clientWidth || 300, h = 150;
+    cv.width = w * ratio; cv.height = h * ratio;
+    const ctx = cv.getContext('2d'); ctx.scale(ratio, ratio);
+    const pulisci = () => { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); };
+    pulisci();
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#14181b';
+    const hidden = $('#f_' + cv.dataset.for);
+    if (hidden.value) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, w, h); im.src = hidden.value; }
+    cv._pulisci = pulisci;
+    let disegna = false, ultimo = null;
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    cv.addEventListener('pointerdown', e => { disegna = true; ultimo = pos(e); cv.setPointerCapture?.(e.pointerId); e.preventDefault(); });
+    cv.addEventListener('pointermove', e => { if (!disegna) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(...ultimo); ctx.lineTo(...p); ctx.stroke(); ultimo = p; e.preventDefault(); });
+    const fine = () => {
+      if (!disegna) return; disegna = false;
+      const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 * h / w);
+      out.getContext('2d').drawImage(cv, 0, 0, out.width, out.height);
+      hidden.value = out.toDataURL('image/jpeg', 0.78);
+    };
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => cv.addEventListener(ev, fine));
+  });
+}
+function mostraPdf(bytes, nome, titolo, indietro) {
+  const file = new File([bytes], nome, { type: 'application/pdf' });
+  if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
+  pdfCorrente = { file, url: URL.createObjectURL(file), indietro };
+  let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
+  openSheet(titolo, `
+    <div class="pdfready">${svg('doc')}<div><b>${esc(nome)}</b><div class="small muted">${num(bytes.length / 1024, 0)} KB</div></div></div>
+    <div class="stack">
+      ${share ? `<button type="button" class="btn primary" data-act="pdfShare">Invia o salva (WhatsApp, Mail, File…)</button>` : ''}
+      <a class="btn ${share ? '' : 'primary'}" href="${pdfCorrente.url}" target="_blank" rel="noopener">Apri il PDF</a>
+      <button type="button" class="btn" data-act="pdfDown">Scarica sul dispositivo</button>
+    </div>`, null, { extra: indietro ? '<button type="button" class="btn" data-act="pdfBack">‹ Torna indietro</button>' : '' });
+}
+function rModuli() {
+  const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  return `<div class="row between"><h2>Moduli</h2><button class="btn primary" data-act="modScegli" type="button">${svg('plus')} Nuovo</button></div>
+  <section class="stack"><h3>Compilati</h3>
+    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Verbali di fine lavori, rilievi misure, dichiarazioni di corretta posa: si compilano qui, si firmano sullo schermo e diventano PDF.</span></div>`}
+  </section>
+  <section class="stack"><div class="row between"><h3>Modelli</h3><button class="btn sm" data-act="modelloNuovo" type="button">${svg('plus')} Modello</button></div>
+    <div class="panel">${modelli().map(m => `<div class="list-line"><div><b>${esc(m.nome)}</b><div class="small muted">${(m.campi || []).length} campi${m.modificato ? ' · modificato da te' : m.mio ? ' · creato da te' : ' · pronto'}</div></div><button class="btn sm" data-act="editModello" data-arg="${esc(m.id)}" type="button">Modifica</button></div>`).join('')}</div>
+  </section>`;
+}
+
+/* editor dei modelli */
+const rigaCampo = c => `<div class="mcampo" data-id="${esc(c.id)}" data-auto="${esc(c.auto || '')}" data-valore="${esc(c.valore || '')}">
+  <div class="mc1"><select name="mc_tipo" aria-label="Tipo di campo">${TIPI_CAMPO.map(([k, l]) => `<option value="${k}" ${k === c.tipo ? 'selected' : ''}>${l}</option>`).join('')}</select>
+  <button type="button" data-act="mcSu" aria-label="Sposta su">↑</button><button type="button" data-act="mcGiu" aria-label="Sposta giù">↓</button><button type="button" data-act="mcRm" aria-label="Togli campo">×</button></div>
+  <input name="mc_label" value="${esc(c.label || '')}" placeholder="${c.tipo === 'nota' ? 'Testo da stampare' : 'Etichetta'}" aria-label="Etichetta">
+  <input name="mc_opz" value="${esc((c.opzioni || c.colonne || []).join(', '))}" placeholder="${c.tipo === 'tabella' ? 'Colonne, separate da virgola' : 'Scelte, separate da virgola'}" aria-label="Scelte o colonne" ${['scelta', 'tabella'].includes(c.tipo) ? '' : 'hidden'}>
+</div>`;
+function sheetModello(m) {
+  const isNew = !m; m = m || { nome: '', descr: '', campi: [{ id: 'data', tipo: 'data', label: 'Data', auto: 'data' }, { id: 'ind', tipo: 'testo', label: 'Indirizzo', auto: 'indirizzo' }] };
+  openSheet(isNew ? 'Nuovo modello' : 'Modifica modello', `
+    ${F('Nome del modulo', inp('mnome', m.nome, 'text', 'required placeholder="Es. Verbale di sopralluogo"'))}
+    ${F('Descrizione', inp('mdescr', m.descr))}
+    <div class="fieldset"><span class="fs-t">Campi, nell'ordine in cui compaiono</span><div id="mcampi" class="stack">${(m.campi || []).map(rigaCampo).join('')}</div><button type="button" class="btn sm" data-act="mcAdd">+ Campo</button></div>
+    <div class="small muted">Il cliente si sceglie sempre in cima al modulo. I campi Data e Indirizzo si compilano da soli dal lavoro o dal cliente. I moduli già compilati non cambiano.</div>`,
+  async () => {
+    const campi = [...document.querySelectorAll('#mcampi .mcampo')].map(el => {
+      const tipo = el.querySelector('[name="mc_tipo"]').value, label = el.querySelector('[name="mc_label"]').value.trim();
+      const opz = el.querySelector('[name="mc_opz"]').value.split(',').map(s => s.trim()).filter(Boolean);
+      const c = { id: el.dataset.id, tipo, label };
+      if (el.dataset.auto) c.auto = el.dataset.auto; if (el.dataset.valore) c.valore = el.dataset.valore;
+      if (tipo === 'scelta') c.opzioni = opz.length ? opz : ['Sì', 'No'];
+      if (tipo === 'tabella') c.colonne = opz.length ? opz : ['Voce', 'Note'];
+      return c;
+    }).filter(c => c.label);
+    if (!campi.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Aggiungi almeno un campo' });
+    store.put('modelli', isNew ? null : m.id, { nome: $('#f_mnome').value.trim(), descr: $('#f_mdescr').value.trim(), campi });
+    toast('Modello salvato');
+  }, { del: isNew || (m.base && !m.modificato) ? null : async () => { store.drop('modelli', m.id); toast(m.base ? 'Modello pronto ripristinato' : 'Modello eliminato'); } });
+  if (!isNew && m.base && m.modificato) { const d = $('#sheetFoot [data-act="del"]'); if (d) d.textContent = 'Ripristina originale'; }
+}
+
+/* ---------- cantieri e navigazione (anche su CarPlay) ---------- */
+const navLink = (tipo, ind) => {
+  const q = encodeURIComponent(ind);
+  return tipo === 'apple' ? `https://maps.apple.com/?daddr=${q}&dirflg=d` : tipo === 'google' ? `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving` : `https://waze.com/ul?q=${q}&navigate=yes`;
+};
+const bottoniNav = ind => `<div class="navbtns"><a class="btn sm primary" href="${navLink('apple', ind)}" target="_blank" rel="noopener">${svg('pin', 'i')} Mappe</a><a class="btn sm" href="${navLink('google', ind)}" target="_blank" rel="noopener">Google</a><a class="btn sm" href="${navLink('waze', ind)}" target="_blank" rel="noopener">Waze</a></div>`;
+function elencoCantieri() {
+  const m = new Map();
+  const add = (ind, j) => { if (!String(ind || '').trim()) return; const k = normNome(ind); const s = m.get(k) || { indirizzo: ind.trim(), lavori: [] }; s.lavori.push(j); m.set(k, s); };
+  S.lavori.forEach(l => add(l.indirizzo, { kind: 'lavori', x: l, d: l.data, f: l.dataFine || l.data, tipo: 'Posa', cliente: l.cliente }));
+  S.interventi.filter(i => i.stato !== 'annullato').forEach(i => add(i.indirizzo, { kind: 'interventi', x: i, d: i.dataProg || i.data, f: i.dataProg || i.data, tipo: 'Intervento', cliente: i.cliente }));
+  return [...m.values()].map(s => {
+    s.lavori.sort((a, b) => a.d.localeCompare(b.d));
+    s.oggi = s.lavori.filter(j => j.d <= TODAY && j.f >= TODAY);
+    s.prossimo = s.lavori.find(j => j.d > TODAY);
+    s.ultimo = [...s.lavori].reverse().find(j => j.f < TODAY);
+    s.clienti = [...new Set(s.lavori.map(j => j.cliente).filter(Boolean))];
+    return s;
+  });
+}
+function rigaCantiere(s, quando) {
+  const j = quando === 'oggi' ? s.oggi[0] : quando === 'prossimi' ? s.prossimo : s.ultimo;
+  return `<div class="card cant"><div class="row between"><span class="t">${esc(s.indirizzo)}</span>${j ? `<span class="chip ${quando === 'oggi' ? 'warn' : quando === 'prossimi' ? 'in' : ''}">${quando === 'oggi' ? 'Oggi' : fmtD(j.d, { day: 'numeric', month: 'short' })}</span>` : ''}</div>
+    <div class="small muted">${esc(s.clienti.join(', '))} · ${s.lavori.length} ${s.lavori.length === 1 ? 'lavoro' : 'lavori'}${j ? ` · ${j.tipo.toLowerCase()}` : ''}</div>
+    ${bottoniNav(s.indirizzo)}
+    ${j && quando !== 'passati' ? `<div class="links"><button type="button" class="linkbtn" data-act="${j.kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${j.x.id}">Apri il lavoro</button><button type="button" class="linkbtn" data-act="icsJob" data-arg="${j.kind}" data-id="${j.x.id}">Aggiungi al Calendario</button></div>` : ''}
+  </div>`;
+}
+function rCantieri() {
+  const q = normNome(UI.cercaCant || '');
+  const tutti = elencoCantieri().filter(s => !q || normNome(s.indirizzo).includes(q) || s.clienti.some(c => normNome(c).includes(q)));
+  const oggi = tutti.filter(s => s.oggi.length);
+  const pross = tutti.filter(s => !s.oggi.length && s.prossimo).sort((a, b) => a.prossimo.d.localeCompare(b.prossimo.d));
+  const pass = tutti.filter(s => !s.oggi.length && !s.prossimo).sort((a, b) => String(b.ultimo?.d || '').localeCompare(String(a.ultimo?.d || '')));
+  return `<div class="row between"><h2>Cantieri</h2></div>
+  <div class="notice small"><b>Su CarPlay:</b> con l'iPhone collegato all'auto, tocca <b>Mappe</b>, <b>Google Maps</b> o <b>Waze</b> e il percorso parte sullo schermo dell'auto. Con <b>Aggiungi al Calendario</b> il lavoro compare anche nell'app Calendario di CarPlay, con l'indirizzo pronto per la navigazione.</div>
+  <label class="f"><span class="sr">Cerca</span><input id="cercaCantiere" type="search" placeholder="Cerca per indirizzo o cliente…" value="${esc(UI.cercaCant || '')}" autocomplete="off"></label>
+  <div id="listaCantieri" class="stack">
+    ${oggi.length ? `<h3>Oggi</h3>${oggi.map(s => rigaCantiere(s, 'oggi')).join('')}` : ''}
+    ${pross.length ? `<h3>Prossimi</h3>${pross.map(s => rigaCantiere(s, 'prossimi')).join('')}` : ''}
+    ${pass.length ? `<h3>Già fatti</h3>${pass.slice(0, 40).map(s => rigaCantiere(s, 'passati')).join('')}` : ''}
+    ${!tutti.length ? `<div class="empty"><b>${q ? 'Nessun cantiere trovato.' : 'Nessun cantiere ancora.'}</b><span class="small">Compaiono qui gli indirizzi delle pose e degli interventi.</span></div>` : ''}
+  </div>`;
+}
+/** File .ics di un lavoro, da aprire con il Calendario dell'iPhone (visibile anche su CarPlay). */
+function icsLavoro(kind, x) {
+  const G = IMP().giornata, pad = n => String(n).padStart(2, '0');
+  const hm = s => String(s || '07:30').replace(':', '') + '00';
+  const escI = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const giorni = kind === 'lavori' ? giorniPosa(x) : [x.dataProg || x.data];
+  const ora = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const fineInt = () => { const h = +hm(G.inizio).slice(0, 2) + 2; return pad(Math.min(h, 23)) + hm(G.inizio).slice(2); };
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Diario di Posa//IT', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+  giorni.forEach((g, i) => {
+    const d = g.replaceAll('-', '');
+    L.push('BEGIN:VEVENT', `UID:${kind}-${x.id}-${g}@diario-di-posa`, `DTSTAMP:${ora}`,
+      `SUMMARY:${escI(`${kind === 'lavori' ? 'Posa' : 'Intervento'} · ${x.cliente || 'Cliente'}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
+      `DTSTART;TZID=Europe/Rome:${d}T${hm(G.inizio)}`, `DTEND;TZID=Europe/Rome:${d}T${kind === 'lavori' ? hm(G.fine) : fineInt()}`,
+      ...(x.indirizzo ? [`LOCATION:${escI(x.indirizzo)}`] : []),
+      `DESCRIPTION:${escI([kind === 'lavori' ? x.installato : x.descrizione, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Partenza per il cantiere', 'TRIGGER:-PT30M', 'END:VALARM', 'END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.join('\r\n') + '\r\n';
+}
+
 /* ---------- impostazioni condivise (valgono su tutti i dispositivi) ---------- */
 const IMP = () => impostazioni(S);
 function salvaImp(parte) { store.put('cfg', 'impostazioni', { ...(S.impostazioni || {}), ...parte }); }
@@ -429,6 +671,8 @@ function menuHtml() {
   <div class="tape" aria-hidden="true"></div>
   <div class="dr-sec">Sezioni</div>
   ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
+  ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
+  ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'verbali, rilievi, dichiarazioni con firma', UI.tab === 'moduli')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
   ${item('setGiornata', '', 'clock', 'Giornata e orari', `${G.inizio}–${G.fine} · ${descrGiorni(G.giorni)} · ${num(oreGiornata(G))} ore`)}
@@ -877,7 +1121,7 @@ function sheetLav(l, prefill) {
     toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : 'Posa salvata');
   }, {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
-    extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button>`,
+    extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
   });
   if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
   aggiornaGiorni();
@@ -927,7 +1171,7 @@ function sheetInt(i, day) {
     toast('Intervento salvato');
   }, {
     del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); toast('Intervento eliminato'); },
-    extra: isNew || i.stato !== 'completato' ? '' : `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>`,
+    extra: isNew ? '' : `${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
   initImporto('#f_costo', i.righe, i.costo, i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale'));
@@ -1184,10 +1428,10 @@ function assicuraCliente(nome, extra = {}) {
 /** Tutto ciò che riguarda un cliente: collegato per id o, per i dati vecchi, per nome. */
 function storicoCliente(c) {
   const mio = x => x.clienteId === c.id || (!x.clienteId && normNome(nomeDi(x)) === normNome(c.nome));
-  const lav = S.lavori.filter(mio), int = S.interventi.filter(mio), prev = S.preventivi.filter(mio);
+  const lav = S.lavori.filter(mio), int = S.interventi.filter(mio), prev = S.preventivi.filter(mio), mod = S.moduli.filter(mio);
   const fatt = [...lav.map(x => ({ imp: n2(x.importo), d: x.data, amm: x.amm })), ...int.filter(i => i.stato === 'completato').map(x => ({ imp: n2(x.costo), d: x.dataProg || x.data, amm: x.amm }))].filter(x => x.d && x.d <= TODAY);
   return {
-    lav, int, prev,
+    lav, int, prev, mod,
     fatturato: sum(fatt, x => x.imp),
     anno: sum(fatt.filter(x => x.d.startsWith(TODAY.slice(0, 4))), x => x.imp),
     aperto: sum(fatt.filter(x => (x.amm || 'da_cons') !== 'pag'), x => x.imp),
@@ -1235,6 +1479,7 @@ function sheetCliente(c) {
   const voce = (d, tipo, testo, imp, chip, act, id) => `<div class="hist" role="button" tabindex="0" data-act="${act}" data-id="${id}"><span class="hd num">${fmtD(d, { day: '2-digit', month: '2-digit', year: '2-digit' })}</span><span class="hm"><b>${tipo}</b>${testo ? ' · ' + esc(testo) : ''}</span><span class="hr"><span class="price">${imp ? eur(imp) : ''}</span>${chip}</span></div>`;
   const storia = isNew ? [] : [
     ...s.prev.map(p => ({ d: p.data, h: voce(p.data, `Preventivo ${esc(p.numero || '')}`, p.oggetto, totPrev(p).totale, `<span class="chip ${statoPrev(p.stato)[2]}">${statoPrev(p.stato)[1]}</span>`, 'editPrev', p.id) })),
+    ...s.mod.map(m => ({ d: m.data, h: voce(m.data, 'Modulo', m.titolo, null, `<span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span>`, 'editMod', m.id) })),
     ...s.lav.map(l => ({ d: l.data, h: voce(l.data, 'Posa', l.installato, l.importo, `<span class="chip ${ammOf(l.amm)[2]}">${ammOf(l.amm)[1]}</span>`, 'editLav', l.id) })),
     ...s.int.map(i => ({ d: i.dataProg || i.data, h: voce(i.dataProg || i.data, 'Intervento', i.descrizione, i.costo, `<span class="chip ${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[2]}">${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[1]}</span>`, 'editInt', i.id) })),
   ].sort((a, b) => String(b.d).localeCompare(String(a.d)));
@@ -1242,7 +1487,7 @@ function sheetCliente(c) {
   openSheet(isNew ? 'Nuovo cliente' : c.nome, `
     ${isNew ? '' : `<div class="kpis"><div class="kpi"><div class="l">Lavorato</div><div class="v">${eur(s.fatturato)}</div></div><div class="kpi"><div class="l">Quest'anno</div><div class="v">${eur(s.anno)}</div></div><div class="kpi"><div class="l">Da incassare</div><div class="v">${eur(s.aperto)}</div></div><div class="kpi"><div class="l">Ultimo lavoro</div><div class="v">${s.ultimo ? fmtD(s.ultimo, { day: 'numeric', month: 'short' }) : '—'}</div></div></div>
     <div class="row">${c.telefono ? `<a class="btn sm" href="tel:${esc(c.telefono.replace(/\s/g, ''))}">Chiama</a><a class="btn sm" href="https://wa.me/${esc(c.telefono.replace(/\D/g, '').replace(/^(?!39)(?=3)/, '39'))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}">Email</a>` : ''}${c.indirizzo ? `<a class="btn sm" href="https://maps.apple.com/?q=${encodeURIComponent(c.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>
-    <div class="row"><button class="btn sm dark" data-act="cliCal" type="button">${svg('cal', 'i')} Vedi nel calendario</button><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button></div>
+    <div class="row"><button class="btn sm dark" data-act="cliCal" type="button">${svg('cal', 'i')} Vedi nel calendario</button><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button><button class="btn sm" data-act="cliMod" type="button">+ Modulo</button></div>
     <div class="fieldset"><span class="fs-t">Storico</span><div class="histlist">${storia.map(x => x.h).join('') || '<div class="small muted">Ancora nessun lavoro.</div>'}</div></div>`}
     <div class="fieldset"><span class="fs-t">Dati del cliente</span>
       <div class="g2">${F('Nome o ragione sociale', inp('kNome', c.nome, 'text', 'required'))}${F('Tipo', sel('kTipo', TIPI_CLIENTE, c.tipo || 'finale'))}</div>
@@ -1651,6 +1896,35 @@ document.addEventListener('click', async e => {
     case 'seed': seed(); render(); break;
     case 'newCli': sheetCliente(null); break;
     case 'menu': apriMenu(); break;
+    case 'modScegli': sheetScegliModello({}); break;
+    case 'modDa': { const x = S[arg].find(r => r.id === id); if (x) sheetScegliModello(ctxDa(arg, x)); break; }
+    case 'cliMod': if (cliCtx) sheetScegliModello(ctxDa('clienti', cliCtx)); break;
+    case 'modNuovo': { const m = modelli().find(x => x.id === arg); if (!m) break; const campi = JSON.parse(JSON.stringify(m.campi || [])); sheetModulo({ modelloId: m.id, titolo: m.nome, campi, valori: valoriIniziali(campi, modCtx), cliente: modCtx.cliente || '', clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); break; }
+    case 'editMod': { const m = S.moduli.find(x => x.id === id); if (m) sheetModulo(m, false); break; }
+    case 'modPdf': {
+      const saved = salvaModulo(new FormData($('#sheetForm')));
+      let bytes; try { bytes = creaModulo({ mod: { ...saved, clienteDati: trovaCliente(saved.cliente) || {} }, azienda: AZ(), immagini: IMG }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
+      const nome = `${saved.titolo} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+      mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModulo(S.moduli.find(x => x.id === saved.id) || saved, false)); break;
+    }
+    case 'siNo': { const h = $('#f_' + b.dataset.for); const v = h.value === arg ? '' : arg; h.value = v; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.arg === v))); break; }
+    case 'tabRiga': { const c = (modEdit?.mod.campi || []).find(x => x.id === arg); $('#tab_' + arg).insertAdjacentHTML('beforeend', rigaTab(c?.colonne || ['Voce'])); break; }
+    case 'tabRm': { const t = b.closest('.mtab'); if (t.querySelectorAll('.mtr:not(.mth)').length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => { i.value = ''; }); break; }
+    case 'firmaCancella': { const cv = document.querySelector(`canvas.pad[data-for="${arg}"]`); cv?._pulisci?.(); $('#f_' + arg).value = ''; break; }
+    case 'modelloNuovo': sheetModello(null); break;
+    case 'editModello': sheetModello(modelli().find(x => x.id === arg)); break;
+    case 'mcAdd': $('#mcampi').insertAdjacentHTML('beforeend', rigaCampo({ id: 'c' + Date.now().toString(36), tipo: 'testo', label: '' })); $('#mcampi').lastElementChild.querySelector('[name="mc_label"]').focus(); break;
+    case 'mcSu': { const r = b.closest('.mcampo'); if (r.previousElementSibling) r.parentElement.insertBefore(r, r.previousElementSibling); break; }
+    case 'mcGiu': { const r = b.closest('.mcampo'); if (r.nextElementSibling) r.parentElement.insertBefore(r.nextElementSibling, r); break; }
+    case 'mcRm': b.closest('.mcampo').remove(); break;
+    case 'icsJob': {
+      const x = S[arg].find(r => r.id === id); if (!x) break;
+      const file = new File([icsLavoro(arg, x)], `${arg === 'lavori' ? 'posa' : 'intervento'}-${String(x.cliente || 'cliente').replace(/[^\w]+/g, '-')}.ics`, { type: 'text/calendar' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), target: '_blank', rel: 'noopener' });
+      if (!/iphone|ipad/i.test(navigator.userAgent)) a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('Conferma con "Aggiungi" nel Calendario'); break;
+    }
     case 'menuClose': chiudiMenu(); break;
     case 'menuGo': UI.tab = arg; if (arg !== 'cal') UI.calCli = null; try { history.replaceState(null, '', '#' + arg); } catch {} render(); window.scrollTo({ top: 0 }); break;
     case 'setNotifiche': sheetNotifiche(); break;
@@ -1720,6 +1994,8 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
   if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
+  if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
+  if (t.name === 'mc_tipo') { const o = t.closest('.mcampo').querySelector('[name="mc_opz"]'); o.hidden = !['scelta', 'tabella'].includes(t.value); o.placeholder = t.value === 'tabella' ? 'Colonne, separate da virgola' : 'Scelte, separate da virgola'; return; }
   if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
   if (t.id === 'f_scontrini') { $('#wrapScG').hidden = t.value !== 'settimanale'; return; }
@@ -1734,6 +2010,8 @@ $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeS
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'f_cliente' || t.id === 'f_cnome') aggiornaCliInfo();
+  if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
+  if (t.id === 'cercaCantiere') { UI.cercaCant = t.value; const tmp = document.createElement('div'); tmp.innerHTML = rCantieri(); $('#listaCantieri').replaceWith(tmp.querySelector('#listaCantieri')); return; }
   if (t.id === 'cercaCliente') {
     UI.cerca = t.value;
     const tmp = document.createElement('div'); tmp.innerHTML = rClienti();

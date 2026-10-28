@@ -2,7 +2,7 @@
 // Le modifiche vengono salvate subito sul dispositivo e inviate appena c'è rete,
 // così l'app funziona anche in cantiere senza segnale.
 
-const KINDS = ['lavori', 'interventi', 'movimenti', 'magazzino', 'cartelle', 'preventivi', 'clienti', 'eventi'];
+const KINDS = ['lavori', 'interventi', 'movimenti', 'magazzino', 'cartelle', 'preventivi', 'clienti', 'eventi', 'modelli', 'moduli'];
 const ls = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
@@ -15,7 +15,7 @@ export function createStore(cfg, onChange) {
   let sb = null, uid = null, channel = null;
   const recs = new Map();          // "kind/id" -> {kind, id, data}
   let outbox = [];                 // modifiche non ancora inviate
-  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], furgone: {}, listino: null, azienda: null, impostazioni: null };
+  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], modelli: [], moduli: [], furgone: {}, listino: null, azienda: null, impostazioni: null };
   const st = { mode: cloud ? 'cloud' : 'demo', auth: cloud ? 'checking' : 'demo', email: '', online: navigator.onLine, syncing: false, lastSync: null, error: '' };
   const urlCache = new Map();
 

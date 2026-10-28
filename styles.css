@@ -350,3 +350,29 @@ input[role="switch"]:checked::after{transform:translateX(19px)}
 .dev small{display:block;color:var(--muted)}
 .ok-t{color:var(--ok);font-weight:600;display:inline-flex;align-items:center;gap:6px}
 .bar-f.st-bad{background:var(--bad)} .bar-f.st-warn{background:var(--warn)} .bar-f.st-in{background:var(--in)} .bar-f.st-ok{background:var(--ok)}
+
+/* Moduli */
+.modchoice{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.modchoice svg{width:26px;height:26px;stroke:var(--tape-text);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.modchoice span:nth-child(2){flex:1;min-width:0}
+.modchoice small{display:block;color:var(--muted);font-size:.82rem}
+.modchoice .go{color:var(--muted);font-size:1.3rem}
+.modtit{margin-top:6px;padding-bottom:4px;border-bottom:2px solid var(--tape)}
+.modnota{font-style:italic;color:var(--muted);margin:0}
+.sino{max-width:220px}
+.mtab{display:flex;flex-direction:column;gap:4px;overflow-x:auto}
+.mtr{display:grid;grid-template-columns:repeat(var(--cols),minmax(64px,1fr)) 28px;gap:4px;min-width:calc(var(--cols) * 68px + 32px)}
+.mtr input{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px;min-height:38px;width:100%;min-width:0}
+.mtr button{border:0;background:none;color:var(--muted);font-size:1.2rem}
+.mth span{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.firma{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+canvas.pad{width:100%;height:150px;touch-action:none;border:1.5px dashed var(--line);border-radius:8px;background:#ffffff;display:block}
+.mcampo{border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--bg)}
+.mc1{display:grid;grid-template-columns:minmax(0,1fr) 34px 34px 34px;gap:4px}
+.mc1 button{border:1px solid var(--line);background:var(--surface);border-radius:6px;font-size:1rem}
+.mcampo select,.mcampo input{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 8px;min-height:38px;width:100%;min-width:0}
+
+/* Cantieri */
+.cant .navbtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.cant .navbtns .btn{flex:1;justify-content:center;min-width:0}
+#cercaCantiere{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:10px 12px;min-height:44px;width:100%}
