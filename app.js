@@ -387,7 +387,8 @@ function rDipendente() {
   <section class="stack"><h3>Oggi</h3>${oggiL.map(cardDip).join('') || '<div class="empty small">Oggi niente in calendario per te.</div>'}</section>
   <section class="stack"><h3>Prossimi</h3>${pross.map(cardDip).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}</section>
   ${fatti.length ? `<section class="stack"><h3>Ultimi giorni</h3>${fatti.slice(0, 15).map(cardDip).join('')}</section>` : ''}
-  <section class="stack"><h3>Moduli che hai compilato</h3>${DIP.moduli.map(m => `<div class="card" role="button" tabindex="0" data-act="dipMod" data-id="${esc(m.id)}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || '')} · ${fmtD(m.data)}</div></div>`).join('') || '<div class="empty small">Ancora nessuno: li compili dal lavoro, con il tasto Modulo.</div>'}</section>
+  <section class="stack"><div class="row between"><h3>Moduli</h3><button class="btn sm primary" data-act="dipModNuovo" type="button">${svg('plus')} Nuovo modulo</button></div>
+    <div class="small muted">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo, consenso foto e video: si compilano qui, si firmano sullo schermo e diventano PDF. Dal tasto Modulo di un lavoro i dati del cliente sono già scritti.</div>${DIP.moduli.map(m => `<div class="card" role="button" tabindex="0" data-act="dipMod" data-id="${esc(m.id)}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || '')} · ${fmtD(m.data)}</div></div>`).join('') || '<div class="empty small">Ancora nessuno: li compili dal lavoro, con il tasto Modulo.</div>'}</section>
   <div class="row between small muted"><span>${esc(store.st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`;
 }
 function cardDip(x) {
@@ -726,6 +727,7 @@ document.addEventListener('click', async e => {
     case 'dipAggiorna': DIP.carico = false; render(); break;
     case 'dipSegna': { const x = DIP.lavori.find(l => l.id === id && l.kind === arg); if (x) sheetSegna(x); break; }
     case 'dipModulo': { const x = DIP.lavori.find(l => l.id === id && l.kind === arg); if (!x) break; sheetScegliModello({ cliente: x.cliente, indirizzo: x.indirizzo, telefono: x.telefono, data: x.dataFine || x.data, dataLavoro: x.dataFine || x.data, descrizione: x.installato || x.descrizione, righe: (x.voci || []).map(v => ({ descr: v.descr, qta: v.qta, unita: v.unita })), ref: { kind: x.kind, id: x.id } }); break; }
+    case 'dipModNuovo': sheetScegliModello({}); break;
     case 'dipMod': { const m = DIP.moduli.find(x => x.id === id); if (m && ufficiale(m.modelloId)) sheetModuloU(m, false); break; }
   }
 });
