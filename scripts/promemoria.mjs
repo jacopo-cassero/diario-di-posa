@@ -93,20 +93,23 @@ async function segnaNotificato(tab, ids) {
 }
 const nuoveRich = await leggiSeEsiste('/richieste_accesso?notificato=eq.false&stato=eq.nuova&select=id,titolare,nome,azienda,ruolo');
 const nuovePren = await leggiSeEsiste('/prenotazioni?notificato=eq.false&stato=eq.richiesta&select=id,titolare,data,data_fine,tipo,cliente,rivenditore');
-const membri = (nuoveRich?.length || nuovePren?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
+const nuoviPrev = await leggiSeEsiste('/richieste_preventivo?notificato=eq.false&stato=eq.nuova&select=id,titolare,rivenditore,indirizzo,cliente,righe');
+const membri = (nuoveRich?.length || nuovePren?.length || nuoviPrev?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
 const dataIt = s => new Date(s + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
-for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || [])].map(x => x.titolare))) {
-  const R = (nuoveRich || []).filter(x => x.titolare === tit), P = (nuovePren || []).filter(x => x.titolare === tit);
+for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuoviPrev || [])].map(x => x.titolare))) {
+  const R = (nuoveRich || []).filter(x => x.titolare === tit), P = (nuovePren || []).filter(x => x.titolare === tit), Q = (nuoviPrev || []).filter(x => x.titolare === tit);
   const righe = [
     ...P.map(p => { const r = membri.find(m => m.user_id === p.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'}: ${p.tipo} ${p.data_fine > p.data ? `dal ${dataIt(p.data)} al ${dataIt(p.data_fine)}` : `il ${dataIt(p.data)}`}${p.cliente ? ' · ' + p.cliente : ''}`; }),
+    ...Q.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); const pz = (q.righe || []).reduce((s, x) => s + (+x.qta || 0), 0); return `• ${r?.azienda || r?.nome || 'Un rivenditore'} chiede un preventivo: ${pz} pz · ${q.indirizzo || ''}`; }),
     ...R.map(r => `• ${r.nome}${r.azienda ? ' (' + r.azienda + ')' : ''} chiede l'accesso${r.ruolo !== 'altro' ? ' come ' + r.ruolo : ''}`),
   ];
-  const titolo = P.length ? `${P.length} ${P.length === 1 ? 'prenotazione da confermare' : 'prenotazioni da confermare'}` : `${R.length} ${R.length === 1 ? 'richiesta di accesso' : 'richieste di accesso'}`;
+  const titolo = Q.length && !P.length ? `${Q.length} ${Q.length === 1 ? 'richiesta di preventivo' : 'richieste di preventivo'}` : P.length ? `${P.length} ${P.length === 1 ? 'prenotazione da confermare' : 'prenotazioni da confermare'}` : `${R.length} ${R.length === 1 ? 'richiesta di accesso' : 'richieste di accesso'}`;
   const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#accessi', tag: `accessi-${Date.now()}` });
   // al proprietario e ai titolari attivi
   for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);
   await segnaNotificato('richieste_accesso', R.map(x => x.id));
   await segnaNotificato('prenotazioni', P.map(x => x.id));
+  await segnaNotificato('richieste_preventivo', Q.map(x => x.id));
   scrivi(`Accessi: ${R.length} richieste e ${P.length} prenotazioni segnalate`);
 }
 

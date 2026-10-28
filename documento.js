@@ -220,3 +220,88 @@ export function docDaLavoro(x, tipoLavoro, azienda) {
     note: x.note || '',
   };
 }
+
+/** Listino prezzi in PDF (per i rivenditori e per te), con maggiorazioni e condizioni. */
+export function creaListino({ listino = LISTINO_BASE, azienda = AZIENDA_BASE, immagini = {} }) {
+  const az = { ...AZIENDA_BASE, ...Object.fromEntries(Object.entries(azienda || {}).filter(([, v]) => v != null && v !== '')) };
+  const L = { ...LISTINO_BASE, ...(listino || {}) };
+  if (!Array.isArray(L.voci)) L.voci = LISTINO_BASE.voci;
+  const pdf = new PDF();
+  const img = {};
+  for (const k of ['logo', 'posaclima', 'dekra']) if (immagini[k]) { try { img[k] = pdf.addJpeg(immagini[k]); } catch {} }
+  const testata = () => {
+    if (img.posaclima) pdf.image(img.posaclima, X0, 9, 17);
+    if (img.logo) pdf.image(img.logo, 105 - 26, 10, 52);
+    else pdf.text(105, 21, 'CASSERO INSTALLAZIONI', { size: 18, font: 'bold', align: 'center' });
+    if (img.dekra) pdf.image(img.dekra, X1 - 14.5, 7, 14.5);
+  };
+  const nuovaPagina = () => { pdf.addPage(); testata(); return TOP; };
+  testata();
+  let y = TOP;
+  pdf.text(X0, y + 4, `LISTINO PREZZI POSA ${L.anno || ''}`.trim(), { size: 17, font: 'bold' });
+  pdf.rect(X0, y + 7, 22, 1.1, { fill: C.arancio });
+  pdf.text(X1, y + 1, 'Prezzi IVA esclusa', { size: 9.5, align: 'right', color: C.grigio });
+  y += 14;
+  const UL = { pz: 'a pezzo', ora: 'a ora', corpo: 'a corpo' };
+  const col = { unita: 150, prezzo: X1 - 3 };
+  const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
+  for (const g of gruppi) {
+    const voci = L.voci.filter(v => v.gruppo === g);
+    if (y + 6 + 7 * Math.min(voci.length, 3) > BOTTOM) y = nuovaPagina();
+    pdf.rect(X0, y, LARG, 6.5, { fill: C.fondo, stroke: C.bordo });
+    pdf.rect(X0, y, 1.6, 6.5, { fill: C.arancio });
+    pdf.text(X0 + 4, y + 4.5, g.toUpperCase(), { size: 8.2, font: 'bold' });
+    y += 6.5;
+    voci.forEach((v, i) => {
+      const nome = pdf.wrap(v.nome, 120, 9.2, 'bold');
+      const vari = v.variante ? pdf.wrap(v.variante, 120, 8) : [];
+      const extra = v.magg === 'blindato' ? [`Prodotto blindato: + ${eur(L.maggBlindato)}`] : v.magg === 'luce' ? [`Posa in luce: + ${eur(L.maggLuce)}`] : [];
+      const h = 3 + nome.length * 4 + (vari.length + extra.length) * 3.6 + 1;
+      if (y + h > BOTTOM) { y = nuovaPagina(); }
+      if (i % 2) pdf.rect(X0, y, LARG, h, { fill: C.riga });
+      let yy = y + 4.8;
+      nome.forEach(t => { pdf.text(X0 + 4, yy, t, { size: 9.2, font: 'bold' }); yy += 4; });
+      [...vari, ...extra].forEach(t => { pdf.text(X0 + 4, yy - 0.4, t, { size: 8, color: C.grigio }); yy += 3.6; });
+      pdf.text(col.unita, y + 4.8, UL[v.unita] || v.unita || '', { size: 8.5, color: C.grigio });
+      pdf.text(col.prezzo, y + 4.8, v.prezzo == null || v.prezzo === '' ? 'da concordare' : eur(v.prezzo), { size: 9.5, font: v.prezzo == null || v.prezzo === '' ? 'normal' : 'bold', align: 'right', color: v.prezzo == null || v.prezzo === '' ? C.grigio : C.testo });
+      pdf.line(X0, y + h, X1, y + h, { color: C.bordo });
+      pdf.line(X0, y, X0, y + h, { color: C.bordo }); pdf.line(X1, y, X1, y + h, { color: C.bordo });
+      y += h;
+    });
+    y += 4;
+  }
+  // note sui prezzi
+  const note = [
+    `Trasferta: ${eur(L.euroKm ?? 1)} al km.`,
+    `Lavori urgenti: maggiorazione del ${L.urgenzaPct ?? 10}% sulle voci di posa.`,
+    `Prodotti blindati: + ${eur(L.maggBlindato)} al pezzo dove indicato. Posa in luce: + ${eur(L.maggLuce)} al pezzo dove indicato.`,
+    az.notaImprevisti,
+  ].filter(Boolean);
+  if (y + 8 + note.length * 4.5 > BOTTOM) y = nuovaPagina();
+  pdf.text(X0, y + 2, 'Note', { size: 9, font: 'bold' }); y += 5;
+  for (const t of note) y = pdf.paragraph(X0, y + 1, '• ' + t, LARG, { size: 8.4, lead: 1.3 }) + 0.6;
+  // condizioni
+  if (az.condizioni) {
+    y += 4;
+    const sezioni = az.condizioni.split(/\n\s*\n/).map(s => { const [t, ...c] = s.trim().split('\n'); return { t: t.trim(), c: c.join(' ').trim() }; }).filter(s => s.t);
+    if (y + 20 > BOTTOM) y = nuovaPagina();
+    pdf.line(X0, y, X1, y, { color: C.bordo }); pdf.text(X0, y + 5, 'Termini e condizioni', { size: 9, font: 'bold' }); y += 9;
+    for (const s of sezioni) {
+      const righe = pdf.wrap(s.c, LARG, 7.6);
+      if (y + 4 + Math.min(righe.length, 3) * 3.3 > BOTTOM) y = nuovaPagina();
+      pdf.text(X0, y, s.t, { size: 7.9, font: 'bold' }); y += 3.6;
+      for (const r of righe) { if (y > BOTTOM) y = nuovaPagina(); pdf.text(X0, y, r, { size: 7.6, color: '#333333' }); y += 3.3; }
+      y += 1.6;
+    }
+  }
+  const n = pdf.pageNo;
+  for (let p = 1; p <= n; p++) {
+    pdf.setPage(p);
+    pdf.text(X0, 281, az.ragioneSociale, { size: 7.8 });
+    pdf.text(X0, 284.6, [az.piva && `P. Iva ${az.piva}`, az.indirizzo].filter(Boolean).join(' · '), { size: 7.8 });
+    pdf.text(X1, 281, az.email || '', { size: 7.8, align: 'right' });
+    pdf.text(X1, 284.6, az.telefono || '', { size: 7.8, align: 'right' });
+    if (n > 1) pdf.text(105, 290, `Pagina ${p} di ${n}`, { size: 7, color: C.grigio, align: 'center' });
+  }
+  return pdf.output({ title: `Listino prezzi posa ${L.anno || ''}`.trim(), author: az.ragioneSociale });
+}

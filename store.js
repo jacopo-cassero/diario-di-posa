@@ -118,6 +118,7 @@ export function createStore(cfg, onChange) {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'records', filter: `user_id=eq.${owner}` }, p => applyRemote(p.new && p.new.kind ? p.new : null))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'prenotazioni' }, () => api.onAccessi && api.onAccessi())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'richieste_accesso' }, () => api.onAccessi && api.onAccessi())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'richieste_preventivo' }, () => api.onAccessi && api.onAccessi())
         .subscribe();
     } catch (e) { console.warn(e); }
   }

@@ -1,6 +1,6 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
-import { creaDocumento, docDaLavoro } from './documento.js';
+import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
 import { creaCalendario } from './calendario-ics.js';
@@ -118,19 +118,20 @@ async function caricaAccessi(forza) {
     ]);
     for (const x of [m, r, p]) if (x.error) throw x.error;
     ACC.membri = m.data; ACC.richieste = r.data; ACC.pren = p.data; ACC.ok = true; ACC.err = '';
+    await caricaRichiestePrev();
   } catch (e) { console.warn(e); ACC.ok = false; ACC.err = /relation|does not exist|schema cache|not find/i.test(e.message || '') ? 'manca' : 'rete'; }
   render();
 }
 store.onAccessi = () => caricaAccessi(true);
 const dipendenti = () => ACC.membri.filter(m => m.ruolo === 'dipendente' && m.stato === 'attivo');
 const nomeMembro = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.nome || m.email) : 'Dipendente'; };
-const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length;
+const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(r => r.stato === 'nuova').length;
 
 /** Avviso in cima al calendario quando ci sono richieste da guardare. */
 function avvisoAccessi() {
-  const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length;
-  if (!r && !p) return '';
-  return `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} dei rivenditori da confermare`, r && `<b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>`;
+  const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length, q = ACC_PREV.L.filter(x => x.stato === 'nuova').length;
+  if (!r && !p && !q) return '';
+  return `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} dei rivenditori da confermare`, q && `<b>${q}</b> ${q === 1 ? 'richiesta' : 'richieste'} di preventivo`, r && `<b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>`;
 }
 
 /* ---------- squadra sui lavori ---------- */
@@ -179,7 +180,10 @@ function rAccessi() {
       <div class="row"><button class="btn sm primary" data-act="accCondividi" type="button">Condividi link</button><button class="btn sm" data-act="accCopia" type="button">Copia</button><button class="btn sm" data-act="accLinkNuovo" type="button">Cambia link</button><button class="btn sm" data-act="accChiudi" type="button">Chiudi richieste</button></div>`
     : `<div class="small muted">Crea un link da mandare a rivenditori, dipendenti e soci: aprendolo possono installare l'app e chiederti l'accesso.</div><div class="row"><button class="btn sm primary" data-act="accApri" type="button">Crea il link</button></div>`}
     <div class="g2">${F('Preavviso minimo per le prenotazioni', selN('accPre', [[1, '1 giorno'], [2, '2 giorni'], [3, '3 giorni'], [5, '5 giorni'], [7, '1 settimana'], [14, '2 settimane']], a.preavviso ?? 2))}${F('I rivenditori vedono', selN('accMesi', [[1, '1 mese avanti'], [2, '2 mesi avanti'], [3, '3 mesi avanti'], [4, '4 mesi avanti'], [6, '6 mesi avanti'], [12, '1 anno avanti']], a.mesi ?? 4))}</div>
+    ${tog('accListino', 'I rivenditori vedono il listino', a.listino !== false, 'lo consultano e lo scaricano in PDF; serve anche per la stima dei preventivi')}
+    <div class="row"><button class="btn sm" data-act="listinoPdf" type="button">${svg('doc', 'i')} Listino in PDF</button></div>
   </section>
+  ${ACC_PREV.L.length ? `<section class="stack"><h3>Richieste di preventivo</h3>${ACC_PREV.L.map(cardRichPrev).join('')}</section>` : ''}
   ${prenR.length ? `<section class="stack"><h3>Prenotazioni da confermare</h3>${prenR.map(p => cardPren(p, true)).join('')}</section>` : ''}
   ${rich.length ? `<section class="stack"><h3>Richieste di accesso</h3>${rich.map(r => `<div class="card"><div class="row between"><span class="t">${esc(r.nome)}${r.azienda ? ' · ' + esc(r.azienda) : ''}</span><span class="chip">${r.ruolo === 'altro' ? 'da decidere' : nomeRuolo(r.ruolo)}</span></div>
       <div class="small muted">${esc(r.email)}${r.telefono ? ' · ' + esc(r.telefono) : ''} · ${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</div>
@@ -257,7 +261,7 @@ async function confermaPren(p) {
 }
 
 /* ---------- vista RIVENDITORE ---------- */
-const RIV = { mese: TODAY.slice(0, 7), occ: new Set(), mesiCaricati: new Set(), mie: [], da: '', a: '', carico: false, err: '' };
+const RIV = { mese: TODAY.slice(0, 7), occ: new Set(), mesiCaricati: new Set(), mie: [], da: '', a: '', carico: false, err: '', listino: null, listinoCarico: false, listinoErr: '', prev: null };
 async function caricaRiv(forza) {
   const A = store.st.accesso;
   if (forza) { RIV.mesiCaricati.clear(); RIV.occ.clear(); }
@@ -437,6 +441,172 @@ function rimpicciolisci(file) {
   });
 }
 
+
+/* ---------- listino e preventivi per i rivenditori ---------- */
+const PIANI = ['Piano terra', '1° piano', '2° piano', '3° piano', '4° piano', '5° piano o più', 'Su più piani'];
+const GRUPPI_ESCLUSI = ['Smontaggio, scarico, tiro al piano e tariffa oraria', 'Assistenza e manutenzione'];
+const vociPrev = L => L.voci.filter(v => !GRUPPI_ESCLUSI.includes(v.gruppo) && (v.unita || 'pz') === 'pz');
+const nomeVoce = v => v.variante ? `${v.nome} – ${v.variante}` : v.nome;
+/** Stima del preventivo dai dati del rivenditore: posa + smontaggio/smuratura + tiro al piano. */
+function stimaPrev(d, L) {
+  const V = id => L.voci.find(v => v.id === id);
+  const out = [];
+  const add = (v, qta, descr) => { if (!v || !n2(qta)) return; const p = v.prezzo == null || v.prezzo === '' ? null : n2(v.prezzo); out.push({ voce: v.id, descr: descr || nomeVoce(v), qta: n2(qta), prezzo: p, tot: p == null ? 0 : p * n2(qta) }); };
+  let smon = 0, smur = 0, tiro = 0;
+  for (const r of d.righe || []) {
+    const v = V(r.voce); if (!v || !n2(r.qta)) continue;
+    add(v, r.qta);
+    if (r.vecchio === 'smontaggio') smon += n2(r.qta);
+    if (r.vecchio === 'smuratura') smur += n2(r.qta);
+    if (d.tiro && v.id !== 'alz') tiro += n2(r.qta);
+  }
+  add(V('smon'), smon, 'Smontaggio vecchi serramenti');
+  add(V('smur'), smur, 'Smuratura vecchio telaio');
+  add(V('tiro'), tiro, 'Tiro al piano');
+  return { righe: out, totale: out.reduce((s, r) => s + r.tot, 0), daConcordare: out.some(r => r.prezzo == null) };
+}
+const LISTINO_RIV = () => { const l = RIV.listino?.listino; return l && Array.isArray(l.voci) ? { ...LISTINO_BASE, ...l } : LISTINO_BASE; };
+async function caricaListinoRiv() {
+  try { RIV.listino = await store.rpc('listino_rivenditore'); RIV.listinoErr = ''; }
+  catch (e) { RIV.listino = null; RIV.listinoErr = /find the function|does not exist/i.test(e.message || '') ? 'Il listino non è ancora disponibile.' : (e.userMsg || 'Non riesco a leggere il listino.'); }
+  try { const { data, error } = await store.tabella('richieste_preventivo').select('*').order('creato', { ascending: false }).limit(40); if (!error) RIV.prev = data; } catch {}
+  RIV.listinoCarico = true; render();
+}
+function rRivTabs() {
+  const t = UI.rivTab || 'cal';
+  return `<div class="seg rivtabs" role="tablist">${[['cal', 'Calendario'], ['prev', 'Preventivo'], ['listino', 'Listino']].map(([k, l]) => `<button type="button" data-act="rivTab" data-arg="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
+}
+function rRivListino() {
+  if (!RIV.listinoCarico) { caricaListinoRiv(); return `<div class="empty">Caricamento del listino…</div>`; }
+  if (RIV.listinoErr) return `<div class="notice small">${esc(RIV.listinoErr)}</div>`;
+  if (RIV.listino && RIV.listino.visibile === false) return `<div class="empty small">Il listino non è disponibile: chiedi i prezzi all'installatore.</div>`;
+  const L = LISTINO_RIV();
+  const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
+  return `<div class="row between"><h2>Listino ${esc(L.anno || '')}</h2><button class="btn primary" data-act="rivListinoPdf" type="button">${svg('doc', 'i')} PDF</button></div>
+  <div class="small muted">Prezzi di posa IVA esclusa. Trasferta ${eur(L.euroKm ?? 1)}/km · urgenza +${num(L.urgenzaPct ?? 10)}%.</div>
+  ${gruppi.map(g => `<section class="panel"><div class="fs-t">${esc(g)}</div>${L.voci.filter(v => v.gruppo === g).map(v => `<div class="list-line"><div><b>${esc(v.nome)}</b>${v.variante ? `<div class="small muted">${esc(v.variante)}</div>` : ''}${v.magg === 'blindato' ? `<div class="small muted">Blindato + ${eur(L.maggBlindato)}</div>` : v.magg === 'luce' ? `<div class="small muted">In luce + ${eur(L.maggLuce)}</div>` : ''}</div><div class="r"><b class="num">${v.prezzo == null || v.prezzo === '' ? 'da concordare' : eur(v.prezzo)}</b><div class="small muted">${{ pz: 'a pezzo', ora: 'a ora', corpo: 'a corpo' }[v.unita || 'pz'] || ''}</div></div></div>`).join('')}</section>`).join('')}`;
+}
+function rRivPreventivo() {
+  if (!RIV.listinoCarico) { caricaListinoRiv(); return `<div class="empty">Caricamento…</div>`; }
+  const P = RIV.prev || [];
+  const ST = { nuova: ['warn', 'Inviata'], in_lavorazione: ['warn', 'In preparazione'], inviato: ['ok', 'Preventivo pronto'], chiusa: ['', 'Chiusa'] };
+  return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="rivPrevNuovo" type="button">${svg('plus')} Richiedi</button></div>
+  <div class="small muted">Scrivi tipologie e quantità, luogo, piano e se c'è da smontare o smurare: vedi subito una stima e la richiesta arriva all'installatore, che ti manda il preventivo.</div>
+  ${RIV.listinoErr && !RIV.prev ? `<div class="notice small">${esc(RIV.listinoErr)}</div>` : ''}
+  <section class="stack">${P.map(r => { const st = ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+    <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz${r.stima ? ' · stima ' + eur(r.stima) : ''}</div>
+    ${r.risposta ? `<div class="small">${esc(r.risposta)}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
+}
+const rigaPrevRiv = (L, r = {}) => {
+  const gruppi = [...new Set(vociPrev(L).map(v => v.gruppo))];
+  return `<div class="prevriga"><select name="rv_voce" aria-label="Tipologia"><option value="">Tipologia…</option>${gruppi.map(g => `<optgroup label="${esc(g)}">${vociPrev(L).filter(v => v.gruppo === g).map(v => `<option value="${esc(v.id)}" ${v.id === r.voce ? 'selected' : ''}>${esc(nomeVoce(v))}</option>`).join('')}</optgroup>`).join('')}</select>
+    <input name="rv_qta" type="number" inputmode="numeric" min="0" placeholder="Q.tà" value="${esc(r.qta || '')}" aria-label="Quantità">
+    <select name="rv_vecchio" aria-label="Vecchio serramento"><option value="">Nuovo, niente da togliere</option><option value="smontaggio" ${r.vecchio === 'smontaggio' ? 'selected' : ''}>Con smontaggio del vecchio</option><option value="smuratura" ${r.vecchio === 'smuratura' ? 'selected' : ''}>Con smuratura del vecchio telaio</option></select>
+    <button type="button" class="iconbtn" data-act="rvRm" aria-label="Togli riga">×</button></div>`;
+};
+function leggiPrevRiv(fd) {
+  const v = fd.getAll('rv_voce'), q = fd.getAll('rv_qta'), o = fd.getAll('rv_vecchio');
+  const righe = v.map((voce, i) => ({ voce, qta: n2(q[i]), vecchio: o[i] || '' })).filter(r => r.voce && r.qta > 0);
+  const L = LISTINO_RIV();
+  righe.forEach(r => { const vv = L.voci.find(x => x.id === r.voce); r.descr = vv ? nomeVoce(vv) : r.voce; });
+  return { cliente: String(fd.get('rv_cliente') || '').trim(), telefono: String(fd.get('rv_tel') || '').trim(), indirizzo: String(fd.get('rv_luogo') || '').trim(), piano: fd.get('rv_piano') || '', ascensore: fd.get('rv_asc') || '', tiro: !!fd.get('rv_tiro'), righe, note: String(fd.get('rv_note') || '').trim() };
+}
+function aggiornaStimaRiv() {
+  const f = $('#sheetForm'), box = $('#stimaRiv'); if (!f || !box) return;
+  const d = leggiPrevRiv(new FormData(f)), L = LISTINO_RIV(), s = stimaPrev(d, L);
+  box.innerHTML = s.righe.length ? `${s.righe.map(r => `<div class="row between small"><span>${num(r.qta)} × ${esc(r.descr)}</span><span class="num">${r.prezzo == null ? 'da concordare' : eur(r.tot)}</span></div>`).join('')}
+    <div class="row between stimatot"><b>Stima posa</b><b class="num">${eur(s.totale)}</b></div><div class="small muted">IVA esclusa${s.daConcordare ? ', voci da concordare escluse' : ''}. Trasferta (${eur(L.euroKm ?? 1)}/km) ed eventuali extra esclusi: il preventivo definitivo lo prepara l'installatore.</div>`
+    : `<div class="small muted">Aggiungi tipologia e quantità per vedere la stima.</div>`;
+}
+function sheetPrevRiv() {
+  const L = LISTINO_RIV();
+  openSheet('Richiesta di preventivo', `
+    <div class="fieldset"><span class="fs-t">Cantiere</span>
+      ${F('Luogo del cantiere', inp('rv_luogo', '', 'text', 'required placeholder="Comune e indirizzo"'))}
+      <div class="g2">${F('Cliente finale', inp('rv_cliente', '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', '', 'tel', 'placeholder="Facoltativo"'))}</div>
+      <div class="g2">${F('Piano', sel('rv_piano', PIANI.map(p => [p, p]), 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], ''))}</div>
+      ${tog('rv_tiro', 'Tiro al piano', false, 'si segna da solo se il piano è alto e non c\'è ascensore')}
+    </div>
+    <div class="fieldset"><span class="fs-t">Tipologie e quantità</span>
+      <div id="rvRighe" class="stack">${rigaPrevRiv(L)}${rigaPrevRiv(L)}</div>
+      <button type="button" class="btn sm" data-act="rvAdd">+ Tipologia</button>
+    </div>
+    ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3"></textarea>`)}
+    <div class="fieldset stima"><span class="fs-t">Stima</span><div id="stimaRiv"></div></div>`,
+  async fd => {
+    const d = leggiPrevRiv(fd);
+    if (!d.righe.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Aggiungi almeno una tipologia con la quantità' });
+    d.stima = Math.round(stimaPrev(d, L).totale * 100) / 100;
+    await store.rpc('chiedi_preventivo', { dati: d });
+    toast('Richiesta inviata: ti arriva il preventivo'); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
+  }, { saveLabel: 'Invia richiesta' });
+  aggiornaStimaRiv();
+}
+async function pdfListino(listino, azienda, nome) {
+  await caricaImmagini();
+  const bytes = creaListino({ listino, azienda, immagini: IMG });
+  mostraPdf(bytes, nome, 'Listino', null);
+}
+// richieste di preventivo lato titolare
+const ACC_PREV = { L: [], ok: null };
+async function caricaRichiestePrev() {
+  try { const { data, error } = await store.tabella('richieste_preventivo').select('*').in('stato', ['nuova', 'in_lavorazione']).order('creato'); if (error) throw error; ACC_PREV.L = data; ACC_PREV.ok = true; }
+  catch { ACC_PREV.L = []; ACC_PREV.ok = false; }
+}
+function cardRichPrev(r) {
+  const m = ACC.membri.find(x => x.user_id === r.rivenditore) || {};
+  const pz = (r.righe || []).map(x => `${num(x.qta)} ${x.descr || x.voce}${x.vecchio ? ' (' + x.vecchio + ')' : ''}`).join(', ');
+  return `<div class="card"><div class="row between"><span class="t">${esc(m.azienda || m.nome || 'Rivenditore')}</span><span class="chip ${r.stato === 'nuova' ? 'warn' : ''}">${r.stato === 'nuova' ? 'Nuova' : 'In preparazione'}</span></div>
+    <div class="small"><b>${esc(r.indirizzo || '')}</b>${r.piano ? ' · ' + esc(r.piano) : ''}${r.ascensore ? ' · ascensore ' + esc(r.ascensore.toLowerCase()) : ''}${r.tiro ? ' · tiro al piano' : ''}${r.cliente ? ' · ' + esc(r.cliente) : ''}</div>
+    <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}
+    ${r.stima ? `<div class="small muted">Stima vista dal rivenditore: ${eur(r.stima)}</div>` : ''}
+    <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
+}
+function preventivoDaRichiesta(r) {
+  const m = ACC.membri.find(x => x.user_id === r.rivenditore) || {};
+  const s = stimaPrev(r, LIST());
+  const az = AZ();
+  return { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, iva: az.ivaPredefinita, condizioni: true,
+    cliente: { nome: m.azienda || m.nome || 'Rivenditore', tipo: 'rivenditore', telefono: m.telefono || '', email: m.email || '' },
+    cantiere: r.indirizzo || '', oggetto: [r.cliente && `Cliente finale: ${r.cliente}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
+    righe: s.righe.map(x => { const v = LIST().voci.find(y => y.id === x.voce); return v ? { ...rigaDaVoce(v, x.qta), descr: x.descr } : null; }).filter(Boolean),
+    richiestaRiv: r.id };
+}
+/** Quando salvi il preventivo nato da una richiesta, il rivenditore vede a che punto è. */
+function aggiornaRichiestaPrev(d, id) {
+  if (!d.richiestaRiv || store.st.mode === 'demo') return;
+  const t = totali(d, LIST());
+  const fatto = d.stato !== 'bozza';
+  store.tabella('richieste_preventivo').update({ stato: fatto ? 'inviato' : 'in_lavorazione', preventivo_id: id, aggiornato: new Date().toISOString(),
+    risposta: fatto ? `Preventivo N. ${d.numero} del ${fmtD(d.data)}: ${eur(t.totale)} (${t.ivaLabel})` : null }).eq('id', d.richiestaRiv).then(({ error }) => { if (!error) caricaRichiestePrev().then(render); });
+}
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#rvRighe, [name="rv_piano"], [name="rv_asc"], [name="rv_tiro"]')) aggiornaStimaRiv(); });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.name === 'rv_piano' || t.name === 'rv_asc') { const tiro = $('#f_rv_tiro'); if (tiro && !tiro.dataset.toccato) { const p = $('#f_rv_piano').value, a = $('#f_rv_asc').value; tiro.checked = p !== 'Piano terra' && a !== 'Sì'; } aggiornaStimaRiv(); }
+  if (t.name === 'rv_tiro') { t.dataset.toccato = '1'; aggiornaStimaRiv(); }
+  if (t.closest && t.closest('#rvRighe')) aggiornaStimaRiv();
+  if (t.id === 'f_accListino') salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listino: t.checked } });
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, id = b.dataset.id;
+  switch (a) {
+    case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
+    case 'rivListinoPdf': { const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
+    case 'rivPrevNuovo': sheetPrevRiv(); break;
+    case 'rvAdd': $('#rvRighe').insertAdjacentHTML('beforeend', rigaPrevRiv(LISTINO_RIV())); break;
+    case 'rvRm': { const box = $('#rvRighe'); if (box.children.length > 1) b.closest('.prevriga').remove(); else b.closest('.prevriga').querySelectorAll('select,input').forEach(x => { x.value = ''; }); aggiornaStimaRiv(); break; }
+    case 'listinoPdf': { const L = LIST(); await pdfListino(L, AZ(), `Listino posa ${L.anno || ''}.pdf`); break; }
+    case 'richPrevCrea': {
+      const r = ACC_PREV.L.find(x => x.id === id); if (!r) break;
+      const esiste = r.preventivo_id && S.preventivi.find(p => p.id === r.preventivo_id);
+      sheetPrev(esiste || preventivoDaRichiesta(r)); break;
+    }
+    case 'richPrevChiudi': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per archiviare'; break; } await store.tabella('richieste_preventivo').update({ stato: 'chiusa', aggiornato: new Date().toISOString() }).eq('id', id); await caricaRichiestePrev(); render(); break; }
+  }
+});
+
 /* ---------- senza accesso / primo accesso ---------- */
 function rSenzaAccesso() {
   const sosp = store.st.ruolo === 'sospeso';
@@ -592,7 +762,7 @@ function render() {
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
 
   if (st.accesso?.cambio_password) { $('#main').innerHTML = rCambioPw(); return; }
-  if (st.ruolo === 'rivenditore') { $('#main').innerHTML = rRivenditore(); return; }
+  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
   if (st.ruolo === 'dipendente') { $('#main').innerHTML = rDipendente(); hydrateFiles($('#main')); return; }
   if (st.ruolo === 'nessuno' || st.ruolo === 'sospeso') { $('#main').innerHTML = rSenzaAccesso(); return; }
   if (!GESTORE()) { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
@@ -2005,7 +2175,7 @@ function rPrev() {
 }
 let prevCtx = null;
 function sheetPrev(p) {
-  const isNew = !p, az = AZ();
+  const isNew = !p || !p.id, az = AZ();
   p = p || { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, cliente: { tipo: 'finale' }, righe: [], iva: az.ivaPredefinita, condizioni: true };
   prevCtx = { p, isNew };
   const c = p.cliente || {};
@@ -2042,6 +2212,7 @@ function salvaPrev(fd) {
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
   d.clienteId = assicuraCliente(d.cliente.nome, { tipo: d.cliente.tipo, indirizzo: d.cliente.indirizzo, piva: d.cliente.piva, telefono: d.cliente.telefono, email: d.cliente.email });
   const id = store.put('preventivi', isNew ? null : p.id, d);
+  aggiornaRichiestaPrev(d, id);
   prevCtx = { p: { id, ...d }, isNew: false };
   return prevCtx.p;
 }
@@ -2631,7 +2802,7 @@ document.addEventListener('click', async e => {
     case 'unseed': unseed(); render(); break;
     case 'csv': csv(arg); break;
     case 'pushOn': case 'pushTest': pushOn(); break;
-    case 'logout': await store.logout(); UI.tab = 'cal'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '' }); RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
+    case 'logout': await store.logout(); UI.tab = 'cal'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '', listino: null, listinoCarico: false, prev: null }); UI.rivTab = 'cal'; RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
   }
 });
 document.addEventListener('keydown', e => {
