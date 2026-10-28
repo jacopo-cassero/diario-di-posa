@@ -1,7 +1,8 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
 import { creaDocumento, docDaLavoro } from './documento.js';
-import { MODELLI_BASE, TIPI_CAMPO, creaModulo } from './moduli.js';
+import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
+import { POSIZIONI } from './moduli-posizioni.js';
 import { createStore } from './store.js';
 
 /* ---------- utilità ---------- */
@@ -410,19 +411,23 @@ function rAn() {
 }
 
 /* ---------- moduli compilabili ---------- */
-const modelli = () => {
-  const mie = new Map(S.modelli.map(m => [m.id, m]));
-  return [
-    ...MODELLI_BASE.map(b => mie.has(b.id) ? { ...mie.get(b.id), id: b.id, base: true, modificato: true } : { ...b, base: true }),
-    ...S.modelli.filter(m => !MODELLI_BASE.some(b => b.id === m.id)).map(m => ({ ...m, mio: true })),
-  ];
-};
+// I moduli CASSERO (i PDF originali) sostituiscono i vecchi modelli generici; restano i modelli creati a mano.
+const VECCHI_BASE = new Set(MODELLI_BASE.map(b => b.id));
+const modelli = () => [
+  ...MODELLI_UFFICIALI,
+  ...S.modelli.filter(m => !VECCHI_BASE.has(m.id) && !MODELLI_UFFICIALI.some(u => u.id === m.id)).map(m => ({ ...m, mio: true })),
+];
+const ufficiale = id => MODELLI_UFFICIALI.find(m => m.id === id);
 let modCtx = {};
 function ctxDa(kind, x) {
   if (kind === 'clienti') return { cliente: x.nome, clienteId: x.id, indirizzo: x.indirizzo, telefono: x.telefono };
   const c = cliDi(x) || {};
   const base = { cliente: x.cliente || '', clienteId: x.clienteId || c.id || '', indirizzo: x.indirizzo || c.indirizzo || '', telefono: x.telefono || c.telefono || '', ore: x.ore, ref: { kind, id: x.id } };
-  return kind === 'lavori' ? { ...base, data: x.dataFine || x.data, lavori: x.installato } : { ...base, data: x.dataProg || x.data, descrizione: x.descrizione };
+  const sk = separaKm(x.righe);
+  base.km = sk.kmTot || ''; base.righe = sk.altre;
+  const pv = x.preventivoId && S.preventivi.find(p => p.id === x.preventivoId);
+  if (pv) base.rif = 'Preventivo ' + (pv.numero || '');
+  return kind === 'lavori' ? { ...base, data: x.dataFine || x.data, dataLavoro: x.dataFine || x.data, lavori: x.installato, descrizione: x.installato } : { ...base, data: x.dataProg || x.data, descrizione: x.descrizione };
 }
 function valoriIniziali(campi, ctx) {
   const v = {};
@@ -439,6 +444,7 @@ function sheetScegliModello(ctx = {}) {
   openSheet('Nuovo modulo', `
     ${ctx.cliente ? `<div class="small muted">Per <b>${esc(ctx.cliente)}</b>${ctx.indirizzo ? ' · ' + esc(ctx.indirizzo) : ''}: i dati si compilano da soli.</div>` : ''}
     <div class="stack">${modelli().map(m => `<button type="button" class="modchoice" data-act="modNuovo" data-arg="${esc(m.id)}">${svg('clip2')}<span><b>${esc(m.nome)}</b><small>${esc(m.descr || `${(m.campi || []).length} campi`)}</small></span><span class="go">›</span></button>`).join('')}</div>
+    <div class="small muted">I quattro moduli Cassero escono nel PDF identici agli originali, con i dati scritti nelle caselle.</div>
     <button type="button" class="btn sm" data-act="modelloNuovo">+ Crea un modello tuo</button>`, null);
 }
 let modEdit = null;
@@ -508,7 +514,7 @@ function initFirme() {
     const ratio = Math.min(window.devicePixelRatio || 1, 2), w = cv.clientWidth || 300, h = 150;
     cv.width = w * ratio; cv.height = h * ratio;
     const ctx = cv.getContext('2d'); ctx.scale(ratio, ratio);
-    const pulisci = () => { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); };
+    const pulisci = () => { ctx.fillStyle = cv.dataset.fondo || '#ffffff'; ctx.fillRect(0, 0, w, h); };
     pulisci();
     ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#14181b';
     const hidden = $('#f_' + cv.dataset.for);
@@ -544,11 +550,132 @@ function rModuli() {
   const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data)));
   return `<div class="row between"><h2>Moduli</h2><button class="btn primary" data-act="modScegli" type="button">${svg('plus')} Nuovo</button></div>
   <section class="stack"><h3>Compilati</h3>
-    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Verbali di fine lavori, rilievi misure, dichiarazioni di corretta posa: si compilano qui, si firmano sullo schermo e diventano PDF.</span></div>`}
+    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo e consenso foto e video: si compilano qui, si firmano sullo schermo e diventano il tuo PDF.</span></div>`}
   </section>
   <section class="stack"><div class="row between"><h3>Modelli</h3><button class="btn sm" data-act="modelloNuovo" type="button">${svg('plus')} Modello</button></div>
-    <div class="panel">${modelli().map(m => `<div class="list-line"><div><b>${esc(m.nome)}</b><div class="small muted">${(m.campi || []).length} campi${m.modificato ? ' · modificato da te' : m.mio ? ' · creato da te' : ' · pronto'}</div></div><button class="btn sm" data-act="editModello" data-arg="${esc(m.id)}" type="button">Modifica</button></div>`).join('')}</div>
+    <div class="panel">${modelli().map(m => `<div class="list-line"><div><b>${esc(m.nome)}</b><div class="small muted">${m.ufficiale ? 'Modulo Cassero · grafica originale' : `${(m.campi || []).length} campi · creato da te`}</div></div>${m.ufficiale ? `<button class="btn sm" data-act="modNuovo" data-arg="${esc(m.id)}" type="button">Compila</button>` : `<button class="btn sm" data-act="editModello" data-arg="${esc(m.id)}" type="button">Modifica</button>`}</div>`).join('')}</div>
   </section>`;
+}
+
+/* ---------- moduli CASSERO (PDF originali) ---------- */
+const SFONDI = {};
+async function sfondoModulo(id) {
+  if (SFONDI[id]) return SFONDI[id];
+  try { const r = await fetch(`moduli/${id}.jpg`); if (r.ok) SFONDI[id] = new Uint8Array(await r.arrayBuffer()); } catch {}
+  return SFONDI[id];
+}
+const piuAnno = d => { const [y, m, g] = String(d || TODAY).split('-'); return `${+y + 1}-${m}-${g}`; };
+const comuneDa = ind => { const p = String(ind || '').split(',').map(x => x.trim()).filter(Boolean); if (p.length < 2) return ''; return p[p.length - 1].replace(/\b\d{5}\b/, '').replace(/\(\s*[A-Z]{2}\s*\)|\b[A-Z]{2}$/, '').trim(); };
+/** Dati del cliente in rubrica, divisi come vogliono i moduli. */
+function datiCliente(c) {
+  if (!c) return {};
+  const pi = String(c.piva || '').trim(), sd = String(c.sdi || '').trim();
+  return { telefono: c.telefono, email: c.email, indirizzo: c.indirizzo, cf: /^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/i.test(pi) ? pi.toUpperCase() : '', piva: /^[A-Z]{6}\d{2}/i.test(pi) ? '' : pi, sdi: sd.includes('@') ? '' : sd, pec: sd.includes('@') ? sd : '' };
+}
+function valoriUfficiali(m, ctx) {
+  const c = datiCliente(ctx.clienteId ? S.clienti.find(x => x.id === ctx.clienteId) : trovaCliente(ctx.cliente));
+  const x = { ...c, ...Object.fromEntries(Object.entries(ctx).filter(([, v]) => v != null && v !== '')) };
+  const auto = {
+    data: x.data || TODAY, oggi: TODAY, dataLavoro: x.dataLavoro || '', traUnAnno: piuAnno(x.data || TODAY), comune: comuneDa(x.indirizzo),
+    pezzi: (x.righe || []).filter(r => (r.unita || 'pz') === 'pz').reduce((a, r) => a + n2(r.qta), 0) || '',
+  };
+  const v = {};
+  for (const f of campiUfficiali(m)) {
+    if (f.def) v[f.n] = f.def;
+    if (!f.auto) continue;
+    const val = f.auto in auto ? auto[f.auto] : x[f.auto];
+    if (val != null && val !== '') v[f.n] = String(val);
+  }
+  if (x.km) v._km = String(x.km);
+  // prodotti della posa nelle righe del verbale
+  const pref = m.id === 'verbale-collaudo' ? 'prod' : m.id === 'scheda-manutenzione' ? 'serr' : '';
+  if (pref) (x.righe || []).slice(0, 4).forEach((r, i) => { v[`${pref}${i + 1}_qta`] = n2(r.qta) ? String(n2(r.qta)) : ''; v[`${pref}${i + 1}_note`] = r.descr || ''; });
+  if (m.id === 'rapporto-assistenza') calcolaRapporto(v);
+  return v;
+}
+const euro2 = x => (Math.round(x * 100) / 100).toFixed(2).replace('.', ',');
+const leggiEuro = s => { const x = parseFloat(String(s || '').replace(/\./g, (m, i, t) => t.includes(',') ? '' : m).replace(',', '.')); return isFinite(x) ? x : 0; };
+const minuti = h => { const m = String(h || '').match(/^(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
+/** Rapporto: tempo dall'orario, manodopera oltre la prima ora (35 €/h, a mezz'ore), trasferta 1 €/km, totale. */
+function calcolaRapporto(v, toccati = {}) {
+  const a = minuti(v.ora_inizio), b = minuti(v.ora_fine);
+  let durata = null;
+  if (a != null && b != null) { durata = b >= a ? b - a : b + 1440 - a; if (!toccati.tempo) v.tempo = `${Math.floor(durata / 60)} h${durata % 60 ? ' ' + (durata % 60) + ' min' : ''}`; }
+  if (durata != null && !toccati.costo_manodopera) { const oltre = Math.max(0, Math.ceil((durata - 60) / 30) / 2); v.costo_manodopera = oltre ? euro2(oltre * 35) : ''; }
+  if (n2(v._km) && !toccati.costo_trasferta) v.costo_trasferta = euro2(n2(v._km) * (LIST().euroKm || 1));
+  if (!toccati.costo_totale) { const t = ['costo_chiamata', 'costo_manodopera', 'costo_trasferta', 'costo_materiali'].reduce((s, k) => s + leggiEuro(v[k]), 0); v.costo_totale = t ? euro2(t) : ''; }
+  return v;
+}
+const nomeU = n => 'u_' + n;
+function campoU(c, v) {
+  const n = nomeU(c.n), val = v[c.n] ?? '';
+  switch (c.t) {
+    case 'nota': return `<p class="modnota small" style="white-space:pre-line">${esc(c.l)}</p>`;
+    case 'testolungo': return F(esc(c.l), `<textarea id="f_${n}" name="${n}" rows="4">${esc(val)}</textarea>`, 'full');
+    case 'data': return F(esc(c.l), inp(n, val, 'date'));
+    case 'ora': return F(esc(c.l), inp(n, val, 'time'));
+    case 'euro': return F(esc(c.l), inp(n, val, 'text', `inputmode="decimal" placeholder="0,00" ${c.calc ? 'class="tot"' : ''}`), c.full ? 'full' : '');
+    case 'check': return tog(n, esc(c.l), !!v[c.n]);
+    case 'radio': return `<div class="f full"><span>${esc(c.l)}</span><div class="seg opzu" role="group">${c.opz.map(([k, l]) => `<button type="button" data-act="siNo" data-arg="${k}" data-for="${n}" aria-pressed="${val === k}">${esc(l)}</button>`).join('')}</div><input type="hidden" id="f_${n}" name="${n}" value="${esc(val)}"></div>`;
+    case 'firma': return `<div class="firma full"><div class="row between"><span class="fs-t">${esc(c.l)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" data-fondo="${esc(POSIZIONI[modEdit?.uff?.id]?.campi[c.n]?.fondo || '#FFF8E6')}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val)}"><div class="small muted">Firma qui con il dito</div></div>`;
+    case 'griglia': return c.righe.map((r, i) => `<div class="urig full"><span class="fs-t">Riga ${i + 1}</span><div class="g2">${r.map((nn, j) => { const col = c.col[j], vv = v[nn] ?? '';
+      return col.t === 'scelta' ? F(esc(col.l), sel(nomeU(nn), [['', '—'], ...col.opz.map(o => [o, o])], vv)) : F(esc(col.l), inp(nomeU(nn), vv, col.t === 'numero' ? 'number' : 'text')); }).join('')}</div></div>`).join('');
+    case 'controlli': return `<div class="full row"><button type="button" class="btn sm" data-act="tuttiOk">Segna tutto ${esc(c.opz[0][1])}</button></div>` + c.gruppi.map(g => `${g.l ? `<div class="ugrp full">${esc(g.l)}</div>` : ''}${g.righe.map(([nn, l]) => `<div class="uctl full"><span>${esc(l)}</span><div class="seg" role="group">${c.opz.map(([k, ll]) => `<button type="button" data-act="siNo" data-arg="${k}" data-for="${nomeU(nn)}" aria-pressed="${v[nn] === k}">${esc(ll)}</button>`).join('')}</div><input type="hidden" id="f_${nomeU(nn)}" name="${nomeU(nn)}" value="${esc(v[nn] || '')}"></div>`).join('')}`).join('');
+    default: {
+      if (c.auto === 'cliente') return `<div class="full">${campoCliente('mcliente', esc(c.l), val)}<div class="cliline small" id="cliInfo"></div></div>`;
+      return F(esc(c.l), inp(n, val, c.tipo || 'text'), c.full ? 'full' : '');
+    }
+  }
+}
+function sheetModuloU(mod, isNew) {
+  const m = ufficiale(mod.modelloId);
+  modEdit = { mod, isNew, uff: m, toccati: { ...(mod.toccati || {}) } };
+  const v = { ...(mod.valori || {}) };
+  const corpo = m.sezioni.map(s => {
+    const inner = s.campi.map(c => campoU(c, v)).join('');
+    const extra = m.id === 'rapporto-assistenza' && s.titolo.startsWith('5.') ? F('Km percorsi (andata e ritorno)', inp('u__km', v._km || '', 'number', 'placeholder="Per calcolare la trasferta"')) : '';
+    return `<div class="fieldset ufs">${s.titolo ? `<span class="fs-t">${esc(s.titolo)}</span>` : ''}<div class="ugrid">${extra}${inner}</div></div>`;
+  }).join('');
+  openSheet(m.nome, `<div class="small muted">${esc(m.descr)} · il PDF esce con la grafica originale.</div>${corpo}
+    ${m.id === 'rapporto-assistenza' ? '<div class="small muted">Tempo, manodopera (35 €/h oltre la prima ora, a mezz\'ore), trasferta e totale si calcolano da soli; se correggi un importo a mano, resta il tuo.</div>' : ''}`,
+  async fd => { salvaModuloU(fd); toast('Modulo salvato'); }, {
+    del: isNew ? null : async () => { store.drop('moduli', mod.id); toast('Modulo eliminato'); },
+    extra: `<button type="button" class="btn dark" data-act="modPdf">PDF</button>`,
+  });
+  aggiornaCliInfoModulo();
+  requestAnimationFrame(initFirme);
+  $('#sheetBody').addEventListener('touchmove', e => { if (e.target.classList?.contains('pad')) e.preventDefault(); }, { passive: false });
+}
+function leggiValoriU(fd) {
+  const m = modEdit.uff, v = {};
+  for (const c of campiUfficiali(m)) {
+    if (c.auto === 'cliente') { v[c.n] = String(fd.get('mcliente') || '').trim(); continue; }
+    if (c.t === 'check') { v[c.n] = !!fd.get(nomeU(c.n)); continue; }
+    v[c.n] = String(fd.get(nomeU(c.n)) ?? '').trim();
+  }
+  const km = String(fd.get('u__km') ?? '').trim(); if (km) v._km = km;
+  return v;
+}
+function salvaModuloU(fd) {
+  const { mod, isNew, uff: m, toccati } = modEdit;
+  const valori = leggiValoriU(fd);
+  const cliente = String(fd.get('mcliente') || '').trim();
+  const firme = campiUfficiali(m).filter(c => c.t === 'firma');
+  const d = { ...stripId(mod), modelloId: m.id, ufficiale: true, titolo: m.nome, valori, toccati, cliente, clienteId: cliente ? assicuraCliente(cliente) : '',
+    stato: firme.every(f => valori[f.n]) ? 'firmato' : 'bozza', data: valori.data_intervento || valori.data_collaudo || valori.data || mod.data || TODAY };
+  const id = store.put('moduli', isNew ? null : mod.id, d);
+  modEdit = { ...modEdit, mod: { id, ...d }, isNew: false };
+  return modEdit.mod;
+}
+/** Ricalcola i costi del rapporto mentre scrivi. */
+function aggiornaRapporto(t) {
+  if (!modEdit?.uff || modEdit.uff.id !== 'rapporto-assistenza') return;
+  const k = t.name?.replace(/^u_/, '');
+  if (['tempo', 'costo_manodopera', 'costo_trasferta', 'costo_totale'].includes(k)) modEdit.toccati[k] = !!t.value.trim();
+  if (!['ora_inizio', 'ora_fine', '_km', 'costo_chiamata', 'costo_manodopera', 'costo_trasferta', 'costo_materiali', 'tempo'].includes(k)) return;
+  const v = leggiValoriU(new FormData($('#sheetForm')));
+  calcolaRapporto(v, modEdit.toccati);
+  for (const f of ['tempo', 'costo_manodopera', 'costo_trasferta', 'costo_totale']) { const el = $('#f_u_' + f); if (el && el !== t) el.value = v[f] || ''; }
 }
 
 /* editor dei modelli */
@@ -1540,6 +1667,10 @@ function compilaDaRubrica(nome) {
   // intervento e posa
   metti('f_telefono', c.telefono);
   metti('f_indirizzo', c.indirizzo);
+  // moduli Cassero
+  const dc = datiCliente(c);
+  metti('f_u_tel', dc.telefono); metti('f_u_email', dc.email); metti('f_u_indirizzo', dc.indirizzo); metti('f_u_indirizzo_cantiere', dc.indirizzo);
+  metti('f_u_cf', dc.cf); metti('f_u_piva', dc.piva); metti('f_u_sdi', dc.sdi); metti('f_u_pec', dc.pec);
   return true;
 }
 
@@ -1899,9 +2030,19 @@ document.addEventListener('click', async e => {
     case 'modScegli': sheetScegliModello({}); break;
     case 'modDa': { const x = S[arg].find(r => r.id === id); if (x) sheetScegliModello(ctxDa(arg, x)); break; }
     case 'cliMod': if (cliCtx) sheetScegliModello(ctxDa('clienti', cliCtx)); break;
-    case 'modNuovo': { const m = modelli().find(x => x.id === arg); if (!m) break; const campi = JSON.parse(JSON.stringify(m.campi || [])); sheetModulo({ modelloId: m.id, titolo: m.nome, campi, valori: valoriIniziali(campi, modCtx), cliente: modCtx.cliente || '', clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); break; }
-    case 'editMod': { const m = S.moduli.find(x => x.id === id); if (m) sheetModulo(m, false); break; }
+    case 'modNuovo': { const m = modelli().find(x => x.id === arg); if (!m) break;
+      if (m.ufficiale) { const nome = modCtx.cliente || ''; sheetModuloU({ modelloId: m.id, titolo: m.nome, valori: valoriUfficiali(m, modCtx), cliente: nome, clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); modCtx = {}; break; }
+      const campi = JSON.parse(JSON.stringify(m.campi || [])); sheetModulo({ modelloId: m.id, titolo: m.nome, campi, valori: valoriIniziali(campi, modCtx), cliente: modCtx.cliente || '', clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); break; }
+    case 'editMod': { const m = S.moduli.find(x => x.id === id); if (!m) break; if (m.ufficiale && ufficiale(m.modelloId)) sheetModuloU(m, false); else sheetModulo(m, false); break; }
+    case 'tuttiOk': { b.closest('.ugrid').querySelectorAll('.uctl').forEach(r => { const h = r.querySelector('input[type=hidden]'); if (h.value) return; const p = r.querySelector('button'); h.value = p.dataset.arg; r.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === p))); }); break; }
     case 'modPdf': {
+      if (modEdit?.uff) {
+        const form = $('#sheetForm'); if (!form.reportValidity()) break;
+        const saved = salvaModuloU(new FormData(form)); const m = modEdit.uff;
+        let bytes; try { bytes = creaModuloUfficiale({ mod: saved, modello: m, sfondo: await sfondoModulo(m.id) }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
+        const nome = `${m.nome} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+        mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || saved, false)); break;
+      }
       const saved = salvaModulo(new FormData($('#sheetForm')));
       let bytes; try { bytes = creaModulo({ mod: { ...saved, clienteDati: trovaCliente(saved.cliente) || {} }, azienda: AZ(), immagini: IMG }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
       const nome = `${saved.titolo} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
@@ -1994,9 +2135,10 @@ document.addEventListener('change', e => {
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
   if (t.id === 'f_cnome') compilaCliente(t.value);
   if (t.id === 'f_cliente') { compilaDaRubrica(t.value); aggiornaCliInfo(); }
-  if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
+  if (t.id === 'f_mcliente') { compilaDaRubrica(t.value); aggiornaCliInfoModulo(); return; }
+  if (t.name && t.name.startsWith('u_')) aggiornaRapporto(t);
   if (t.name === 'mc_tipo') { const o = t.closest('.mcampo').querySelector('[name="mc_opz"]'); o.hidden = !['scelta', 'tabella'].includes(t.value); o.placeholder = t.value === 'tabella' ? 'Colonne, separate da virgola' : 'Scelte, separate da virgola'; return; }
-  if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); } return; }
+  if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); if (target.id === 'f_mcliente') aggiornaCliInfoModulo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
   if (t.id === 'f_scontrini') { $('#wrapScG').hidden = t.value !== 'settimanale'; return; }
   if (t.id === 'f_gpausa' && $('#oreStd')) { $('#oreStd').textContent = num(oreGiornata({ inizio: $('#f_ginizio').value, fine: $('#f_gfine').value, pausa: t.value })) + ' ore'; return; }
@@ -2011,6 +2153,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'f_cliente' || t.id === 'f_cnome') aggiornaCliInfo();
   if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
+  if (t.name && t.name.startsWith('u_')) { aggiornaRapporto(t); return; }
   if (t.id === 'cercaCantiere') { UI.cercaCant = t.value; const tmp = document.createElement('div'); tmp.innerHTML = rCantieri(); $('#listaCantieri').replaceWith(tmp.querySelector('#listaCantieri')); return; }
   if (t.id === 'cercaCliente') {
     UI.cerca = t.value;
