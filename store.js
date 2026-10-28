@@ -182,6 +182,8 @@ export function createStore(cfg, onChange) {
     async creaAccount(email, password) {
       const tmp = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'ddp-nuovo-account' } });
       const { data, error } = await tmp.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+      if (error && /signups? not allowed|signup.*disabled/i.test(error.message)) throw Object.assign(error, { userMsg: 'Su Supabase le iscrizioni sono spente: attiva "Allow new users to sign up" in Authentication › Sign In / Providers, poi riprova.' });
+      if (error && /rate limit|too many/i.test(error.message)) throw Object.assign(error, { userMsg: 'Supabase ha mandato troppe email di conferma in poco tempo: riprova tra un\'ora, oppure spegni "Confirm email" in Authentication › Sign In / Providers.' });
       if (error && !/registered|exists/i.test(error.message)) throw Object.assign(error, { userMsg: /password/i.test(error.message) ? 'Password provvisoria troppo debole: almeno 8 caratteri.' : error.message });
       const esistente = !!error || !data.user || (Array.isArray(data.user.identities) && data.user.identities.length === 0);
       return { esistente, conferma: !esistente && !data.session };
