@@ -2693,7 +2693,7 @@ function sheetAzienda() {
     <div class="g2">${F('Email', inp('email', a.email, 'email'))}${F('Indirizzo (facoltativo)', inp('indirizzo', a.indirizzo))}</div>
     ${F('IBAN per i pagamenti (facoltativo)', inp('iban', a.iban))}
     <div class="g2">${F('IVA predefinita', sel('ivaPredefinita', IVA.map(i => [i[0], i[1]]), String(a.ivaPredefinita)))}${F('Validità preventivi (giorni)', inp('validitaGiorni', a.validitaGiorni, 'number'))}</div>
-    ${F('Avviso imprevisti', inp('notaImprevisti', a.notaImprevisti))}
+    ${F('Avviso imprevisti (solo nei preventivi)', inp('notaImprevisti', a.notaImprevisti))}
     ${F('Termini e condizioni allegati ai preventivi', `<textarea id="f_condTesto" name="condizioni" style="min-height:280px">${esc(a.condizioni)}</textarea>`)}
     <div class="small muted">Separa i punti con una riga vuota: la prima riga di ogni punto è il titolo.</div>`,
   async fd => {

@@ -132,7 +132,7 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
   if (prev && +doc.validita > 0) info.push(`Validità dell'offerta: ${doc.validita} giorni dalla data del preventivo.`);
   info.push(`Pagamento: bonifico bancario all'emissione della fattura${az.iban ? ` – IBAN ${az.iban}` : ''}.`);
   note.push([info.join('\n'), { size: 8 }]);
-  if (az.notaImprevisti) note.push([az.notaImprevisti.toUpperCase() + (ora && ora.prezzo ? ` (${eur(ora.prezzo)}/ora)` : ''), { size: 7.2, font: 'bold', color: C.rosso }]);
+  if (prev && az.notaImprevisti) note.push([az.notaImprevisti.toUpperCase() + (ora && ora.prezzo ? ` (${eur(ora.prezzo)}/ora)` : ''), { size: 7.2, font: 'bold', color: C.rosso }]);
   const altNote = note.reduce((a, [t, o]) => a + pdf.wrap(t, nw, o.size, o.font || 'normal').length * o.size * 1.3 / (72 / 25.4) + 1.6, 0);
   const altTot = tl.length * 5.2 + 9;
   if (y + 3 + Math.max(altNote, altTot) > BOTTOM) y = nuovaPagina(); else y += 3;
