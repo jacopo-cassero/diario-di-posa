@@ -443,3 +443,6 @@ details > summary{cursor:pointer;color:var(--muted);padding:2px 0}
 .chipf[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .chipf[aria-pressed="true"] .num{color:inherit;opacity:.75}
 .seg .badge{margin-left:4px}
+.riga.sconto{background:var(--sunk);border-radius:8px;padding:6px 8px}
+.riga-tot.neg{color:#1e6b34}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .riga-tot.neg{color:#9fe0b0}}

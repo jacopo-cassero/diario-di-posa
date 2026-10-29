@@ -1,6 +1,6 @@
 // Impaginazione di preventivi e consuntivi in PDF, nello stile del listino CASSERO.
 import { PDF } from './pdf.js';
-import { totali, prezzoUnitario, totaleRiga, ivaOf, UNITA, LISTINO_BASE, AZIENDA_BASE } from './listino.js';
+import { totali, prezzoUnitario, totaleRiga, ivaOf, UNITA, LISTINO_BASE, AZIENDA_BASE, rigaSconto, baseSconto } from './listino.js';
 
 const EUR = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
 const eur = n => EUR.format(+n || 0).replace(/ | /g, ' ');
@@ -81,7 +81,8 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
     y += 9;
   }
   // con più giornate, ogni giornata ha la sua intestazione nella tabella
-  const elenco = doc.gruppi ? doc.gruppi.flatMap(g => [{ gruppo: g.titolo }, ...(g.righe || []).filter(r => r.descr || r.prezzo)]) : righe;
+  const baseTutto = baseSconto((doc.righe || []).filter(r => r.descr || r.prezzo), L);
+  const elenco = doc.gruppi ? doc.gruppi.flatMap(g => [{ gruppo: g.titolo }, ...(g.righe || []).filter(r => r.descr || r.prezzo).map(r => r.voce === 'sconto' ? rigaSconto(r, baseTutto) : r)]) : righe;
   let ir = 0;
   elenco.forEach(r => {
     if (r.gruppo) {
@@ -108,9 +109,12 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
     descr.forEach(l => { pdf.text(col.descr, ty, l, { size: 8.8 }); ty += 3.8; });
     extraL.forEach(l => { pdf.text(col.descr, ty - 0.7, l, { size: 7.2, font: 'italic', color: C.grigio }); ty += 3.1; });
     const vuoto = r.prezzo === '' || r.prezzo == null;
-    pdf.text(col.qta, by, qtaFmt(r.qta), { size: 8.8, align: 'right' });
-    pdf.text(col.um, by, r.unita === 'corpo' ? 'corpo' : (UNITA[r.unita] || r.unita || ''), { size: 8.2, align: 'center', color: C.grigio });
-    pdf.text(col.prezzo, by, vuoto ? 'da concordare' : eur(prezzoUnitario(r, L)), { size: vuoto ? 7.6 : 8.8, align: 'right', color: vuoto ? C.grigio : C.testo, font: vuoto ? 'italic' : 'normal' });
+    const sc = r.voce === 'sconto';
+    if (!sc) {
+      pdf.text(col.qta, by, qtaFmt(r.qta), { size: 8.8, align: 'right' });
+      pdf.text(col.um, by, r.unita === 'corpo' ? 'corpo' : (UNITA[r.unita] || r.unita || ''), { size: 8.2, align: 'center', color: C.grigio });
+      pdf.text(col.prezzo, by, vuoto ? 'da concordare' : eur(prezzoUnitario(r, L)), { size: vuoto ? 7.6 : 8.8, align: 'right', color: vuoto ? C.grigio : C.testo, font: vuoto ? 'italic' : 'normal' });
+    }
     pdf.text(col.importo, by, vuoto ? '—' : eur(totaleRiga(r, L)), { size: 8.8, align: 'right', font: 'bold' });
     y += h;
   });

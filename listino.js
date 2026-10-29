@@ -138,12 +138,21 @@ export function prezzoUnitario(riga, listino = LISTINO_BASE) {
 export const totaleRiga = (riga, listino) => r2(num(riga.qta) * prezzoUnitario(riga, listino));
 
 /** Totali di un documento (preventivo, posa o intervento). */
+/** Riga di sconto con l'importo calcolato: in euro (sempre negativo) o in percentuale sulle voci di lavoro. */
+export function rigaSconto(r, base) {
+  if (r.unita === 'pct') { const p = Math.abs(num(r.prezzo)); return { ...r, unita: 'corpo', qta: 1, pct: p, prezzo: -r2(base * p / 100), descr: r.descr && !/^sconto$/i.test(r.descr.trim()) ? r.descr : `Sconto ${String(p).replace('.', ',')}%` }; }
+  return { ...r, qta: num(r.qta) || 1, prezzo: -Math.abs(num(r.prezzo)) };
+}
+/** Somma delle voci di lavoro: senza trasferta e senza sconti. */
+export const baseSconto = (righe, listino = LISTINO_BASE) => r2((righe || []).filter(r => r.voce !== 'km' && r.voce !== 'sconto').reduce((s, r) => s + totaleRiga(r, listino), 0));
 export function totali(doc, listino = LISTINO_BASE) {
-  const righe = (doc.righe || []).filter(r => r.descr || r.prezzo);
+  const grezze = (doc.righe || []).filter(r => r.descr || r.prezzo);
+  const base = baseSconto(grezze, listino);
+  const righe = grezze.map(r => r.voce === 'sconto' ? rigaSconto(r, base) : r);
   const imponibileRighe = r2(righe.reduce((s, r) => s + totaleRiga(r, listino), 0));
   const pct = doc.urgenza ? num(doc.urgenzaPct ?? listino.urgenzaPct) : 0;
-  // la trasferta a km non ha maggiorazione urgenza
-  const urgenza = r2(righe.filter(r => r.voce !== 'km').reduce((s, r) => s + totaleRiga(r, listino), 0) * pct / 100);
+  // la trasferta a km e gli sconti non hanno maggiorazione urgenza
+  const urgenza = r2(righe.filter(r => r.voce !== 'km' && r.voce !== 'sconto').reduce((s, r) => s + totaleRiga(r, listino), 0) * pct / 100);
   const imponibile = r2(imponibileRighe + urgenza);
   const [, ivaLabel, ivaPct, ivaNota] = ivaOf(doc.iva ?? '22');
   const iva = r2(imponibile * ivaPct / 100);

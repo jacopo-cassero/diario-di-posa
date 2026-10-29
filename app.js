@@ -1,5 +1,5 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
-import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero } from './listino.js';
+import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
@@ -1864,7 +1864,7 @@ function contaPezzi(righe) {
 }
 /** Descrizione della giornata creata dalle voci. */
 function riepilogoVoci(righe) {
-  return (righe || []).map(r => {
+  return (righe || []).filter(r => r.voce !== 'sconto').map(r => {
     const extra = [r.blindato && 'blindato', r.luce && 'in luce'].filter(Boolean).join(', ');
     const nome = r.descr + (extra ? ` (${extra})` : '');
     return r.unita === 'corpo' ? nome : r.unita === 'ora' ? `${num(r.qta, 2)} ore ${nome.toLowerCase()}` : `${num(r.qta, 2)} × ${nome}`;
@@ -2104,6 +2104,15 @@ function opzioniListino() {
 }
 function rigaHtml(r) {
   const L = LIST();
+  if (r.voce === 'sconto') return `<div class="riga sconto" data-voce="sconto">
+    <div class="riga-top"><input name="rd" value="${esc(r.descr || 'Sconto')}" placeholder="Sconto" aria-label="Descrizione"><button type="button" data-act="rmRiga" aria-label="Togli sconto">×</button></div>
+    <div class="riga-num">
+      <input name="rq" type="hidden" value="1">
+      <label class="f"><span>In</span><select name="ru"><option value="corpo" ${r.unita !== 'pct' ? 'selected' : ''}>€</option><option value="pct" ${r.unita === 'pct' ? 'selected' : ''}>%</option></select></label>
+      <label class="f"><span class="lsc">${r.unita === 'pct' ? 'Percentuale' : 'Importo €'}</span><input name="rp" type="number" step="any" min="0" inputmode="decimal" value="${esc(r.prezzo === '' || r.prezzo == null ? '' : Math.abs(n2(r.prezzo)))}" placeholder="${r.unita === 'pct' ? 'es. 10' : 'es. 50'}"></label>
+      <span class="riga-tot price neg"></span>
+    </div>
+  </div>`;
   return `<div class="riga" data-voce="${esc(r.voce || '')}" data-magg="${esc(r.magg || '')}">
     <div class="riga-top"><input name="rd" value="${esc(r.descr || '')}" placeholder="Descrizione della voce" aria-label="Descrizione"><button type="button" data-act="rmRiga" aria-label="Togli voce">×</button></div>
     <div class="riga-num">
@@ -2121,7 +2130,7 @@ function righeBox(righe, kind, { urgenza = false, iva = null } = {}) {
   return `<div class="fieldset" id="righeBox" data-kind="${kind}">
     <span class="fs-t">Voci e prezzi dal listino</span>
     <div class="righe" id="righe">${(righe || []).map(rigaHtml).join('')}</div>
-    <div class="row"><select id="addVoce" class="btn sm addvoce" aria-label="Aggiungi voce dal listino"><option value="">+ Aggiungi dal listino…</option>${opzioniListino()}</select><button type="button" class="btn sm" data-act="addLibera">+ Voce libera</button></div>
+    <div class="row"><select id="addVoce" class="btn sm addvoce" aria-label="Aggiungi voce dal listino"><option value="">+ Aggiungi dal listino…</option>${opzioniListino()}</select><button type="button" class="btn sm" data-act="addLibera">+ Voce libera</button><button type="button" class="btn sm" data-act="addSconto">+ Sconto</button></div>
     ${kind !== 'lav' ? `<label class="check"><input type="checkbox" id="f_urgApp" name="urgApp" ${urgenza ? 'checked' : ''}> Maggiorazione urgenza ${num(L.urgenzaPct)}%</label>` : ''}
     ${kind === 'prev' ? F('IVA', sel('iva', IVA.map(i => [i[0], i[1]]), String(iva ?? AZ().ivaPredefinita))) : ''}
     <div class="totbox" id="totBox"></div>
@@ -2134,6 +2143,7 @@ function leggiRighe() {
     const q = n => el.querySelector(`[name="${n}"]`);
     const p = q('rp').value.trim();
     const r = { voce: el.dataset.voce || '', descr: q('rd').value.trim(), unita: q('ru').value, qta: n2(q('rq').value), prezzo: p === '' ? '' : n2(p), magg: el.dataset.magg || '', blindato: !!q('rb')?.checked, luce: !!q('rl')?.checked };
+    if (r.voce === 'sconto') { if (r.prezzo === '' || !n2(r.prezzo)) return { descr: '' }; r.qta = 1; r.prezzo = r.unita === 'pct' ? Math.abs(n2(r.prezzo)) : -Math.abs(n2(r.prezzo)); r.descr = r.descr || 'Sconto'; return r; }
     if (r.blindato) r.maggBlindato = L.maggBlindato;
     if (r.luce) r.maggLuce = L.maggLuce;
     return r;
@@ -2142,8 +2152,15 @@ function leggiRighe() {
 function aggiornaTotali() {
   const box = $('#righeBox'); if (!box) return;
   const kind = box.dataset.kind, L = LIST();
+  const base = baseSconto(leggiRighe(), L);
   document.querySelectorAll('#righe .riga').forEach(el => {
     const q = n => el.querySelector(`[name="${n}"]`);
+    if (el.dataset.voce === 'sconto') {
+      const v = q('rp').value.trim(), pct = q('ru').value === 'pct';
+      el.querySelector('.lsc').textContent = pct ? 'Percentuale' : 'Importo €';
+      el.querySelector('.riga-tot').textContent = v === '' ? '—' : eur(totaleRiga(rigaSconto({ unita: q('ru').value, prezzo: v, qta: 1 }, base), L));
+      return;
+    }
     const r = { unita: q('ru').value, qta: n2(q('rq').value), prezzo: q('rp').value.trim(), blindato: !!q('rb')?.checked, luce: !!q('rl')?.checked };
     const sp = el.querySelectorAll('.riga-num .f > span');
     sp[0].textContent = r.unita === 'ora' ? 'Ore' : 'Q.tà';
@@ -2821,6 +2838,7 @@ document.addEventListener('click', async e => {
     case 'newPrev': sheetPrev(null); break;
     case 'editPrev': sheetPrev(S.preventivi.find(x => x.id === id)); break;
     case 'prevF': UI.prevFilter = arg; render(); break;
+    case 'addSconto': $('#righe').insertAdjacentHTML('beforeend', rigaHtml({ voce: 'sconto', descr: 'Sconto', unita: 'corpo', qta: 1, prezzo: '' })); aggiornaTotali(); $('#righe').lastElementChild.querySelector('[name="rp"]').focus(); break;
     case 'addLibera': $('#righe').insertAdjacentHTML('beforeend', rigaHtml({ descr: '', unita: 'corpo', qta: 1, prezzo: '' })); aggiornaTotali(); $('#righe').lastElementChild.querySelector('[name="rd"]').focus(); break;
     case 'rmRiga': b.closest('.riga').remove(); aggiornaTotali(); break;
     case 'ricalcola': { const imp = $('#f_importo') || $('#f_costo'); if (imp) { imp.dataset.auto = '1'; aggiornaTotali(); } break; }
