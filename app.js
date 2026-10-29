@@ -1,4 +1,4 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata } from './logica.js';
+import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
@@ -911,6 +911,7 @@ function lavoroCard(l) {
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
+    ${badgeOrario(l)}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}${l.urgenzaApplicata ? '<span class="chip warn">Urgente</span>' : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
@@ -923,11 +924,38 @@ function lavoroCard(l) {
       ${nAll ? `<span class="small muted">${svg('clip', 'i')} ${nAll} ${nAll === 1 ? 'allegato' : 'allegati'}</span>` : ''}</div>` : ''}
   </div>`;
 }
+/* ---------- orari ---------- */
+const badgeOrario = x => { const t = testoOrario(x); if (!t) return ''; const o = orarioDi(x); return `<div class="orariob">${svg('clock', 'i')} <b>${x.tuttoGiorno ? 'Tutto il giorno' : esc(t)}</b>${x.tuttoGiorno ? ` <span class="muted">${o[0]}–${o[1]}</span>` : ''}</div>`; };
+function campoOrario(x, kind) {
+  const tg = x.tuttoGiorno ?? (kind === 'lav' && !x.oraInizio);
+  const ini = x.oraInizio && !x.tuttoGiorno ? x.oraInizio : kind === 'lav' ? TUTTO_GIORNO[0] : '';
+  const fin = x.oraFine && !x.tuttoGiorno ? x.oraFine : kind === 'lav' ? TUTTO_GIORNO[1] : '';
+  return `<div class="fieldset orario"><span class="fs-t">Orario</span>
+    ${tog('tuttoGiorno', 'Tutto il giorno', tg, `dalle ${TUTTO_GIORNO[0]} alle ${TUTTO_GIORNO[1]}: la giornata è impegnata`)}
+    <div class="g2" id="orariBox" ${tg ? 'hidden' : ''}>${F('Dalle', inp('oraInizio', ini, 'time'))}${F('Alle', inp('oraFine', fin, 'time'))}</div>
+  </div>`;
+}
+function leggiOrario(fd) {
+  if (fd.get('tuttoGiorno')) return { tuttoGiorno: true, oraInizio: TUTTO_GIORNO[0], oraFine: TUTTO_GIORNO[1] };
+  const a = String(fd.get('oraInizio') || ''), b = String(fd.get('oraFine') || '');
+  if (a && b && b <= a) throw Object.assign(new Error('orario'), { userMsg: 'L\'ora di fine deve essere dopo quella di inizio' });
+  return { tuttoGiorno: false, oraInizio: a, oraFine: a ? b : '' };
+}
+/** Altri lavori nello stesso giorno con orari che si accavallano (per avvisare). */
+function sovrapposti(kind, id, giorni, d) {
+  const o = orarioDi(d); if (!o) return '';
+  const fine = x => { const p = orarioDi(x); return p && (p[1] || `${String(Math.min(+p[0].slice(0, 2) + 2, 23)).padStart(2, '0')}${p[0].slice(2)}`); };
+  const mio = [o[0], fine(d)];
+  const altri = [...S.lavori.filter(x => !(kind === 'lavori' && x.id === id) && giorni.some(g => inPosa(x, g))), ...S.interventi.filter(x => !(kind === 'interventi' && x.id === id) && x.dataProg && giorni.includes(x.dataProg) && x.stato !== 'annullato')];
+  const c = altri.find(x => { const p = orarioDi(x); return p && p[0] < mio[1] && fine(x) > mio[0]; });
+  return c ? `${c.cliente || 'un altro lavoro'} (${testoOrario(c)})` : '';
+}
 function intCard(i) {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
     <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
+    ${i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
     ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
@@ -973,7 +1001,7 @@ function rCal() {
   <section class="stack">
     <div class="row between"><h3>${fmtD(UI.day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
       <div class="row"><button class="btn sm" data-act="newEv" data-arg="${UI.day}" type="button">+ Ferie, fiera, corso</button><button class="btn sm" data-act="newInt" data-arg="${UI.day}" type="button">+ Intervento</button><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button></div></div>
-    ${de.map(eventoCard).join('')}${dl.map(lavoroCard).join('')}${di.map(intCard).join('')}
+    ${de.map(eventoCard).join('')}${[...dl.map(x => [x, lavoroCard]), ...di.map(x => [x, intCard])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, f]) => f(x)).join('')}
     ${!dl.length && !di.length && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
   </section>
   ${S.lavori.some(x => x.esempio) || S.movimenti.some(x => x.esempio) ? `<button class="btn ghost small" data-act="unseed" type="button">Rimuovi i dati di esempio</button>` : ''}`;
@@ -1922,6 +1950,7 @@ function sheetLav(l, prefill) {
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     <div class="cliline small" id="cliInfo"></div>
     <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
+    ${campoOrario(l, 'lav')}
     <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${l.clienteFinale ? `<div class="small muted">Cliente finale: <b>${esc(l.clienteFinale)}</b></div>` : ''}
@@ -1973,6 +2002,7 @@ function sheetLav(l, prefill) {
     moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente);
     conSquadra('lavori', isNew ? null : l.id, d, fd);
+    Object.assign(d, leggiOrario(fd));
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (isNew && d.preventivoId) {
       const p = S.preventivi.find(x => x.id === d.preventivoId);
@@ -1980,7 +2010,8 @@ function sheetLav(l, prefill) {
     }
     UI.day = d.data; UI.month = d.data.slice(0, 7);
     const inFerie = S.eventi.some(e => e.tipo === 'ferie' && giorniPosa(d).some(g => inEv(e, g)));
-    toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : 'Posa salvata');
+    const sov = sovrapposti('lavori', id, giorniPosa(d), d);
+    toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : sov ? `Posa salvata. Attenzione: si sovrappone a ${sov}` : 'Posa salvata');
   }, {
     del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
@@ -2015,6 +2046,7 @@ function sheetInt(i, day) {
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
+    ${campoOrario(i, 'int')}
     <div class="g2">${F('Costo al cliente €', inp('costo', i.costo, 'number'))}${F('Ore', inp('ore', i.ore, 'number'))}</div>
     ${impHint()}
     ${kmBox(separaKm(i.righe).km, separaKm(i.righe).euro)}
@@ -2031,8 +2063,10 @@ function sheetInt(i, day) {
     moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
-    store.put('interventi', isNew ? null : i.id, d);
-    toast('Intervento salvato');
+    Object.assign(d, leggiOrario(fd));
+    const idInt = store.put('interventi', isNew ? null : i.id, d);
+    const sov = d.dataProg ? sovrapposti('interventi', idInt, [d.dataProg], d) : '';
+    toast(sov ? `Intervento salvato. Attenzione: si sovrappone a ${sov}` : 'Intervento salvato');
   }, {
     del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); toast('Intervento eliminato'); },
     extra: isNew ? '' : `${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
@@ -2903,6 +2937,8 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
+  if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
+  if (t.id === 'f_oraInizio' && $('#f_oraFine') && !$('#f_oraFine').value && t.value) { const h = Math.min(+t.value.slice(0, 2) + 2, 23); $('#f_oraFine').value = `${String(h).padStart(2, '0')}${t.value.slice(2)}`; }
   if (t.id === 'firmatoIn') { const f = t.files && t.files[0]; t.value = ''; allegaFirmato(f); return; }
   if (t.dataset.change === 'anY') { UI.anYear = +t.value; render(); return; }
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }

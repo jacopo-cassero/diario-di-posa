@@ -446,3 +446,6 @@ details > summary{cursor:pointer;color:var(--muted);padding:2px 0}
 .riga.sconto{background:var(--sunk);border-radius:8px;padding:6px 8px}
 .riga-tot.neg{color:#1e6b34}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .riga-tot.neg{color:#9fe0b0}}
+.orariob{display:flex;align-items:center;gap:6px;font-size:.9rem}
+.orariob .i{width:16px;height:16px}
+.fieldset.orario .tog{border-bottom:0}

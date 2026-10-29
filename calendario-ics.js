@@ -1,6 +1,8 @@
 // Calendario «Diario di Posa» in formato iCalendar: pose, interventi programmati e impegni.
 // Lo usa l'app per tenere aggiornato il calendario a cui l'iPhone è iscritto (visibile anche su CarPlay).
 
+import { orarioDi } from './logica.js';
+
 const pad = n => String(n).padStart(2, '0');
 const isoGiorno = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 const giorno = s => new Date(s + 'T12:00:00Z');
@@ -45,21 +47,25 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       if (x.soloFeriali !== false && !G.giorni.includes(d.getUTCDay()) && k !== x.data && k !== fine) continue;
       giorni.push(k);
     }
+    const o = orarioDi(x);
+    const ini = o ? o[0] : G.inizio, fin = o && o[1] ? o[1] : o ? `${pad(Math.min(+o[0].slice(0, 2) + 2, 23))}${o[0].slice(2)}` : G.fine;
     giorni.forEach((k, i) => evento(`posa-${x.id}-${k}`, [
       `SUMMARY:${esc(`${x.urgenzaApplicata ? '⚠ ' : ''}Posa · ${x.cliente || 'Cliente'}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
-      `DTSTART;TZID=Europe/Rome:${compatto(k)}T${hm(G.inizio)}`,
-      `DTEND;TZID=Europe/Rome:${compatto(k)}T${hm(G.fine)}`,
+      `DTSTART;TZID=Europe/Rome:${compatto(k)}T${hm(ini)}`,
+      `DTEND;TZID=Europe/Rome:${compatto(k)}T${hm(fin)}`,
       ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
       `DESCRIPTION:${esc([x.installato, x.note, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
     ]));
   }
   for (const x of S.interventi || []) {
     if (!x.dataProg || x.stato === 'annullato' || x.dataProg < limite) continue;
-    const inizio = hm(G.inizio), h = +inizio.slice(0, 2) + 2;
+    const o = orarioDi(x);
+    const inizio = hm(o ? o[0] : G.inizio), h = +inizio.slice(0, 2) + 2;
+    const fine = o && o[1] ? hm(o[1]) : `${pad(Math.min(h, 23))}${inizio.slice(2)}`;
     evento(`int-${x.id}`, [
       `SUMMARY:${esc(`${x.urgenza === 'critica' ? '⚠ ' : ''}Intervento · ${x.cliente || 'Cliente'}${x.stato === 'completato' ? ' (fatto)' : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(x.dataProg)}T${inizio}`,
-      `DTEND;TZID=Europe/Rome:${compatto(x.dataProg)}T${pad(Math.min(h, 23))}${inizio.slice(2)}`,
+      `DTEND;TZID=Europe/Rome:${compatto(x.dataProg)}T${fine}`,
       ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
       `DESCRIPTION:${esc([x.descrizione, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
     ]);

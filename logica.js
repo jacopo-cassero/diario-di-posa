@@ -104,7 +104,7 @@ export function promemoria(S, today = oggi(), momento = 'app') {
     const ev = (S.eventi || []).filter(e => e.data === giorno);
     const NOMI_EV = { ferie: 'inizio ferie', fiera: 'fiera', corso: 'corso', altro: 'impegno' };
     if (ev.length) out.push({ lvl: 'in', txt: `${etichetta}: ${ev.map(e => e.titolo || NOMI_EV[e.tipo] || 'impegno').join(', ')}`, sub: ev.map(e => [NOMI_EV[e.tipo], e.orario, e.luogo].filter(Boolean).join(' · ')).join(' / '), act: 'day', arg: giorno });
-    if (pose.length || ints.length) out.push({ lvl: 'in', txt: `${etichetta}: ${[pose.length ? `${pose.length} ${pose.length === 1 ? 'posa' : 'pose'}` : '', ints.length ? `${ints.length} ${ints.length === 1 ? 'intervento' : 'interventi'}` : ''].filter(Boolean).join(' e ')}`, sub: [...pose, ...ints].map(x => [x.cliente, x.indirizzo].filter(Boolean).join(', ')).slice(0, 3).join(' / '), act: 'day', arg: giorno });
+    if (pose.length || ints.length) out.push({ lvl: 'in', txt: `${etichetta}: ${[pose.length ? `${pose.length} ${pose.length === 1 ? 'posa' : 'pose'}` : '', ints.length ? `${ints.length} ${ints.length === 1 ? 'intervento' : 'interventi'}` : ''].filter(Boolean).join(' e ')}`, sub: [...pose, ...ints].sort((a, b) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(x => [orarioDi(x) && !x.tuttoGiorno ? orarioDi(x)[0] : '', x.cliente, x.indirizzo].filter(Boolean).join(' ')).slice(0, 3).join(' / '), act: 'day', arg: giorno });
   }
 
   if (sera) {
@@ -174,4 +174,19 @@ export function leggiScontrino(testo, nomiMagazzino = []) {
     }
   }
   return { data, fornitore, numero, totale, categoria, descrizione: '', righe: mat.slice(0, 15) };
+}
+
+/* ---------- orari di pose e interventi ---------- */
+export const TUTTO_GIORNO = ['08:00', '18:00'];
+/** [inizio, fine] del lavoro, oppure null se non ha un orario. */
+export function orarioDi(x) {
+  if (!x) return null;
+  if (x.tuttoGiorno) return [x.oraInizio || TUTTO_GIORNO[0], x.oraFine || TUTTO_GIORNO[1]];
+  if (x.oraInizio) return [x.oraInizio, x.oraFine || ''];
+  return null;
+}
+export function testoOrario(x) {
+  const o = orarioDi(x); if (!o) return '';
+  if (x.tuttoGiorno) return 'tutto il giorno';
+  return o[1] ? `${o[0]}–${o[1]}` : `dalle ${o[0]}`;
 }
