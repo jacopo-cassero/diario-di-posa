@@ -1982,7 +1982,7 @@ function sheetLav(l, prefill) {
     const inFerie = S.eventi.some(e => e.tipo === 'ferie' && giorniPosa(d).some(g => inEv(e, g)));
     toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : 'Posa salvata');
   }, {
-    del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
+    del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
   });
   if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
@@ -2214,13 +2214,34 @@ function aggiungiVoce(id) {
 const STATI_PREV = [['bozza', 'Bozza', ''], ['inviato', 'Inviato', 'warn'], ['accettato', 'Accettato', 'ok'], ['rifiutato', 'Rifiutato', 'bad']];
 const statoPrev = k => STATI_PREV.find(s => s[0] === (k || 'bozza')) || STATI_PREV[0];
 const totPrev = p => totali(p, LIST());
+/* preventivo firmato dal cliente */
+let prevFirmato = null;
+const firmatoHtml = () => prevFirmato
+  ? `<div class="row between"><span class="fs-t">Preventivo firmato</span><span class="chip ok">Firmato</span></div>
+     <div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="firmatoApri">${esc(prevFirmato.nome)}</button><button type="button" class="x" data-act="firmatoTogli" aria-label="Togli il preventivo firmato">×</button></div>
+     <div class="small muted">Caricato il ${fmtD(prevFirmato.data)}. Resta salvato con il preventivo e passa nella posa quando la metti in calendario.</div>`
+  : `<div class="row between"><span class="fs-t">Preventivo firmato</span><label class="btn sm primary" for="firmatoIn">${svg('clip')} Allega<input id="firmatoIn" type="file" accept="application/pdf,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label></div>
+     <div class="small muted">Quando il cliente lo firma, allega qui il PDF o una foto della copia firmata: il preventivo passa ad «Accettato».</div>`;
+async function allegaFirmato(file) {
+  if (!file) return;
+  try {
+    toast('Carico il preventivo firmato…');
+    const blob = file.type.startsWith('image/') ? await shrink(file, 2400) : file;
+    const n = prevCtx?.p?.numero ? `Preventivo ${String(prevCtx.p.numero).replace(/\//g, '-')} firmato` : 'Preventivo firmato';
+    const ext = (file.name.split('.').pop() || (file.type.split('/')[1] || 'pdf')).toLowerCase();
+    const path = await store.uploadFile(blob, file.name);
+    prevFirmato = { nome: `${n}.${ext}`, path, tipo: file.type, data: TODAY };
+    $('#firmatoBox').innerHTML = firmatoHtml();
+    const st = $('#f_stato'); if (st && st.value !== 'accettato') { st.value = 'accettato'; toast('Allegato: preventivo segnato come accettato. Tocca Salva'); } else toast('Allegato: tocca Salva');
+  } catch (e) { toast(e.userMsg || 'Caricamento non riuscito'); }
+}
 function prevCard(p) {
   const t = totPrev(p), st = statoPrev(p.stato);
   const attesa = p.stato === 'inviato' ? -daysTo(p.dataInvio || p.data) : 0;
   return `<div class="card" role="button" tabindex="0" data-act="editPrev" data-id="${p.id}">
     <div class="row between"><span class="t">${esc(p.cliente?.nome || 'Cliente')}</span><span class="price">${eur(t.totale)}</span></div>
     ${p.oggetto ? `<div>${esc(p.oggetto)}</div>` : ''}
-    <div class="meta"><span class="num">N. ${esc(p.numero || '')}</span><span>${fmtD(p.data, { day: 'numeric', month: 'short' })}</span><span class="chip ${st[2]}">${st[1]}</span>${attesa >= 7 ? `<span class="chip warn">senza risposta da ${attesa} gg</span>` : ''}${p.lavoroId ? '<span class="chip in">in calendario</span>' : ''}</div>
+    <div class="meta"><span class="num">N. ${esc(p.numero || '')}</span><span>${fmtD(p.data, { day: 'numeric', month: 'short' })}</span><span class="chip ${st[2]}">${st[1]}</span>${p.firmato ? '<span class="chip ok">firmato</span>' : p.stato === 'accettato' ? '<span class="chip warn">manca la firma</span>' : ''}${attesa >= 7 ? `<span class="chip warn">senza risposta da ${attesa} gg</span>` : ''}${p.lavoroId ? '<span class="chip in">in calendario</span>' : ''}</div>
   </div>`;
 }
 function rPrev() {
@@ -2241,6 +2262,7 @@ function sheetPrev(p) {
   const isNew = !p || !p.id, az = AZ();
   p = p || { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, cliente: { tipo: 'finale' }, righe: [], iva: az.ivaPredefinita, condizioni: true };
   prevCtx = { p, isNew };
+  prevFirmato = p.firmato || null;
   const c = p.cliente || {};
   openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
@@ -2259,6 +2281,7 @@ function sheetPrev(p) {
     ${righeBox(separaKm(p.righe).altre, 'prev', { urgenza: !!p.urgenza, iva: p.iva })}
     ${F('Note per il cliente', `<textarea id="f_note" name="note" placeholder="Es. Materiale di consumo compreso">${esc(p.note || '')}</textarea>`)}
     <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
+    <div class="fieldset firmatobox" id="firmatoBox">${firmatoHtml()}</div>
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
     del: isNew ? null : async () => { store.drop('preventivi', p.id); toast('Preventivo eliminato'); },
     extra: `<button type="button" class="btn dark" data-act="prevPdf">PDF</button>${!isNew && p.stato === 'accettato' && !p.lavoroId ? '<button type="button" class="btn" data-act="pianifica">Metti in calendario</button>' : ''}`,
@@ -2270,7 +2293,7 @@ function salvaPrev(fd) {
   const d = { ...stripId(p),
     numero: fd.get('numero').trim(), data: fd.get('data'), validita: n2(fd.get('validita')), stato: fd.get('stato'),
     cliente: { nome: fd.get('cnome').trim(), tipo: fd.get('ctipo'), indirizzo: fd.get('cindirizzo').trim(), piva: fd.get('cpiva').trim(), telefono: fd.get('ctel').trim(), email: fd.get('cemail').trim() },
-    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd),
+    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd), firmato: prevFirmato || null,
     urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
   d.clienteId = assicuraCliente(d.cliente.nome, { tipo: d.cliente.tipo, indirizzo: d.cliente.indirizzo, piva: d.cliente.piva, telefono: d.cliente.telefono, email: d.cliente.email });
@@ -2855,7 +2878,9 @@ document.addEventListener('click', async e => {
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
     case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { store.put('preventivi', p.id, { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
-    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
+    case 'firmatoApri': if (prevFirmato) openFile(prevFirmato.path); break;
+    case 'firmatoTogli': if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Togli?'; break; } prevFirmato = null; $('#firmatoBox').innerHTML = firmatoHtml(); toast('Tolto: tocca Salva'); break;
+    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { allegati: p.firmato ? [p.firmato] : [], cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
     case 'editListino': sheetListino(); break;
     case 'editAzienda': sheetAzienda(); break;
     case 'addL': b.insertAdjacentHTML('beforebegin', listinoRow({ id: 'v' + Date.now().toString(36), nome: '', variante: '', prezzo: '', unita: 'pz' })); b.previousElementSibling.querySelector('[name="ln"]').focus(); break;
@@ -2878,6 +2903,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
+  if (t.id === 'firmatoIn') { const f = t.files && t.files[0]; t.value = ''; allegaFirmato(f); return; }
   if (t.dataset.change === 'anY') { UI.anYear = +t.value; render(); return; }
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }
   if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; }
