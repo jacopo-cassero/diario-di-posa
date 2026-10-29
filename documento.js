@@ -109,7 +109,7 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
     descr.forEach(l => { pdf.text(col.descr, ty, l, { size: 8.8 }); ty += 3.8; });
     extraL.forEach(l => { pdf.text(col.descr, ty - 0.7, l, { size: 7.2, font: 'italic', color: C.grigio }); ty += 3.1; });
     const vuoto = r.prezzo === '' || r.prezzo == null;
-    const sc = r.voce === 'sconto';
+    const sc = r.voce === 'sconto' || r.voce === 'arrot';
     if (!sc) {
       pdf.text(col.qta, by, qtaFmt(r.qta), { size: 8.8, align: 'right' });
       pdf.text(col.um, by, r.unita === 'corpo' ? 'corpo' : (UNITA[r.unita] || r.unita || ''), { size: 8.2, align: 'center', color: C.grigio });

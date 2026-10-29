@@ -144,7 +144,7 @@ export function rigaSconto(r, base) {
   return { ...r, qta: num(r.qta) || 1, prezzo: -Math.abs(num(r.prezzo)) };
 }
 /** Somma delle voci di lavoro: senza trasferta e senza sconti. */
-export const baseSconto = (righe, listino = LISTINO_BASE) => r2((righe || []).filter(r => r.voce !== 'km' && r.voce !== 'sconto').reduce((s, r) => s + totaleRiga(r, listino), 0));
+export const baseSconto = (righe, listino = LISTINO_BASE) => r2((righe || []).filter(r => r.voce !== 'km' && r.voce !== 'sconto' && r.voce !== 'arrot').reduce((s, r) => s + totaleRiga(r, listino), 0));
 export function totali(doc, listino = LISTINO_BASE) {
   const grezze = (doc.righe || []).filter(r => r.descr || r.prezzo);
   const base = baseSconto(grezze, listino);
@@ -152,7 +152,7 @@ export function totali(doc, listino = LISTINO_BASE) {
   const imponibileRighe = r2(righe.reduce((s, r) => s + totaleRiga(r, listino), 0));
   const pct = doc.urgenza ? num(doc.urgenzaPct ?? listino.urgenzaPct) : 0;
   // la trasferta a km e gli sconti non hanno maggiorazione urgenza
-  const urgenza = r2(righe.filter(r => r.voce !== 'km' && r.voce !== 'sconto').reduce((s, r) => s + totaleRiga(r, listino), 0) * pct / 100);
+  const urgenza = r2(righe.filter(r => r.voce !== 'km' && r.voce !== 'sconto' && r.voce !== 'arrot').reduce((s, r) => s + totaleRiga(r, listino), 0) * pct / 100);
   const imponibile = r2(imponibileRighe + urgenza);
   const [, ivaLabel, ivaPct, ivaNota] = ivaOf(doc.iva ?? '22');
   const iva = r2(imponibile * ivaPct / 100);

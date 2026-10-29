@@ -2076,6 +2076,83 @@ function sheetInt(i, day) {
 }
 
 /* consuntivo */
+/* ---------- sconti e arrotondamenti nei consuntivi ---------- */
+let consCtx = null;
+const r2a = n => Math.round((+n || 0) * 100) / 100;
+function campoAggiustamenti(a = {}) {
+  return `<div class="fieldset" id="aggBox"><span class="fs-t">Sconti e arrotondamenti</span>
+    <div class="g2">${F('Sconto', sel('csTipo', [['eur', 'in euro'], ['pct', 'in percentuale']], a.scontoTipo || 'eur'))}${F(a.scontoTipo === 'pct' ? 'Percentuale' : 'Importo €', inp('csVal', a.sconto || '', 'number', 'min="0" step="any" inputmode="decimal" placeholder="0"'))}</div>
+    ${F('<span id="csTotLbl">Totale finale arrotondato</span>', inp('csTot', a.totale || '', 'number', 'min="0" step="any" inputmode="decimal" placeholder="Lascia vuoto per non arrotondare"'))}
+    <div class="row chips">${[[1, 'all\'euro'], [10, 'a 10 €'], [50, 'a 50 €'], [100, 'a 100 €']].map(([m, l]) => `<button type="button" class="chipf" data-act="csArr" data-arg="${m}">↓ ${l}</button>`).join('')}<button type="button" class="chipf" data-act="csArr" data-arg="0">Nessuno</button></div>
+    <div class="small muted" id="csInfo"></div></div>`;
+}
+function leggiAgg() {
+  if (!$('#f_csTipo')) return {};
+  const a = { scontoTipo: $('#f_csTipo').value, sconto: n2($('#f_csVal').value), totale: n2($('#f_csTot').value) };
+  if (!a.sconto) { delete a.sconto; delete a.scontoTipo; }
+  if (!a.totale) delete a.totale;
+  return a;
+}
+/** Aggiunge al consuntivo la riga di sconto e quella di arrotondamento per arrivare al totale scelto. */
+function conAggiustamenti(doc, a = {}) {
+  const L = LIST(), extra = [];
+  if (n2(a.sconto) > 0) extra.push({ voce: 'sconto', descr: 'Sconto', unita: a.scontoTipo === 'pct' ? 'pct' : 'corpo', qta: 1, prezzo: a.scontoTipo === 'pct' ? n2(a.sconto) : -n2(a.sconto) });
+  if (n2(a.totale) > 0) {
+    const t = totali({ ...doc, righe: [...doc.righe, ...extra] }, L), k = 1 + t.ivaPct / 100, obiettivo = n2(a.totale);
+    let diff = r2a(obiettivo / k - t.imponibile);
+    for (const c of [0, 0.01, -0.01, 0.02, -0.02]) if (Math.abs(r2a(r2a(t.imponibile + diff + c) * k) - obiettivo) < 0.005) { diff = r2a(diff + c); break; }
+    if (Math.abs(diff) >= 0.01) extra.push({ voce: 'arrot', descr: 'Arrotondamento', unita: 'corpo', qta: 1, prezzo: diff });
+  }
+  if (!extra.length) return doc;
+  const d = { ...doc, righe: [...doc.righe, ...extra] };
+  if (doc.gruppi) d.gruppi = [...doc.gruppi, { titolo: 'Sconti e arrotondamenti', righe: totali(d, L).righe.slice(-extra.length) }];
+  return d;
+}
+const righeTotale = t => t.ivaPct > 0 ? `Imponibile: ${eur(t.imponibile)}\n${t.ivaLabel}: ${eur(t.iva)}\nTotale: ${eur(t.totale)}` : `Totale: ${eur(t.imponibile)}${t.ivaNota ? '' : ' + IVA se dovuta'}`;
+function infoAgg(prima, doc, t) {
+  const box = $('#csInfo'); if (!box) return;
+  const lbl = $('#csTotLbl'); if (lbl) lbl.textContent = t.ivaPct > 0 ? 'Totale finale arrotondato (IVA compresa)' : 'Totale finale arrotondato';
+  const vl = $('#f_csVal')?.closest('label')?.querySelector('span'); if (vl) vl.textContent = $('#f_csTipo').value === 'pct' ? 'Percentuale' : 'Importo €';
+  const tot = x => x.ivaPct > 0 ? x.totale : x.imponibile;
+  box.textContent = Math.abs(tot(prima) - tot(t)) < 0.005 ? `Totale senza sconti: ${eur(tot(prima))}` : `Era ${eur(tot(prima))} · diventa ${eur(tot(t))} (${eur(tot(t) - tot(prima))})`;
+}
+function testoConsSingolo(x, kind, iva, adj = leggiAgg()) {
+  const L = kind === 'lavori', lis = LIST();
+  const doc0 = { ...docDaLavoro(x, kind, AZ()), iva };
+  const doc = conAggiustamenti(doc0, adj);
+  const t = totali(doc, lis);
+  const mats = (x.materiali || []).filter(m => m.nome);
+  const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : r.unita === 'km' ? 'km' : 'pz';
+  const riga = r => r.prezzo === '' ? `- ${r.descr}: da concordare` : (r.voce === 'sconto' || r.voce === 'arrot') ? `- ${r.descr}: ${eur(totaleRiga(r, lis))}` : `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`.replace(/  +/g, ' ');
+  if ($('#csInfo')) infoAgg(totali(doc0, lis), doc, t);
+  return `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
+Cliente: ${x.cliente || ''}
+Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+Cantiere: ${x.indirizzo || '—'}
+
+Lavori eseguiti:
+${(L ? x.installato : x.descrizione) || '—'}${L && n2(x.pezzi) ? `\nPezzi posati: ${num(x.pezzi, 0)}` : ''}
+Ore impiegate: ${n2(x.ore) ? num(x.ore) : '—'}
+${t.righe.length ? `\nDettaglio:\n${t.righe.map(riga).join('\n')}\n` : ''}${t.urgenzaPct ? `Maggiorazione urgenza ${num(t.urgenzaPct)}%: ${eur(t.urgenza)}\n` : ''}${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
+${righeTotale(t)}`;
+}
+function aggiornaCons() {
+  if (consCtx) { const x = S[consCtx.kind].find(r => r.id === consCtx.id); const pre = $('#consTxt'); if (x && pre) pre.textContent = testoConsSingolo(x, consCtx.kind, $('#f_iva')?.value || AZ().ivaPredefinita); }
+  else aggiornaCM();
+}
+document.addEventListener('input', e => { if (['f_csVal', 'f_csTot'].includes(e.target.id)) aggiornaCons(); });
+document.addEventListener('change', e => { if (['f_csTipo', 'f_csVal', 'f_csTot'].includes(e.target.id) || (e.target.id === 'f_iva' && $('#aggBox'))) aggiornaCons(); });
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act="csArr"]'); if (!b) return;
+  const m = +b.dataset.arg, tot = $('#f_csTot');
+  if (!m) { tot.value = ''; aggiornaCons(); return; }
+  tot.value = ''; aggiornaCons();
+  const L = LIST(); let t;
+  if (consCtx) { const x = S[consCtx.kind].find(r => r.id === consCtx.id); t = totali(conAggiustamenti({ ...docDaLavoro(x, consCtx.kind, AZ()), iva: $('#f_iva').value }, leggiAgg()), L); }
+  else { const sc = jobsScelti(); if (!sc.length) return; t = totali(conAggiustamenti(docMulti(sc, $('#f_iva').value), leggiAgg()), L); }
+  const v = t.ivaPct > 0 ? t.totale : t.imponibile;
+  tot.value = Math.floor(v / m + 1e-9) * m; aggiornaCons();
+});
 function sheetCons(kind, id) {
   const x = S[kind].find(r => r.id === id); if (!x) return;
   const L = kind === 'lavori';
@@ -2084,21 +2161,15 @@ function sheetCons(kind, id) {
   const t = totali(doc, lis);
   const mats = (x.materiali || []).filter(m => m.nome);
   const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : r.unita === 'km' ? 'km' : 'pz';
-  const txt = `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
-Cliente: ${x.cliente || ''}
-Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
-Cantiere: ${x.indirizzo || '—'}
-
-Lavori eseguiti:
-${(L ? x.installato : x.descrizione) || '—'}${L && n2(x.pezzi) ? `\nPezzi posati: ${num(x.pezzi, 0)}` : ''}
-Ore impiegate: ${n2(x.ore) ? num(x.ore) : '—'}
-${doc.righe.length ? `\nDettaglio:\n${doc.righe.map(r => `- ${r.descr}: ${r.prezzo === '' ? 'da concordare' : `${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`}`.replace(/  +/g, ' ')).join('\n')}\n` : ''}${t.urgenzaPct ? `Maggiorazione urgenza ${num(t.urgenzaPct)}%: ${eur(t.urgenza)}\n` : ''}${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
-Totale: ${eur(t.imponibile)} + IVA se dovuta`;
+  consCtx = { kind, id, adj: { ...(x.consAgg || {}) } };
+  const txt = testoConsSingolo(x, kind, x.iva ?? AZ().ivaPredefinita, consCtx.adj);
   openSheet('Consuntivo', `<div class="small muted">Mandalo al cliente o all'impresa come testo (WhatsApp, email) o come PDF, poi segnalo come inviato. Da qui si passa alla fattura.</div>
     <pre class="cons" id="consTxt">${esc(txt)}</pre>
-    ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}`,
-    async fd => { store.put(kind, id, { ...stripId(x), iva: fd.get('iva'), amm: 'cons' }); toast('Consuntivo segnato come inviato'); },
+    ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}
+    ${campoAggiustamenti(consCtx.adj)}`,
+    async fd => { store.put(kind, id, { ...stripId(x), iva: fd.get('iva'), amm: 'cons', consAgg: leggiAgg() }); toast('Consuntivo segnato come inviato'); },
     { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consPdf" data-arg="${kind}" data-id="${id}">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
+  aggiornaCons();
 }
 const stripId = o => { const { id, ...r } = o; return r; };
 
@@ -2501,17 +2572,18 @@ function barraSelezione() {
     <div class="row"><button class="btn sm" data-act="selAnnulla" type="button">Annulla</button><button class="btn sm dark" data-act="selCons" type="button" ${j.length ? '' : 'disabled'}>Crea consuntivo</button></div></div>`;
 }
 let cmCtx = null;
-function sheetConsMulti() {
+function sheetConsMulti(adj = {}) {
   const jobs = lavoriSel();
   if (!jobs.length) { toast('Nei giorni scelti non ci sono pose o interventi completati'); return; }
   const clienti = [...new Set(jobs.map(j => j.x.cliente || ''))];
   const conta = c => jobs.filter(j => (j.x.cliente || '') === c).length;
   const cli = [...clienti].sort((a, b) => conta(b) - conta(a))[0];
-  cmCtx = { jobs };
+  cmCtx = { jobs, adj }; consCtx = null;
   openSheet('Consuntivo di più giorni', `
     ${clienti.length > 1 ? F('Cliente', sel('cmCliente', clienti.map(c => [c, c || 'Senza nome']), cli)) : `<div class="small muted">Cliente</div><b>${esc(cli || 'Senza nome')}</b>`}
     <div class="fieldset"><span class="fs-t">Lavori compresi</span><div id="cmLista" class="stack"></div></div>
     ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(AZ().ivaPredefinita)))}
+    ${campoAggiustamenti(adj)}
     <pre class="cons" id="consTxt"></pre>`,
   async () => {
     const sc = jobsScelti(); if (!sc.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scegli almeno un lavoro' });
@@ -2545,10 +2617,11 @@ function aggiornaCM() {
   const pre = $('#consTxt'); if (!pre) return;
   const sc = jobsScelti();
   if (!sc.length) { pre.textContent = 'Scegli almeno un lavoro.'; return; }
-  const L = LIST(), doc = docMulti(sc, 'no'), t = totali(doc, L);
+  const L = LIST(), iva = $('#f_iva')?.value || 'no', doc = conAggiustamenti(docMulti(sc, iva), leggiAgg()), t = totali(doc, L);
   const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
   const dd = s => fmtD(s, { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const riga = r => r.prezzo === '' ? `- ${r.descr}: da concordare` : um(r) ? `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, L))} = ${eur(totaleRiga(r, L))}` : `- ${r.descr}: ${eur(totaleRiga(r, L))}`;
+  const bs = baseSconto(doc.righe, L);
+  const riga = r0 => { const r = r0.voce === 'sconto' ? rigaSconto(r0, bs) : r0; return r.prezzo === '' ? `- ${r.descr}: da concordare` : r.voce === 'sconto' || r.voce === 'arrot' ? `- ${r.descr}: ${eur(totaleRiga(r, L))}` : um(r) ? `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, L))} = ${eur(totaleRiga(r, L))}` : `- ${r.descr}: ${eur(totaleRiga(r, L))}`; };
   pre.textContent = `CONSUNTIVO LAVORI
 Cliente: ${doc.cliente.nome}
 Periodo: ${dd(doc.data)}${doc.dataFine !== doc.data ? ' – ' + dd(doc.dataFine) : ''}
@@ -2556,7 +2629,8 @@ ${doc.cantiere ? 'Cantiere: ' + doc.cantiere + '\n' : ''}
 ${doc.gruppi.map(g => `${g.titolo.toUpperCase()}\n${g.righe.map(riga).join('\n') || '- nessuna voce'}`).join('\n\n')}
 
 Ore totali: ${num(doc.ore, 2)}
-Totale: ${eur(t.imponibile)} + IVA se dovuta`;
+${righeTotale(t)}`;
+  infoAgg(totali(docMulti(sc, iva), L), doc, t);
 }
 
 /* ---------- PDF ---------- */
@@ -2805,7 +2879,7 @@ document.addEventListener('click', async e => {
     case 'selMode': UI.sel = new Set(); render(); toast('Tocca i giorni da mettere nel consuntivo'); break;
     case 'selAnnulla': UI.sel = null; render(); break;
     case 'selCons': sheetConsMulti(); break;
-    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } apriPdf('consuntivo', docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), () => sheetConsMulti()); break; }
+    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
     case 'seg': UI.seg = arg; render(); break;
     case 'authView': UI.authView = arg; UI.authErr = ''; UI.authMsg = ''; render(); break;
@@ -2907,7 +2981,7 @@ document.addEventListener('click', async e => {
       apriPdf('preventivo', saved, () => sheetPrev(S.preventivi.find(x => x.id === saved.id) || saved));
       break;
     }
-    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const doc = docDaLavoro(x, arg, AZ()); doc.iva = $('#f_iva')?.value || doc.iva; apriPdf('consuntivo', doc, () => sheetCons(arg, id)); break; }
+    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const adj = leggiAgg(); if (JSON.stringify(adj) !== JSON.stringify(x.consAgg || {})) store.put(arg, id, { ...stripId(x), consAgg: adj }); const doc0 = docDaLavoro(x, arg, AZ()); doc0.iva = $('#f_iva')?.value || doc0.iva; apriPdf('consuntivo', conAggiustamenti(doc0, adj), () => sheetCons(arg, id)); break; }
     case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
