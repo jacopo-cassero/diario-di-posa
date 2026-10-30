@@ -3,6 +3,7 @@ import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnita
 import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
+import { xmlDaFile, leggiFatturaXml, leggiFatturaTesto } from './fatture-fornitori.js';
 import { creaCalendario } from './calendario-ics.js';
 import { createStore } from './store.js';
 
@@ -1053,6 +1054,7 @@ function rConti() {
     const out = sum(L.filter(m => m.tipo !== 'entrata'), m => m.importo), inn = sum(L.filter(m => m.tipo === 'entrata'), m => m.importo);
     h += `<div class="photo-cta">
       <label class="btn primary" for="photo">${svg('cam')} Fotografa scontrino<input id="photo" type="file" accept="image/*" capture="environment"></label>
+      <label class="btn" for="fatturaIn">${svg('doc')} Carica fattura<input id="fatturaIn" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label>
       <button class="btn" data-act="newMov" type="button">${svg('plus')} A mano</button></div>
     <div class="cal-head"><button class="iconbtn" data-act="cMonth" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h3 style="flex:1;text-align:center">${monthName(UI.cMonth)}</h3><button class="iconbtn" data-act="cMonth" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><div class="l">Spese del mese</div><div class="v">${eur(out)}</div></div><div class="kpi"><div class="l">Altre entrate</div><div class="v">${eur(inn)}</div></div></div>
@@ -1063,7 +1065,7 @@ function rConti() {
   }
   if (UI.seg === 'mag') {
     const L = [...S.magazzino].sort((a, b) => a.nome.localeCompare(b.nome));
-    h += `<div class="row between"><span class="muted small">Valore in magazzino <b class="num">${eur(sum(L, m => Math.max(n2(m.qta), 0) * n2(m.costoMedio)))}</b></span><button class="btn sm" data-act="newMag" type="button">${svg('plus')} Materiale</button></div>
+    h += `<div class="row between"><span class="muted small">Valore in magazzino <b class="num">${eur(sum(L, m => Math.max(n2(m.qta), 0) * n2(m.costoMedio)))}</b></span><label class="btn sm primary" for="fatturaIn2">${svg('doc', 'i')} Carica fattura<input id="fatturaIn2" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label><button class="btn sm" data-act="newMag" type="button">${svg('plus')} Materiale</button></div>
     <div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Giacenza</th><th class="r">Costo medio</th><th>Stato</th></tr></thead><tbody>
     ${L.map(m => { const low = n2(m.soglia) > 0 && n2(m.qta) <= n2(m.soglia); return `<tr data-act="editMag" data-id="${m.id}" style="cursor:pointer"><td><b>${esc(m.nome)}</b></td><td class="r num">${num(m.qta)} ${esc(m.unita)}</td><td class="r num">${eur(m.costoMedio)}</td><td>${n2(m.qta) < 0 ? '<span class="chip bad">Negativo</span>' : low ? '<span class="chip warn">Da riordinare</span>' : '<span class="chip ok">Ok</span>'}</td></tr>`; }).join('') || `<tr><td colspan="4" class="muted">Il magazzino si riempie da solo quando registri un acquisto di materiale.</td></tr>`}
     </tbody></table></div>
@@ -2216,7 +2218,9 @@ function sheetMov(m, prefill) {
   const isNew = !m; m = m || { tipo: 'uscita', data: TODAY, categoria: 'materiale', magazzino: true, ...(prefill || {}) };
   openSheet(isNew ? 'Nuova spesa' : 'Spesa', `
     ${m._preview ? `<img class="receipt" src="${m._preview}" alt="Foto dello scontrino">` : m.foto ? `<button type="button" data-act="openPath" data-arg="${esc(m.foto)}" style="border:0;background:none;padding:0"><img class="receipt" data-file="${esc(m.foto)}" alt="Foto dello scontrino"></button>` : ''}
-    ${m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
+    ${m.documento ? `<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="openPath" data-arg="${esc(m.documento.path)}">${esc(m.documento.nome)}</button></div>` : ''}
+    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto la fattura in automatico.'} <b>Controlla materiali e quantità</b> e togli le righe che non vanno in magazzino (trasporto, servizi…).${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
+    ${m._doppia ? `<div class="notice small bad">Attenzione: hai già registrato una fattura ${esc(m.numero)} di ${esc(m.fornitore)} il ${fmtD(m._doppia)}. Se è la stessa, non salvarla due volte.</div>` : ''}
     <div class="g2">${F('Tipo', sel('tipo', [['uscita', 'Spesa'], ['entrata', 'Entrata']], m.tipo))}${F('Data', inp('data', m.data, 'date', 'required'))}</div>
     <div class="g2">${F('Categoria', sel('categoria', CAT, m.categoria))}${F('Importo totale €', inp('importo', m.importo, 'number', 'required'))}</div>
     <div class="g2">${F('Fornitore', inp('fornitore', m.fornitore))}${F('N. documento', inp('numero', m.numero))}</div>
@@ -2230,13 +2234,14 @@ function sheetMov(m, prefill) {
     const mag = cat === 'materiale' && !!fd.get('magazzino') && righe.length > 0;
     const d = { tipo: fd.get('tipo'), data: fd.get('data'), categoria: cat, importo: n2(fd.get('importo')), fornitore: fd.get('fornitore').trim(), numero: fd.get('numero').trim(), descrizione: fd.get('descrizione').trim(), righe, magazzino: mag };
     if (m.foto) d.foto = m.foto;
+    if (m.documento) d.documento = m.documento;
     if (m.esempio) d.esempio = true;
     if (!isNew && m.magazzino) moveStock(m.righe, -1);
     if (mag) moveStock(righe, +1, true);
     store.put('movimenti', isNew ? null : m.id, d);
     UI.cMonth = d.data.slice(0, 7);
     toast(mag ? 'Spesa salvata e magazzino aggiornato' : 'Spesa salvata');
-  }, { del: isNew ? null : async () => { if (m.magazzino) moveStock(m.righe, -1); if (m.foto) store.removeFile(m.foto).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
+  }, { del: isNew ? null : async () => { if (m.magazzino) moveStock(m.righe, -1); if (m.foto) store.removeFile(m.foto).catch(() => {}); if (m.documento) store.removeFile(m.documento.path).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
 }
 
 /* ---------- voci e prezzi dal listino ---------- */
@@ -2768,6 +2773,69 @@ function loadTesseract() {
   if (window.Tesseract) return Promise.resolve();
   return tessP ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'; s.onload = res; s.onerror = () => { tessP = null; rej(new Error('tesseract')); }; document.head.appendChild(s); });
 }
+/* ---------- fatture dei fornitori ---------- */
+let pdfjsP = null;
+function loadPdfjs() {
+  if (window.pdfjsLib) return Promise.resolve();
+  return pdfjsP ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(); }; s.onerror = () => { pdfjsP = null; rej(new Error('pdfjs')); }; document.head.appendChild(s); });
+}
+/** Testo di un PDF, riga per riga; se è una scansione, legge le prime pagine come foto. */
+async function testoPdf(bytes, passo) {
+  await loadPdfjs();
+  const doc = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  let out = '';
+  for (let p = 1; p <= Math.min(doc.numPages, 6); p++) {
+    const page = await doc.getPage(p); const c = await page.getTextContent();
+    const righe = new Map();
+    for (const it of c.items) { if (!it.str.trim()) continue; const y = Math.round(it.transform[5] / 3); const L = righe.get(y) || []; L.push([it.transform[4], it.str]); righe.set(y, L); }
+    out += [...righe.entries()].sort((a, b) => b[0] - a[0]).map(([, L]) => L.sort((a, b) => a[0] - b[0]).map(x => x[1]).join(' ')).join('\n') + '\n';
+  }
+  if (out.replace(/\s/g, '').length > 40) return out;
+  // PDF scansionato: lo leggo come immagine
+  passo('Il PDF è una scansione: lo leggo come foto…');
+  await loadTesseract();
+  for (let p = 1; p <= Math.min(doc.numPages, 2); p++) {
+    const page = await doc.getPage(p); const vp = page.getViewport({ scale: 2 });
+    const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    const { data } = await window.Tesseract.recognize(cv, 'ita'); out += (data.text || '') + '\n';
+  }
+  return out;
+}
+async function caricaFattura(file) {
+  if (!file) return;
+  openSheet('Lettura fattura', `<div class="stack" style="align-items:center;padding:20px 0;text-align:center"><div class="spinner"></div><b id="phStep">Apro la fattura…</b><span class="small muted">Fattura elettronica (XML o .p7m), PDF o foto.</span></div>`, null);
+  const passo = t => { const el = $('#phStep'); if (el) el.textContent = t; };
+  const forf = ['fo'].includes(String(AZ().ivaPredefinita));
+  const nome = file.name || 'fattura', ext = (nome.split('.').pop() || '').toLowerCase();
+  let letto = null, documento = null;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (['xml', 'p7m'].includes(ext) || /xml/.test(file.type)) {
+      passo('Leggo la fattura elettronica…');
+      const xml = xmlDaFile(bytes); if (!xml) throw Object.assign(new Error('xml'), { userMsg: 'Non trovo la fattura dentro il file: prova con il PDF' });
+      letto = leggiFatturaXml(xml, { forfettario: forf });
+    } else if (ext === 'pdf' || file.type === 'application/pdf') {
+      passo('Leggo il PDF…');
+      letto = leggiFatturaTesto(await testoPdf(bytes.slice(), passo), { forfettario: forf });
+    } else if (file.type.startsWith('image/')) {
+      passo('Leggo la foto della fattura…');
+      await loadTesseract(); const { data } = await window.Tesseract.recognize(await shrink(file, 2400), 'ita');
+      letto = leggiFatturaTesto(data.text || '', { forfettario: forf });
+    } else throw Object.assign(new Error('tipo'), { userMsg: 'Formato non riconosciuto: usa XML, .p7m, PDF o una foto' });
+  } catch (e) { console.warn(e); toast(e.userMsg || 'Non sono riuscito a leggere la fattura: compila a mano'); }
+  try { passo('Salvo il documento…'); const blob = file.type.startsWith('image/') ? await shrink(file, 2400) : file; documento = { path: await store.uploadFile(blob, nome), nome: nome.slice(0, 80), tipo: file.type }; }
+  catch (e) { toast(e.userMsg || 'Documento non salvato: lo puoi allegare dopo'); }
+  const L = letto || { righe: [] };
+  const doppia = L.numero && S.movimenti.find(x => x.numero && x.numero.trim().toLowerCase() === L.numero.trim().toLowerCase() && normNome(x.fornitore) === normNome(L.fornitore));
+  sheetMov(null, {
+    categoria: 'materiale', magazzino: true, documento, _fattura: letto ? letto.tipo : '', _forf: forf && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
+    data: L.data && L.data <= TODAY ? L.data : TODAY, importo: L.totale || '', fornitore: L.fornitore || '', numero: L.numero || '',
+    descrizione: L.numero ? `Fattura ${L.numero}` : 'Fattura fornitore',
+    righe: (L.righe || []).map(r => ({ nome: (S.magazzino.find(m => normNome(m.nome) === normNome(r.nome)) || {}).nome || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
+  });
+  if (letto && !L.righe.length) toast('Non ho trovato le righe dei materiali: aggiungile a mano');
+}
 async function onPhoto(file) {
   if (!file) return;
   openSheet('Lettura scontrino', `<div class="stack" style="align-items:center;padding:20px 0;text-align:center"><div class="spinner"></div><b id="phStep">Preparo la foto…</b><span class="small muted">La prima volta servono circa 30 secondi, poi è più veloce.</span></div>`, null);
@@ -3080,6 +3148,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f); return; }
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
