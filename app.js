@@ -160,7 +160,7 @@ function conSquadra(kind, id, d, fd) {
   const cur = id && S[kind].find(x => x.id === id);
   if (cur?.lavoroSquadra) d.lavoroSquadra = cur.lavoroSquadra;
   if (cur?.prenotazioneId) { d.prenotazioneId = cur.prenotazioneId; d.clienteFinale = cur.clienteFinale; }
-  for (const k of ['gruppoCons', 'importoCons', 'consAgg']) if (cur && cur[k] != null) d[k] = cur[k];
+  for (const k of ['gruppoCons', 'importoCons', 'consAgg', 'giorniFatti']) if (cur && cur[k] != null) d[k] = cur[k];
   return d;
 }
 
@@ -912,7 +912,7 @@ function lavoroCard(l) {
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
-    ${badgeOrario(l)}
+    ${badgeOrario(l)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}${l.urgenzaApplicata ? '<span class="chip warn">Urgente</span>' : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
@@ -923,6 +923,7 @@ function lavoroCard(l) {
       ${cart && isUrl(cart.url) ? `<a href="${esc(cart.url)}" target="_blank" rel="noopener">Cartella ${esc(cart.nome)}</a>` : ''}
       ${isUrl(l.cartellaUrl) ? `<a href="${esc(l.cartellaUrl)}" target="_blank" rel="noopener">Cartella cantiere</a>` : ''}
       ${nAll ? `<span class="small muted">${svg('clip', 'i')} ${nAll} ${nAll === 1 ? 'allegato' : 'allegati'}</span>` : ''}</div>` : ''}
+    <div class="row fattorow">${bottoneFatto('lavori', l)}</div>
   </div>`;
 }
 /* ---------- orari ---------- */
@@ -951,6 +952,29 @@ function sovrapposti(kind, id, giorni, d) {
   const c = altri.find(x => { const p = orarioDi(x); return p && p[0] < mio[1] && fine(x) > mio[0]; });
   return c ? `${c.cliente || 'un altro lavoro'} (${testoOrario(c)})` : '';
 }
+/* ---------- lavori della giornata: fatti e nascosti ---------- */
+const FILTRI_GIORNO = [['dafare', 'Da fare'], ['tutti', 'Tutto'], ['pose', 'Pose'], ['int', 'Interventi']];
+UI.dayFiltro = (() => { try { return localStorage.getItem('ddp:dayFiltro') || 'dafare'; } catch { return 'dafare'; } })();
+const posaFatta = (l, k) => (l.giorniFatti || []).includes(k);
+const intChiuso = i => ['completato', 'annullato'].includes(i.stato);
+function elencoGiorno(dl, di, de) {
+  const f = UI.dayFiltro || 'dafare', k = UI.day;
+  const vediL = f === 'int' ? [] : f === 'dafare' ? dl.filter(l => !posaFatta(l, k)) : dl;
+  const vediI = f === 'pose' ? [] : f === 'dafare' ? di.filter(i => !intChiuso(i)) : di;
+  const nasc = f === 'dafare' ? dl.filter(l => posaFatta(l, k)).length + di.filter(intChiuso).length : 0;
+  const tot = dl.length + di.length;
+  const filtri = tot ? `<div class="chips dayfiltri">${FILTRI_GIORNO.map(([v, l]) => { const n = v === 'dafare' ? dl.filter(x => !posaFatta(x, k)).length + di.filter(x => !intChiuso(x)).length : v === 'tutti' ? tot : v === 'pose' ? dl.length : di.length; return `<button type="button" class="chipf" data-act="dayFiltro" data-arg="${v}" aria-pressed="${f === v}">${l} <span class="num">${n}</span></button>`; }).join('')}</div>` : '';
+  const carte = [...vediL.map(x => [x, lavoroCard]), ...vediI.map(x => [x, intCard])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, fn]) => fn(x)).join('');
+  return `${filtri}${(f === 'tutti' || f === 'dafare') ? de.map(eventoCard).join('') : ''}${carte}
+    ${!tot && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
+    ${tot && !vediL.length && !vediI.length && f === 'dafare' ? `<div class="empty small">Tutto fatto per oggi 👍</div>` : ''}
+    ${nasc ? `<button type="button" class="linkbtn small" data-act="dayFiltro" data-arg="tutti">${nasc} ${nasc === 1 ? 'lavoro completato o annullato nascosto' : 'lavori completati o annullati nascosti'}: mostra</button>` : ''}`;
+}
+const bottoneFatto = (kind, x) => {
+  if (kind === 'lavori') { const f = posaFatta(x, UI.day); return `<button type="button" class="btn sm ${f ? '' : 'ok'}" data-act="${f ? 'posaRiapri' : 'posaFatta'}" data-id="${x.id}">${f ? 'Riapri' : '✓ Segna fatta'}</button>`; }
+  if (x.stato === 'annullato') return '';
+  return `<button type="button" class="btn sm ${x.stato === 'completato' ? '' : 'ok'}" data-act="${x.stato === 'completato' ? 'intRiapri' : 'intFatto'}" data-id="${x.id}">${x.stato === 'completato' ? 'Riapri' : '✓ Segna completato'}</button>`;
+};
 function intCard(i) {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
@@ -961,6 +985,7 @@ function intCard(i) {
     ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
+    ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -1002,8 +1027,7 @@ function rCal() {
   <section class="stack">
     <div class="row between"><h3>${fmtD(UI.day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
       <div class="row"><button class="btn sm" data-act="newEv" data-arg="${UI.day}" type="button">+ Ferie, fiera, corso</button><button class="btn sm" data-act="newInt" data-arg="${UI.day}" type="button">+ Intervento</button><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button></div></div>
-    ${de.map(eventoCard).join('')}${[...dl.map(x => [x, lavoroCard]), ...di.map(x => [x, intCard])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, f]) => f(x)).join('')}
-    ${!dl.length && !di.length && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
+    ${elencoGiorno(dl, di, de)}
   </section>
   ${S.lavori.some(x => x.esempio) || S.movimenti.some(x => x.esempio) ? `<button class="btn ghost small" data-act="unseed" type="button">Rimuovi i dati di esempio</button>` : ''}`;
 }
@@ -2933,6 +2957,9 @@ document.addEventListener('click', async e => {
     case 'rinnova': sheetRinnova(arg); break;
     case 'cons': sheetCons(arg, id); break;
     case 'amm': advance(arg, id); render(); break;
+    case 'dayFiltro': UI.dayFiltro = arg; try { localStorage.setItem('ddp:dayFiltro', arg); } catch {} render(); break;
+    case 'posaFatta': case 'posaRiapri': { const l = S.lavori.find(x => x.id === id); if (!l) break; const g = new Set(l.giorniFatti || []); if (a === 'posaFatta') g.add(UI.day); else g.delete(UI.day); store.put('lavori', id, { ...stripId(l), giorniFatti: [...g].sort() }); toast(a === 'posaFatta' ? (UI.dayFiltro === 'dafare' ? 'Posa fatta: la trovi in «Tutto»' : 'Posa segnata come fatta') : 'Posa riaperta'); break; }
+    case 'intFatto': case 'intRiapri': { const i = S.interventi.find(x => x.id === id); if (!i) break; store.put('interventi', id, { ...stripId(i), stato: a === 'intFatto' ? 'completato' : (i.dataProg ? 'programmato' : 'aperto') }); toast(a === 'intFatto' ? (UI.tab === 'cal' && UI.dayFiltro === 'dafare' ? 'Intervento completato: lo trovi in «Tutto»' : 'Intervento completato') : 'Intervento riaperto'); break; }
     case 'ammGruppo': { const L = lavoriGruppo(arg); if (!L.length) break; const i = AMM.findIndex(a => a[0] === statoGruppo(arg)); const nx = AMM[Math.min(i + 1, AMM.length - 1)][0]; for (const [k, x] of L) store.put(k, x.id, { ...stripId(x), amm: nx }); toast(`${ammOf(nx)[1]}: ${L.length} lavori`); render(); break; }
     case 'sciogliGruppo': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per separare'; break; } for (const [k, x] of lavoriGruppo(arg)) { const d = stripId(x); delete d.gruppoCons; delete d.importoCons; store.put(k, x.id, d); } toast('Lavori separati: tornano ai prezzi pieni'); render(); break; }
     case 'close': closeSheet(); break;

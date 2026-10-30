@@ -449,3 +449,8 @@ details > summary{cursor:pointer;color:var(--muted);padding:2px 0}
 .orariob{display:flex;align-items:center;gap:6px;font-size:.9rem}
 .orariob .i{width:16px;height:16px}
 .fieldset.orario .tog{border-bottom:0}
+.fattorow{justify-content:flex-end}
+.btn.ok{background:#e6f4ea;border-color:#9fd3ad;color:#1e6b34;font-weight:700}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.ok{background:#1d3a26;border-color:#2f6b40;color:#9fe0b0}}
+:root[data-theme="dark"] .btn.ok{background:#1d3a26;border-color:#2f6b40;color:#9fe0b0}
+.dayfiltri{margin-bottom:2px}
