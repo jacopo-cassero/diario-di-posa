@@ -1,5 +1,5 @@
 // Service worker: fa funzionare l'app senza rete e riceve le notifiche.
-const VERSIONE = 'ddp-v43';
+const VERSIONE = 'ddp-v44';
 const FILE = ['./', 'index.html', 'styles.css', 'app.js', 'store.js', 'logica.js', 'listino.js', 'pdf.js', 'pdf-metrics.js', 'documento.js', 'moduli.js', 'moduli-posizioni.js', 'calendario-ics.js', 'fatture-fornitori.js', 'config.js', 'manifest.webmanifest',
   'icone/icona-192.png', 'icone/icona-512.png', 'icone/apple-touch-icon.png', 'icone/favicon-64.png', 'icone/logo-scritta.png', 'icone/logo-cassero.jpg', 'icone/badge-posaclima.jpg', 'icone/badge-dekra.jpg',
   'moduli/rapporto-assistenza.jpg', 'moduli/scheda-manutenzione.jpg', 'moduli/consenso-foto-video.jpg', 'moduli/verbale-collaudo.jpg',
