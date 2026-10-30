@@ -26,7 +26,7 @@ export const IMPOSTAZIONI_BASE = {
     mattino: true, oraMattino: 7,
     sera: true, oraSera: 19,
     weekend: false,
-    furgone: true, furgoneGiorni: 30,
+    furgone: true, furgoneGiorni: 30, furgoneKm: 1500,
     consuntivi: true, fatture: true, incassi: true,
     preventivi: true, preventiviGiorni: 7,
     materiale: true, urgenti: true,
@@ -69,8 +69,11 @@ export function promemoria(S, today = oggi(), momento = 'app') {
         const n = daysBetween(today, d);
         if (n <= n2(N.furgoneGiorni)) out.push({ lvl: n < 0 ? 'bad' : n <= 7 ? 'warn' : 'in', txt: `${lab} furgone ${n < 0 ? `scaduta da ${-n} giorni` : n === 0 ? 'scade oggi' : `scade tra ${n} giorni`}`, sub: d.split('-').reverse().join('/'), act: 'tab', arg: 'van' });
       }
-      if (n2(f.km) && n2(f.tagliandoKm) && n2(f.tagliandoKm) - n2(f.km) <= 1000)
-        out.push({ lvl: 'warn', txt: 'Tagliando vicino per chilometri', sub: `mancano ${Math.round(n2(f.tagliandoKm) - n2(f.km))} km`, act: 'tab', arg: 'van' });
+      const kmAtt = kmFurgone(S), manca = n2(f.tagliandoKm) - kmAtt;
+      if (kmAtt && n2(f.tagliandoKm) && manca <= n2(N.furgoneKm ?? 1500)) {
+        const r = ritmoKm(S, today), gg = r > 0 && manca > 0 ? Math.round(manca / r) : null;
+        out.push({ lvl: manca <= 0 ? 'bad' : manca <= 500 ? 'warn' : 'in', txt: manca <= 0 ? `Tagliando superato di ${Math.round(-manca)} km` : `Tagliando tra ${Math.round(manca)} km`, sub: `furgone a ${Math.round(kmAtt).toLocaleString('it-IT')} km · tagliando a ${Math.round(n2(f.tagliandoKm)).toLocaleString('it-IT')} km${gg != null ? ` · al ritmo attuale circa ${gg <= 1 ? 'domani' : gg + ' giorni'}` : ''}`, act: 'tab', arg: 'van' });
+      }
     }
     const all = [
       ...(S.lavori || []).map(x => ({ ...x, _d: x.dataFine || x.data })),
@@ -189,4 +192,42 @@ export function testoOrario(x) {
   const o = orarioDi(x); if (!o) return '';
   if (x.tuttoGiorno) return 'tutto il giorno';
   return o[1] ? `${o[0]}–${o[1]}` : `dalle ${o[0]}`;
+}
+
+/* ---------- chilometri del furgone ---------- */
+/** Km attuali: il più alto tra quelli del furgone e quelli segnati nelle spese (carburante, officina). */
+export function kmFurgone(S) {
+  return Math.max(n2((S.furgone || {}).km), ...(S.movimenti || []).map(m => n2(m.km)), 0);
+}
+/** Km al giorno degli ultimi mesi, dalle letture segnate nelle spese (0 se non bastano). */
+export function ritmoKm(S, today = oggi()) {
+  const L = (S.movimenti || []).filter(m => n2(m.km) > 0 && m.data && daysBetween(m.data, today) <= 180).map(m => [m.data, n2(m.km)]).sort((a, b) => a[0].localeCompare(b[0]));
+  if (L.length < 2) return 0;
+  const gg = daysBetween(L[0][0], L[L.length - 1][0]), km = L[L.length - 1][1] - L[0][1];
+  return gg >= 7 && km > 0 ? km / gg : 0;
+}
+/** Consumo medio (km/l) dai pieni con km e litri. */
+export function consumoMedio(S) {
+  const L = (S.movimenti || []).filter(m => m.categoria === 'carburante' && n2(m.km) > 0).sort((a, b) => n2(a.km) - n2(b.km));
+  if (L.length < 2) return 0;
+  const litri = L.slice(1).reduce((a, m) => a + n2(m.litri), 0), km = n2(L[L.length - 1].km) - n2(L[0].km);
+  const c = litri > 0 && km > 0 ? km / litri : 0;
+  return c >= 4 && c <= 25 ? c : 0; // fuori da questi valori mancano dei pieni: meglio non mostrarlo
+}
+/** Litri e km letti da uno scontrino del carburante (se ci sono). */
+export function leggiCarburante(testo) {
+  const t = String(testo || '');
+  const lm = t.match(/(\d{1,3}[.,]\d{2,3})\s*(?:lt\b|l\b|litri)/i) || t.match(/(?:litri|lt\.?|quantit[aà])\s*[:=]?\s*(\d{1,3}[.,]\d{2,3})/i);
+  const km = t.match(/\b(?:km|chilometri|odometro)\s*[:.=]?\s*(\d{1,3}(?:[.\s]?\d{3})+|\d{4,7})\b/i);
+  return { litri: lm ? n2(lm[1].replace(',', '.')) : 0, km: km ? n2(km[1].replace(/[.\s]/g, '')) : 0 };
+}
+/** Categoria di una spesa dal testo del documento. */
+export function categoriaDa(testo) {
+  const low = String(testo || '').toLowerCase();
+  if (/gasolio|diesel|benzina|carburant|self ?service|adblue|\bgpl\b|metano|rifornimento|erogat/.test(low)) return 'carburante';
+  if (/officina|tagliando|revisione|assicuraz|bollo auto|pneumatic|gommist|ricambi auto|autoriparaz|carrozzeria|cambio olio|filtro olio/.test(low)) return 'furgone';
+  if (/telefon|cellulare|tim\b|vodafone|wind|iliad|fastweb|cancelleria|toner|stampant/.test(low)) return 'telefono';
+  if (/silicon|schiuma|poliuretan|vit[ei]\b|tassell|guarnizion|nastro|sigillant|cune[io]|spessor|staff[ae]|coprifil|primer|ferramenta|edil|serrament|controtelai/.test(low)) return 'materiale';
+  if (/punt[ae] |disco|dischi|trapan|avvitator|utensil|scala|livella|smerigliatric|batteria makita|dewalt|hilti|bosch/.test(low)) return 'attrezzatura';
+  return 'altro';
 }

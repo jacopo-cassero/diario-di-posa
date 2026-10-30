@@ -1,4 +1,4 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO } from './logica.js';
+import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm, consumoMedio, leggiCarburante, categoriaDa } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
@@ -1054,7 +1054,7 @@ function rConti() {
     const out = sum(L.filter(m => m.tipo !== 'entrata'), m => m.importo), inn = sum(L.filter(m => m.tipo === 'entrata'), m => m.importo);
     h += `<div class="photo-cta">
       <label class="btn primary" for="photo">${svg('cam')} Fotografa scontrino<input id="photo" type="file" accept="image/*" capture="environment"></label>
-      <label class="btn" for="fatturaIn">${svg('doc')} Carica fattura<input id="fatturaIn" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label>
+      <label class="btn" for="fatturaIn">${svg('doc')} Carica PDF o fattura<input id="fatturaIn" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label>
       <button class="btn" data-act="newMov" type="button">${svg('plus')} A mano</button></div>
     <div class="cal-head"><button class="iconbtn" data-act="cMonth" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h3 style="flex:1;text-align:center">${monthName(UI.cMonth)}</h3><button class="iconbtn" data-act="cMonth" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><div class="l">Spese del mese</div><div class="v">${eur(out)}</div></div><div class="kpi"><div class="l">Altre entrate</div><div class="v">${eur(inn)}</div></div></div>
@@ -1096,7 +1096,10 @@ function rVan() {
   const f = S.furgone || {};
   const spY = S.movimenti.filter(m => ['furgone', 'carburante'].includes(m.categoria) && (m.data || '').startsWith(TODAY.slice(0, 4)));
   return `<div class="row between"><h2>Furgone</h2><button class="btn sm" data-act="editVan" type="button">Dati mezzo</button></div>
-  <div class="panel row between"><div><b>${esc(f.modello || 'Furgone')}</b> <span class="muted">${esc(f.targa || 'targa non inserita')}</span><div class="small muted">${n2(f.km) ? `<span class="num">${num(f.km, 0)}</span> km` : 'km non inseriti'}${f.compagnia ? ' · ' + esc(f.compagnia) : ''}</div></div><button class="btn sm" data-act="km" type="button">Aggiorna km</button></div>
+  <div class="panel row between"><div><b>${esc(f.modello || 'Furgone')}</b> <span class="muted">${esc(f.targa || 'targa non inserita')}</span><div class="small muted">${kmFurgone(S) ? `<span class="num">${num(kmFurgone(S), 0)}</span> km` : 'km non inseriti'}${f.compagnia ? ' · ' + esc(f.compagnia) : ''}</div></div><button class="btn sm" data-act="km" type="button">Aggiorna km</button></div>
+  ${(() => { const km = kmFurgone(S), r = ritmoKm(S, TODAY), c = consumoMedio(S), manca = n2(f.tagliandoKm) - km;
+    const parti = [r ? `percorri circa <b class="num">${num(r * 7, 0)}</b> km a settimana` : '', c ? `consumo medio <b class="num">${num(c, 1)}</b> km/l` : '', n2(f.tagliandoKm) && km ? (manca > 0 ? `tagliando tra <b class="num">${num(manca, 0)}</b> km${r ? ` (verso il ${fmtD(piuGiorni(TODAY, Math.round(manca / r)), { day: 'numeric', month: 'long' })})` : ''}` : `<b>tagliando superato di ${num(-manca, 0)} km</b>`) : ''].filter(Boolean);
+    return parti.length ? `<div class="small ${manca <= 0 && n2(f.tagliandoKm) && km ? 'notice bad' : 'muted'}">${parti.join(' · ')}</div>` : `<div class="small muted">Segna i km quando fai carburante: l'app calcola quanto percorri e ti avvisa prima del tagliando.</div>`; })()}
   <div class="scad">${SCAD.map(([k, l]) => { const d = f[k]; const n = d ? daysTo(d) : null; const c = n === null ? '' : n < 0 ? 'bad' : n <= 30 ? 'warn' : 'ok'; return `<div class="card"><div class="row between"><span class="t">${l}</span>${n === null ? '<span class="chip">da inserire</span>' : `<span class="chip ${c}">${n < 0 ? 'Scaduta' : n === 0 ? 'Oggi' : n <= 30 ? 'Tra ' + n + ' gg' : 'Ok'}</span>`}</div>
     <div class="big">${d ? fmtD(d) : '—'}</div>${k === 'tagliando' && n2(f.tagliandoKm) ? `<div class="small muted">oppure a <span class="num">${num(f.tagliandoKm, 0)}</span> km</div>` : ''}
     <div><button class="btn sm" data-act="rinnova" data-arg="${k}" type="button">${d ? 'Registra rinnovo' : 'Imposta scadenza'}</button></div></div>`; }).join('')}</div>
@@ -1651,6 +1654,7 @@ function sheetNotifiche() {
     </div>
     <div class="fieldset"><span class="fs-t">Furgone</span>
       <div class="togrow">${tog('furgone', 'Scadenze del furgone', N.furgone, 'assicurazione, bollo, revisione, tagliando')}${selN('furgoneGiorni', [[7, '7 gg prima'], [15, '15 gg prima'], [30, '30 gg prima'], [60, '60 gg prima']], N.furgoneGiorni)}</div>
+      <div class="togrow"><span><b>Tagliando a chilometri</b><small>avviso quando mancano</small></span>${selN('furgoneKm', [[500, '500 km'], [1000, '1.000 km'], [1500, '1.500 km'], [2000, '2.000 km'], [3000, '3.000 km']], N.furgoneKm ?? 1500)}</div>
     </div>
     <div class="fieldset"><span class="fs-t">Lavoro e giornata</span>
       ${tog('programma', 'Programma del giorno', N.programma, 'pose, interventi, ferie, fiere e corsi')}
@@ -1669,7 +1673,7 @@ function sheetNotifiche() {
   async fd => {
     const n = { ...N };
     for (const k of ['mattino', 'sera', 'weekend', 'furgone', 'programma', 'giornata', 'urgenti', 'consuntivi', 'fatture', 'incassi', 'preventivi', 'materiale']) n[k] = !!fd.get(k);
-    for (const k of ['oraMattino', 'oraSera', 'furgoneGiorni', 'preventiviGiorni', 'scontriniGiorno']) n[k] = +fd.get(k);
+    for (const k of ['oraMattino', 'oraSera', 'furgoneGiorni', 'furgoneKm', 'preventiviGiorni', 'scontriniGiorno']) n[k] = +fd.get(k);
     n.scontrini = fd.get('scontrini');
     salvaImp({ notifiche: n });
     toast('Notifiche salvate su tutti i dispositivi');
@@ -2219,12 +2223,17 @@ function sheetMov(m, prefill) {
   openSheet(isNew ? 'Nuova spesa' : 'Spesa', `
     ${m._preview ? `<img class="receipt" src="${m._preview}" alt="Foto dello scontrino">` : m.foto ? `<button type="button" data-act="openPath" data-arg="${esc(m.foto)}" style="border:0;background:none;padding:0"><img class="receipt" data-file="${esc(m.foto)}" alt="Foto dello scontrino"></button>` : ''}
     ${m.documento ? `<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="openPath" data-arg="${esc(m.documento.path)}">${esc(m.documento.nome)}</button></div>` : ''}
-    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto la fattura in automatico.'} <b>Controlla materiali e quantità</b> e togli le righe che non vanno in magazzino (trasporto, servizi…).${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
+    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto il documento in automatico.'} <b>Controlla categoria, importo${m.categoria === 'materiale' ? ' e materiali' : ''}</b> prima di salvare${m.categoria === 'materiale' ? ' e togli le righe che non vanno in magazzino (trasporto, servizi…)' : ''}.${m.categoria === 'carburante' && !m.km ? ' <b>Scrivi i km del furgone</b> per gli avvisi del tagliando.' : ''}${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
     ${m._doppia ? `<div class="notice small bad">Attenzione: hai già registrato una fattura ${esc(m.numero)} di ${esc(m.fornitore)} il ${fmtD(m._doppia)}. Se è la stessa, non salvarla due volte.</div>` : ''}
     <div class="g2">${F('Tipo', sel('tipo', [['uscita', 'Spesa'], ['entrata', 'Entrata']], m.tipo))}${F('Data', inp('data', m.data, 'date', 'required'))}</div>
     <div class="g2">${F('Categoria', sel('categoria', CAT, m.categoria))}${F('Importo totale €', inp('importo', m.importo, 'number', 'required'))}</div>
     <div class="g2">${F('Fornitore', inp('fornitore', m.fornitore))}${F('N. documento', inp('numero', m.numero))}</div>
     ${F('Descrizione', inp('descrizione', m.descrizione))}
+    <div id="carBox" class="fieldset" ${['carburante', 'furgone'].includes(m.categoria) ? '' : 'hidden'}><span class="fs-t">Furgone</span>
+      <div class="g2">${F('Km del furgone', inp('mkm', m.km || '', 'number', `inputmode="numeric" placeholder="${kmFurgone(S) ? 'ultimo: ' + num(kmFurgone(S), 0) : 'es. 152300'}"`))}<label class="f" id="litriWrap" ${m.categoria === 'carburante' ? '' : 'hidden'}><span>Litri</span>${inp('mlitri', m.litri || '', 'number', 'step="any" inputmode="decimal"')}</label></div>
+      <label class="check" id="tagWrap" ${m.categoria === 'furgone' ? '' : 'hidden'}><input type="checkbox" name="mtagliando" ${m.tagliandoFatto ? 'checked' : ''}> È il tagliando: il prossimo tra ${num(n2(S.furgone?.intervalloKm) || 30000, 0)} km e un anno</label>
+      <div class="small muted">I km aggiornano il furgone: quando ti avvicini al tagliando ti arriva l'avviso.</div>
+    </div>
     <div id="buyBox" ${m.categoria === 'materiale' ? '' : 'hidden'}>
       ${matBox(m.righe, true, 'Materiale acquistato')}
       <label class="check" style="margin-top:8px"><input type="checkbox" id="f_magazzino" name="magazzino" ${m.magazzino !== false ? 'checked' : ''}> Carica questo materiale in magazzino</label>
@@ -2235,6 +2244,14 @@ function sheetMov(m, prefill) {
     const d = { tipo: fd.get('tipo'), data: fd.get('data'), categoria: cat, importo: n2(fd.get('importo')), fornitore: fd.get('fornitore').trim(), numero: fd.get('numero').trim(), descrizione: fd.get('descrizione').trim(), righe, magazzino: mag };
     if (m.foto) d.foto = m.foto;
     if (m.documento) d.documento = m.documento;
+    if (['carburante', 'furgone'].includes(cat)) {
+      const km = n2(fd.get('mkm')), litri = cat === 'carburante' ? n2(fd.get('mlitri')) : 0;
+      if (km) d.km = km; if (litri) d.litri = litri;
+      const f = S.furgone || {}, nf = { ...f };
+      if (km > n2(f.km)) nf.km = km;
+      if (cat === 'furgone' && fd.get('mtagliando')) { d.tagliandoFatto = true; const base = km || kmFurgone(S); if (base) nf.tagliandoKm = base + (n2(f.intervalloKm) || 30000); nf.tagliando = addYears(d.data, 1); }
+      if (JSON.stringify(nf) !== JSON.stringify(f)) store.put('cfg', 'furgone', nf);
+    }
     if (m.esempio) d.esempio = true;
     if (!isNew && m.magazzino) moveStock(m.righe, -1);
     if (mag) moveStock(righe, +1, true);
@@ -2802,7 +2819,7 @@ async function testoPdf(bytes, passo) {
   }
   return out;
 }
-async function caricaFattura(file) {
+async function caricaFattura(file, mag = false) {
   if (!file) return;
   openSheet('Lettura fattura', `<div class="stack" style="align-items:center;padding:20px 0;text-align:center"><div class="spinner"></div><b id="phStep">Apro la fattura…</b><span class="small muted">Fattura elettronica (XML o .p7m), PDF o foto.</span></div>`, null);
   const passo = t => { const el = $('#phStep'); if (el) el.textContent = t; };
@@ -2815,24 +2832,29 @@ async function caricaFattura(file) {
       passo('Leggo la fattura elettronica…');
       const xml = xmlDaFile(bytes); if (!xml) throw Object.assign(new Error('xml'), { userMsg: 'Non trovo la fattura dentro il file: prova con il PDF' });
       letto = leggiFatturaXml(xml, { forfettario: forf });
+      letto.categoria = categoriaDa([letto.fornitore, ...letto.righe.map(r => r.nome)].join(' '));
+      if (letto.categoria === 'carburante') letto.litri = letto.righe.filter(r => /^l/i.test(r.unita) || /gasolio|benzina|diesel/i.test(r.nome)).reduce((a, r) => a + r.qta, 0);
     } else if (ext === 'pdf' || file.type === 'application/pdf') {
       passo('Leggo il PDF…');
-      letto = leggiFatturaTesto(await testoPdf(bytes.slice(), passo), { forfettario: forf });
+      const testo = await testoPdf(bytes.slice(), passo);
+      letto = { ...leggiFatturaTesto(testo, { forfettario: forf }), categoria: categoriaDa(testo), ...leggiCarburante(testo) };
     } else if (file.type.startsWith('image/')) {
-      passo('Leggo la foto della fattura…');
+      passo('Leggo la foto…');
       await loadTesseract(); const { data } = await window.Tesseract.recognize(await shrink(file, 2400), 'ita');
-      letto = leggiFatturaTesto(data.text || '', { forfettario: forf });
+      const testo = data.text || '', sc = leggiScontrino(testo, S.magazzino.map(m => m.nome)), ft = leggiFatturaTesto(testo, { forfettario: forf });
+      letto = { ...sc, ...ft, fornitore: ft.fornitore || sc.fornitore, numero: ft.numero || sc.numero, data: ft.data || sc.data, totale: ft.totale || sc.totale, righe: ft.righe.length ? ft.righe : sc.righe, tipo: 'testo', categoria: categoriaDa(testo), ...leggiCarburante(testo) };
     } else throw Object.assign(new Error('tipo'), { userMsg: 'Formato non riconosciuto: usa XML, .p7m, PDF o una foto' });
   } catch (e) { console.warn(e); toast(e.userMsg || 'Non sono riuscito a leggere la fattura: compila a mano'); }
   try { passo('Salvo il documento…'); const blob = file.type.startsWith('image/') ? await shrink(file, 2400) : file; documento = { path: await store.uploadFile(blob, nome), nome: nome.slice(0, 80), tipo: file.type }; }
   catch (e) { toast(e.userMsg || 'Documento non salvato: lo puoi allegare dopo'); }
   const L = letto || { righe: [] };
   const doppia = L.numero && S.movimenti.find(x => x.numero && x.numero.trim().toLowerCase() === L.numero.trim().toLowerCase() && normNome(x.fornitore) === normNome(L.fornitore));
+  const cat = L.categoria && L.categoria !== 'altro' ? L.categoria : (L.righe || []).length ? 'materiale' : (mag ? 'materiale' : 'altro');
   sheetMov(null, {
-    categoria: 'materiale', magazzino: true, documento, _fattura: letto ? letto.tipo : '', _forf: forf && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
-    data: L.data && L.data <= TODAY ? L.data : TODAY, importo: L.totale || '', fornitore: L.fornitore || '', numero: L.numero || '',
-    descrizione: L.numero ? `Fattura ${L.numero}` : 'Fattura fornitore',
-    righe: (L.righe || []).map(r => ({ nome: (S.magazzino.find(m => normNome(m.nome) === normNome(r.nome)) || {}).nome || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
+    categoria: cat, magazzino: cat === 'materiale', documento, _fattura: letto ? letto.tipo : '', _forf: forf && cat === 'materiale' && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
+    data: L.data && L.data <= TODAY ? L.data : TODAY, importo: L.totale || '', fornitore: L.fornitore || '', numero: L.numero || '', km: L.km || '', litri: L.litri ? Math.round(L.litri * 100) / 100 : '',
+    descrizione: cat === 'carburante' ? 'Carburante' : L.numero ? `Fattura ${L.numero}` : '',
+    righe: cat !== 'materiale' ? [] : (L.righe || []).map(r => ({ nome: (S.magazzino.find(m => normNome(m.nome) === normNome(r.nome)) || {}).nome || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
   });
   if (letto && !L.righe.length) toast('Non ho trovato le righe dei materiali: aggiungile a mano');
 }
@@ -2848,14 +2870,14 @@ async function onPhoto(file) {
       const st = $('#phStep'); if (st) st.textContent = 'Leggo lo scontrino…';
       await loadTesseract();
       const { data } = await window.Tesseract.recognize(blob, 'ita');
-      letto = leggiScontrino(data.text || '', S.magazzino.map(m => m.nome));
+      letto = { ...leggiScontrino(data.text || '', S.magazzino.map(m => m.nome)), ...leggiCarburante(data.text) };
     } catch (e) { console.warn(e); toast('Lettura automatica non riuscita: compila a mano'); }
   }
   const ok = letto && (letto.totale || letto.fornitore);
   sheetMov(null, {
     foto, _preview: preview, _letto: !!ok, categoria: ok && letto.categoria !== 'altro' ? letto.categoria : 'materiale',
     data: ok && letto.data && letto.data <= TODAY ? letto.data : TODAY,
-    importo: ok ? letto.totale || '' : '', fornitore: ok ? letto.fornitore : '', numero: ok ? letto.numero : '', descrizione: '',
+    importo: ok ? letto.totale || '' : '', fornitore: ok ? letto.fornitore : '', numero: ok ? letto.numero : '', descrizione: '', km: letto?.km || '', litri: letto?.litri || '',
     righe: ok ? letto.righe : [],
   });
 }
@@ -2899,8 +2921,8 @@ function sheetVan() {
     <div class="g2">${F('Km attuali', inp('km', f.km, 'number'))}${F('Compagnia assicurativa', inp('compagnia', f.compagnia))}</div>
     <div class="g2">${F('Scadenza assicurazione', inp('assicurazione', f.assicurazione, 'date'))}${F('Scadenza bollo', inp('bollo', f.bollo, 'date'))}</div>
     <div class="g2">${F('Prossima revisione', inp('revisione', f.revisione, 'date'))}${F('Prossimo tagliando', inp('tagliando', f.tagliando, 'date'))}</div>
-    ${F('Tagliando a km', inp('tagliandoKm', f.tagliandoKm, 'number'))}`,
-  async fd => { const d = { ...f }; delete d.esempio; ['modello', 'targa', 'compagnia', 'assicurazione', 'bollo', 'revisione', 'tagliando'].forEach(k => d[k] = String(fd.get(k) || '').trim()); ['km', 'tagliandoKm'].forEach(k => d[k] = n2(fd.get(k))); store.put('cfg', 'furgone', d); toast('Dati furgone salvati'); });
+    <div class="g2">${F('Prossimo tagliando a km', inp('tagliandoKm', f.tagliandoKm, 'number'))}${F('Tagliando ogni km', inp('intervalloKm', f.intervalloKm || 30000, 'number'))}</div>`,
+  async fd => { const d = { ...f }; delete d.esempio; ['modello', 'targa', 'compagnia', 'assicurazione', 'bollo', 'revisione', 'tagliando'].forEach(k => d[k] = String(fd.get(k) || '').trim()); ['km', 'tagliandoKm', 'intervalloKm'].forEach(k => d[k] = n2(fd.get(k))); store.put('cfg', 'furgone', d); toast('Dati furgone salvati'); });
 }
 function sheetKm() {
   const f = S.furgone || {};
@@ -3148,7 +3170,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f); return; }
+  if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f, t.id === 'fatturaIn2'); return; }
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
@@ -3163,7 +3185,7 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.change === 'anY') { UI.anYear = +t.value; render(); return; }
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }
-  if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; }
+  if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; const cb = $('#carBox'); if (cb) { cb.hidden = !['carburante', 'furgone'].includes(t.value); $('#litriWrap').hidden = t.value !== 'carburante'; $('#tagWrap').hidden = t.value !== 'furgone'; } }
   if (t.id === 'addVoce') { const v = t.value; t.value = ''; aggiungiVoce(v); return; }
   if (t.id === 'f_urgApp') { t.dataset.touched = '1'; aggiornaTotali(); }
   if (t.id === 'f_urgenza') { const u = $('#f_urgApp'); if (u && !u.dataset.touched) { u.checked = t.value !== 'normale'; aggiornaTotali(); } }
