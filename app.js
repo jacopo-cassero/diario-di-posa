@@ -671,6 +671,7 @@ function rCambioPw() {
 function rRichiesta() {
   const inst = !(window.navigator.standalone || matchMedia('(display-mode: standalone)').matches) && /iphone|ipad/i.test(navigator.userAgent);
   return `<div class="auth">
+    <div class="authlogo"><img src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"></div>
     <h2>Richiedi l'accesso</h2>
     ${inst ? `<div class="notice small"><b>Per averla come app:</b> tocca <b>Condividi</b> in Safari › <b>Aggiungi alla schermata Home</b>.</div>` : ''}
     <form class="panel" id="richiestaForm">
@@ -833,6 +834,7 @@ function rAuth() {
   const v = store.st.auth === 'recovery' ? 'newpw' : UI.authView;
   const title = { login: 'Accedi', signup: 'Crea il tuo account', reset: 'Recupera la password', newpw: 'Scegli una nuova password' }[v];
   return `<div class="auth">
+    <div class="authlogo"><img src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"></div>
     <h2>${title}</h2>
     <form class="panel" id="authForm" data-view="${v}">
       ${v !== 'newpw' ? `<label class="f"><span>Email</span><input id="a_email" name="email" type="email" autocomplete="email" required inputmode="email"></label>` : ''}
@@ -1590,7 +1592,7 @@ function menuHtml() {
   const attive = Object.values(A).filter(Boolean).length, tot = Object.keys(A).length;
   const st = store.st;
   const item = (act, arg, icon, label, sub = '', on = false) => `<button class="dr-item ${on ? 'on' : ''}" data-act="${act}" data-arg="${arg}" type="button">${svg(icon)}<span>${label}${sub ? `<small>${sub}</small>` : ''}</span></button>`;
-  return `<div class="dr-head"><div><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
+  return `<div class="dr-head"><div><img class="dr-logo" src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
   <div class="tape" aria-hidden="true"></div>
   <div class="dr-sec">Sezioni</div>
   ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
