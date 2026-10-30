@@ -160,6 +160,7 @@ function conSquadra(kind, id, d, fd) {
   const cur = id && S[kind].find(x => x.id === id);
   if (cur?.lavoroSquadra) d.lavoroSquadra = cur.lavoroSquadra;
   if (cur?.prenotazioneId) { d.prenotazioneId = cur.prenotazioneId; d.clienteFinale = cur.clienteFinale; }
+  for (const k of ['gruppoCons', 'importoCons', 'consAgg']) if (cur && cur[k] != null) d[k] = cur[k];
   return d;
 }
 
@@ -1049,9 +1050,13 @@ function rConti() {
     h += `<div class="small muted">Ogni lavoro passa da consuntivo a fattura a pagamento. Tocca il pulsante per farlo avanzare.</div>`;
     AMM.slice(0, 3).forEach(([k, l, c]) => {
       const L = all.filter(x => (x.amm || 'da_cons') === k);
-      h += `<section class="stack"><div class="row between"><h3>${l}</h3><span class="chip ${c} num">${L.length} · ${eur(sum(L, x => x.importo))}</span></div>
-      ${L.map(x => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(x.importo)}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}</div>
-        <div class="row">${k === 'da_cons' ? `<button class="btn sm dark" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">Prepara consuntivo</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Segna consuntivo inviato' : k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button></div></div>`).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
+      const imp = x => x.importoCons ?? x.importo;
+      const gruppi = new Map(); const singoli = [];
+      for (const x of L) { if (x.gruppoCons?.id && k !== 'da_cons') { if (statoGruppo(x.gruppoCons.id) !== k) continue; if (!gruppi.has(x.gruppoCons.id)) gruppi.set(x.gruppoCons.id, lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ ...y, _k: kk, _d: kk === 'lavori' ? y.data : (y.dataProg || y.data), _t: kk === 'lavori' ? y.installato : y.descrizione, importo: kk === 'lavori' ? y.importo : y.costo })).sort((a, b) => String(a._d).localeCompare(b._d))); } else singoli.push(x); }
+      const voci = [...[...gruppi.values()].map(gg => ({ d: gg[0]._d, h: cardGruppoCons(gg, k) })), ...singoli.map(x => ({ d: x._d, h: null, x }))].sort((a, b) => String(a.d).localeCompare(b.d));
+      h += `<section class="stack"><div class="row between"><h3>${l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>
+      ${voci.map(v => v.h || ((x) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
+        <div class="row">${k === 'da_cons' ? `<button class="btn sm dark" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">Prepara consuntivo</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Segna consuntivo inviato' : k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button></div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
     });
   }
   return h;
@@ -1073,7 +1078,7 @@ function rVan() {
 function inPeriod(d) { if (!d) return false; if (!d.startsWith(String(UI.anYear))) return false; return UI.anMonth === 'all' || d.slice(5, 7) === UI.anMonth; }
 function clientiPrincipali(lav, ints) {
   const m = new Map();
-  for (const [x, imp] of [...lav.map(l => [l, n2(l.importo)]), ...ints.map(i => [i, n2(i.costo)])]) {
+  for (const [x, imp] of [...lav.map(l => [l, fatturato(l)]), ...ints.map(i => [i, fatturato(i)])]) {
     const k = x.clienteId || normNome(x.cliente); if (!k) continue;
     const r = m.get(k) || { nome: (S.clienti.find(c => c.id === x.clienteId) || {}).nome || x.cliente, id: x.clienteId, imp: 0, n: 0 };
     r.imp += imp; r.n++; m.set(k, r);
@@ -1706,7 +1711,7 @@ function statLavoro(lav, ints) {
   lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g)));
   ints.forEach(i => giorni.add(i.dataProg || i.data));
   const nG = giorni.size, disp = giorniLavorabili();
-  const incasso = sum(lav, l => l.importo) + sum(ints, i => i.costo);
+  const incasso = sum(lav, fatturato) + sum(ints, fatturato);
   const ore = sum(lav, l => l.ore) + sum(ints, i => i.ore), pezzi = sum(lav, l => l.pezzi);
   const aOre = lav.filter(l => calcoloDi(l) === 'ore').length;
   return `<section class="panel stack"><h3>Giorni lavorati e rendimento</h3>
@@ -1735,7 +1740,7 @@ function statInterventi() {
     <div class="small muted">Incasso medio per intervento: <b>${chiusi.length ? eur(sum(chiusi, i => i.costo) / chiusi.length) : '—'}</b>. L'attesa è il tempo tra la richiesta e il giorno dell'intervento.</div></section>`;
 }
 function statContabilita(lav, ints) {
-  const jobs = [...lav.map(l => ({ a: l.amm, v: n2(l.importo) })), ...ints.map(i => ({ a: i.amm, v: n2(i.costo) }))];
+  const jobs = [...lav.map(l => ({ a: l.amm, v: fatturato(l) })), ...ints.map(i => ({ a: i.amm, v: fatturato(i) }))];
   const tot = sum(jobs, j => j.v) || 1;
   const righe = AMM.map(([k, l, c]) => ({ l, c, v: sum(jobs.filter(j => (j.a || 'da_cons') === k), j => j.v), n: jobs.filter(j => (j.a || 'da_cons') === k).length }));
   return `<section class="panel stack"><h3>Situazione incassi</h3><div class="bars">${righe.map(r => `<div><div class="bar-l"><span>${r.l} <span class="muted small">· ${r.n}</span></span><span class="num">${eur(r.v)} · ${num(r.v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f st-${r.c || 'x'}" style="width:${r.v / tot * 100}%"></div></div></div>`).join('')}</div>
@@ -1751,7 +1756,7 @@ function statPreventivi() {
 function statClienti(lav, ints) {
   const attivi = new Set([...lav, ...ints].map(x => x.clienteId || normNome(x.cliente)).filter(Boolean));
   const nuovi = S.clienti.filter(c => c.creato && inPeriod(c.creato));
-  const perTipo = TIPI_CLIENTE.map(([k, l]) => [l, sum([...lav.map(x => [x, x.importo]), ...ints.map(x => [x, x.costo])].filter(([x]) => ((cliDi(x) || {}).tipo || 'finale') === k), ([, v]) => n2(v))]);
+  const perTipo = TIPI_CLIENTE.map(([k, l]) => [l, sum([...lav.map(x => [x, fatturato(x)]), ...ints.map(x => [x, fatturato(x)])].filter(([x]) => ((cliDi(x) || {}).tipo || 'finale') === k), ([, v]) => n2(v))]);
   const tot = sum(perTipo, x => x[1]) || 1;
   return `<section class="panel stack"><h3>Clienti</h3><div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">${tile('Clienti con lavori', attivi.size)}${tile('Nuovi in rubrica', nuovi.length)}</div>
     <div class="bars">${perTipo.map(([l, v]) => `<div><div class="bar-l"><span>${l}</span><span class="num">${eur(v)} · ${num(v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${v / tot * 100}%"></div></div></div>`).join('')}</div></section>
@@ -1766,7 +1771,7 @@ function statFurgone(mov, lav, ints) {
   const sp = mov.filter(m => m.tipo !== 'entrata' && ['furgone', 'carburante'].includes(m.categoria));
   const carb = sum(sp.filter(m => m.categoria === 'carburante'), m => m.importo), manut = sum(sp.filter(m => m.categoria === 'furgone'), m => m.importo);
   const giorni = new Set(); lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g))); ints.forEach(i => giorni.add(i.dataProg || i.data));
-  const entr = sum(lav, l => l.importo) + sum(ints, i => i.costo);
+  const entr = sum(lav, fatturato) + sum(ints, fatturato);
   return `<section class="panel stack"><h3>Costi del furgone</h3><div class="kpis">${tile('Carburante', eur(carb))}${tile('Manutenzione e tasse', eur(manut))}${tile('Al giorno lavorato', giorni.size ? eur((carb + manut) / giorni.size) : '—')}${tile('Sul fatturato', entr ? num((carb + manut) / entr * 100, 1) + '%' : '—')}</div></section>`;
 }
 
@@ -2167,7 +2172,12 @@ function sheetCons(kind, id) {
     <pre class="cons" id="consTxt">${esc(txt)}</pre>
     ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}
     ${campoAggiustamenti(consCtx.adj)}`,
-    async fd => { store.put(kind, id, { ...stripId(x), iva: fd.get('iva'), amm: 'cons', consAgg: leggiAgg() }); toast('Consuntivo segnato come inviato'); },
+    async fd => {
+      const adj = leggiAgg(), d = { ...stripId(x), iva: fd.get('iva'), amm: (x.amm || 'da_cons') === 'da_cons' ? 'cons' : x.amm, consAgg: adj };
+      if (adj.sconto || adj.totale) d.importoCons = totali(conAggiustamenti({ ...docDaLavoro(x, kind, AZ()), iva: fd.get('iva') }, adj), LIST()).imponibile; else delete d.importoCons;
+      delete d.gruppoCons;
+      store.put(kind, id, d); toast('Consuntivo segnato come inviato');
+    },
     { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consPdf" data-arg="${kind}" data-id="${id}">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
   aggiornaCons();
 }
@@ -2439,7 +2449,7 @@ function assicuraCliente(nome, extra = {}) {
 function storicoCliente(c) {
   const mio = x => x.clienteId === c.id || (!x.clienteId && normNome(nomeDi(x)) === normNome(c.nome));
   const lav = S.lavori.filter(mio), int = S.interventi.filter(mio), prev = S.preventivi.filter(mio), mod = S.moduli.filter(mio);
-  const fatt = [...lav.map(x => ({ imp: n2(x.importo), d: x.data, amm: x.amm })), ...int.filter(i => i.stato === 'completato').map(x => ({ imp: n2(x.costo), d: x.dataProg || x.data, amm: x.amm }))].filter(x => x.d && x.d <= TODAY);
+  const fatt = [...lav.map(x => ({ imp: fatturato(x), d: x.data, amm: x.amm })), ...int.filter(i => i.stato === 'completato').map(x => ({ imp: fatturato(x), d: x.dataProg || x.data, amm: x.amm }))].filter(x => x.d && x.d <= TODAY);
   return {
     lav, int, prev, mod,
     fatturato: sum(fatt, x => x.imp),
@@ -2564,6 +2574,8 @@ function lavoriSel() {
   S.interventi.filter(i => i.stato === 'completato' && set.has(i.dataProg || i.data)).forEach(x => out.push({ x, kind: 'interventi', d: x.dataProg || x.data }));
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
+/** Quanto si incassa davvero da un lavoro: con sconti e arrotondamenti del consuntivo, se ci sono. */
+const fatturato = x => n2(x.importoCons != null ? x.importoCons : x.importo != null ? x.importo : x.costo);
 const importoJob = j => n2(j.kind === 'lavori' ? j.x.importo : j.x.costo);
 function barraSelezione() {
   if (!UI.sel) return `<div class="row between"><span class="small muted">Più giornate per lo stesso cliente?</span><button class="btn sm" data-act="selMode" type="button">Consuntivo di più giorni</button></div>`;
@@ -2587,8 +2599,18 @@ function sheetConsMulti(adj = {}) {
     <pre class="cons" id="consTxt"></pre>`,
   async () => {
     const sc = jobsScelti(); if (!sc.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scegli almeno un lavoro' });
-    for (const j of sc) if ((j.x.amm || 'da_cons') === 'da_cons') store.put(j.kind, j.x.id, { ...stripId(j.x), amm: 'cons' });
-    UI.sel = null; toast(`Consuntivo segnato come inviato (${sc.length} ${sc.length === 1 ? 'lavoro' : 'lavori'})`);
+    const iva = $('#f_iva')?.value || AZ().ivaPredefinita, adj = leggiAgg(), L = LIST();
+    const t = totali(conAggiustamenti(docMulti(sc, iva), adj), L);
+    const lordi = sc.map(j => totali({ ...docDaLavoro(j.x, j.kind, AZ()), iva }, L).imponibile), somma = lordi.reduce((a, b) => a + b, 0);
+    const g = { id: 'cm' + Date.now().toString(36), n: sc.length, imponibile: t.imponibile, totale: t.totale, iva, lordo: Math.round(somma * 100) / 100, data: TODAY, dal: sc[0].d, al: sc[sc.length - 1].d, cliente: sc[0].x.cliente || '', agg: adj };
+    let resto = t.imponibile;
+    sc.forEach((j, i) => {
+      // ogni lavoro tiene la sua parte del totale scontato (proporzionale), così analisi e fatture tornano
+      const quota = i === sc.length - 1 ? Math.round(resto * 100) / 100 : Math.round((somma ? t.imponibile * lordi[i] / somma : t.imponibile / sc.length) * 100) / 100;
+      resto -= quota;
+      store.put(j.kind, j.x.id, { ...stripId(j.x), amm: (j.x.amm || 'da_cons') === 'da_cons' ? 'cons' : j.x.amm, iva, gruppoCons: g, importoCons: quota });
+    });
+    UI.sel = null; toast(`Consuntivo unico inviato: ${sc.length} ${sc.length === 1 ? 'lavoro' : 'lavori'}, ${eur(t.imponibile)}${t.ivaPct > 0 ? ' + IVA' : ''}`);
   }, { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consMultiPdf">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
   disegnaListaCM(cli);
 }
@@ -2805,6 +2827,19 @@ function sheetRinnova(k) {
 }
 
 /* avanzamento fatture */
+/** Una sola fattura per il consuntivo di più giorni: i lavori avanzano insieme. */
+function cardGruppoCons(gg, k) {
+  const g = gg[0].gruppoCons, sconto = Math.round((n2(g.lordo) - n2(g.imponibile)) * 100) / 100;
+  const ivaL = ivaOf(g.iva || '22');
+  return `<div class="card gruppocons"><div class="row between"><span class="t">${esc(g.cliente || gg[0].cliente || '')}</span><span class="price">${eur(g.imponibile)}</span></div>
+    <div class="small"><span class="chip in">Consuntivo unico</span> ${gg.length} ${gg.length === 1 ? 'lavoro' : 'lavori'} · ${g.dal === g.al ? fmtD(g.dal) : `dal ${fmtD(g.dal, { day: 'numeric', month: 'short' })} al ${fmtD(g.al, { day: 'numeric', month: 'short', year: 'numeric' })}`}</div>
+    <div class="small muted">${Math.abs(sconto) > 0.009 ? `Prezzo pieno <s>${eur(g.lordo)}</s> · ${sconto > 0 ? 'sconto' : 'in più'} ${eur(Math.abs(sconto))} · ` : ''}${ivaL[2] > 0 ? `totale IVA compresa ${eur(g.totale)}` : esc(ivaL[1])}</div>
+    <details class="small"><summary>Lavori compresi</summary>${gg.map(x => `<div>${fmtD(x._d, { day: 'numeric', month: 'short' })} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''} · ${eur(x.importoCons ?? x.importo)}</div>`).join('')}</details>
+    <div class="row"><button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button><button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
+}
+/** Stato del consuntivo unico: quello del lavoro più indietro. */
+function statoGruppo(gid) { const L = lavoriGruppo(gid); return AMM[Math.min(...L.map(([, x]) => Math.max(0, AMM.findIndex(a => a[0] === (x.amm || 'da_cons')))))][0]; }
+function lavoriGruppo(gid) { return [...S.lavori.map(x => ['lavori', x]), ...S.interventi.map(x => ['interventi', x])].filter(([, x]) => x.gruppoCons?.id === gid); }
 function advance(kind, id) {
   const x = S[kind].find(r => r.id === id); if (!x) return;
   const i = AMM.findIndex(a => a[0] === (x.amm || 'da_cons'));
@@ -2898,6 +2933,8 @@ document.addEventListener('click', async e => {
     case 'rinnova': sheetRinnova(arg); break;
     case 'cons': sheetCons(arg, id); break;
     case 'amm': advance(arg, id); render(); break;
+    case 'ammGruppo': { const L = lavoriGruppo(arg); if (!L.length) break; const i = AMM.findIndex(a => a[0] === statoGruppo(arg)); const nx = AMM[Math.min(i + 1, AMM.length - 1)][0]; for (const [k, x] of L) store.put(k, x.id, { ...stripId(x), amm: nx }); toast(`${ammOf(nx)[1]}: ${L.length} lavori`); render(); break; }
+    case 'sciogliGruppo': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per separare'; break; } for (const [k, x] of lavoriGruppo(arg)) { const d = stripId(x); delete d.gruppoCons; delete d.importoCons; store.put(k, x.id, d); } toast('Lavori separati: tornano ai prezzi pieni'); render(); break; }
     case 'close': closeSheet(); break;
     case 'addrow': $('#matrows').insertAdjacentHTML('beforeend', matRow({}, arg === 'buy')); break;
     case 'rmrow': { const rows = $('#matrows'); if (rows.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = ''); break; }
