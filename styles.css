@@ -454,3 +454,8 @@ details > summary{cursor:pointer;color:var(--muted);padding:2px 0}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.ok{background:#1d3a26;border-color:#2f6b40;color:#9fe0b0}}
 :root[data-theme="dark"] .btn.ok{background:#1d3a26;border-color:#2f6b40;color:#9fe0b0}
 .dayfiltri{margin-bottom:2px}
+.statosel{max-width:100%;font-weight:600}
+details.pagati > summary{list-style:none;cursor:pointer}
+details.pagati > summary::-webkit-details-marker{display:none}
+details.pagati > summary h3::after{content:" ▸";color:var(--muted)}
+details.pagati[open] > summary h3::after{content:" ▾"}

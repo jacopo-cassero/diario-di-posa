@@ -1071,16 +1071,20 @@ function rConti() {
   }
   if (UI.seg === 'fatt') {
     const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
-    h += `<div class="small muted">Ogni lavoro passa da consuntivo a fattura a pagamento. Tocca il pulsante per farlo avanzare.</div>`;
-    AMM.slice(0, 3).forEach(([k, l, c]) => {
-      const L = all.filter(x => (x.amm || 'da_cons') === k);
+    h += `<div class="small muted">Ogni lavoro passa da consuntivo a fattura a pagamento. Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
+    AMM.forEach(([k, l, c]) => {
+      let L = all.filter(x => (x.amm || 'da_cons') === k);
+      // i pagati: solo gli ultimi 60 giorni, in una sezione chiusa
+      if (k === 'pag') L = L.filter(x => x._d >= piuGiorni(TODAY, -60));
       const imp = x => x.importoCons ?? x.importo;
       const gruppi = new Map(); const singoli = [];
       for (const x of L) { if (x.gruppoCons?.id && k !== 'da_cons') { if (statoGruppo(x.gruppoCons.id) !== k) continue; if (!gruppi.has(x.gruppoCons.id)) gruppi.set(x.gruppoCons.id, lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ ...y, _k: kk, _d: kk === 'lavori' ? y.data : (y.dataProg || y.data), _t: kk === 'lavori' ? y.installato : y.descrizione, importo: kk === 'lavori' ? y.importo : y.costo })).sort((a, b) => String(a._d).localeCompare(b._d))); } else singoli.push(x); }
       const voci = [...[...gruppi.values()].map(gg => ({ d: gg[0]._d, h: cardGruppoCons(gg, k) })), ...singoli.map(x => ({ d: x._d, h: null, x }))].sort((a, b) => String(a.d).localeCompare(b.d));
-      h += `<section class="stack"><div class="row between"><h3>${l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>
+      const testa = `<div class="row between"><h3>${k === 'pag' ? 'Pagati (ultimi 2 mesi)' : l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>`;
+      if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}</details>`; return; }
+      h += `<section class="stack">${testa}
       ${voci.map(v => v.h || ((x) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
-        <div class="row">${k === 'da_cons' ? `<button class="btn sm dark" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">Prepara consuntivo</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Segna consuntivo inviato' : k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button></div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
+        <div class="row">${k === 'da_cons' ? `<button class="btn sm dark" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">Prepara consuntivo</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Segna consuntivo inviato' : k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
     });
   }
   return h;
@@ -2851,6 +2855,9 @@ function sheetRinnova(k) {
 }
 
 /* avanzamento fatture */
+/** Menu per correggere lo stato (se hai segnato per sbaglio). */
+const selStato = (kind, id, k, gruppo = '') => `<select class="btn sm statosel" data-change="ammSet" data-kind="${kind}" data-id="${esc(id)}" data-gruppo="${esc(gruppo)}" aria-label="Cambia stato">${AMM.map(([v, l]) => `<option value="${v}" ${v === k ? 'selected' : ''}>${v === k ? 'Stato: ' : '↩ '}${l}</option>`).join('')}</select>`;
+const cardFatt = (x, k, imp) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}</div><div class="row">${selStato(x._k, x.id, k)}</div></div>`;
 /** Una sola fattura per il consuntivo di più giorni: i lavori avanzano insieme. */
 function cardGruppoCons(gg, k) {
   const g = gg[0].gruppoCons, sconto = Math.round((n2(g.lordo) - n2(g.imponibile)) * 100) / 100;
@@ -2859,7 +2866,7 @@ function cardGruppoCons(gg, k) {
     <div class="small"><span class="chip in">Consuntivo unico</span> ${gg.length} ${gg.length === 1 ? 'lavoro' : 'lavori'} · ${g.dal === g.al ? fmtD(g.dal) : `dal ${fmtD(g.dal, { day: 'numeric', month: 'short' })} al ${fmtD(g.al, { day: 'numeric', month: 'short', year: 'numeric' })}`}</div>
     <div class="small muted">${Math.abs(sconto) > 0.009 ? `Prezzo pieno <s>${eur(g.lordo)}</s> · ${sconto > 0 ? 'sconto' : 'in più'} ${eur(Math.abs(sconto))} · ` : ''}${ivaL[2] > 0 ? `totale IVA compresa ${eur(g.totale)}` : esc(ivaL[1])}</div>
     <details class="small"><summary>Lavori compresi</summary>${gg.map(x => `<div>${fmtD(x._d, { day: 'numeric', month: 'short' })} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''} · ${eur(x.importoCons ?? x.importo)}</div>`).join('')}</details>
-    <div class="row"><button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button><button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
+    <div class="row">${k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
 }
 /** Stato del consuntivo unico: quello del lavoro più indietro. */
 function statoGruppo(gid) { const L = lavoriGruppo(gid); return AMM[Math.min(...L.map(([, x]) => Math.max(0, AMM.findIndex(a => a[0] === (x.amm || 'da_cons')))))][0]; }
@@ -3078,6 +3085,13 @@ document.addEventListener('change', e => {
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
   if (t.id === 'f_oraInizio' && $('#f_oraFine') && !$('#f_oraFine').value && t.value) { const h = Math.min(+t.value.slice(0, 2) + 2, 23); $('#f_oraFine').value = `${String(h).padStart(2, '0')}${t.value.slice(2)}`; }
   if (t.id === 'firmatoIn') { const f = t.files && t.files[0]; t.value = ''; allegaFirmato(f); return; }
+  if (t.dataset.change === 'ammSet') {
+    const v = t.value, nome = ammOf(v)[1];
+    if (t.dataset.gruppo) { const L = lavoriGruppo(t.dataset.gruppo); for (const [k, x] of L) store.put(k, x.id, { ...stripId(x), amm: v }); toast(`${L.length} lavori: ${nome}`); }
+    else { const x = S[t.dataset.kind].find(r => r.id === t.dataset.id); if (x) { store.put(t.dataset.kind, x.id, { ...stripId(x), amm: v }); toast(`Stato cambiato: ${nome}`); } }
+    if (v === 'pag') UI.pagAperti = true;
+    render(); return;
+  }
   if (t.dataset.change === 'anY') { UI.anYear = +t.value; render(); return; }
   if (t.dataset.change === 'anM') { UI.anMonth = t.value; render(); return; }
   if (t.id === 'f_categoria') { const bb = $('#buyBox'); if (bb) bb.hidden = t.value !== 'materiale'; }
@@ -3124,4 +3138,5 @@ caricaImmagini();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn(e));
 render();
 
+document.addEventListener('toggle', e => { if (e.target.classList?.contains('pagati')) UI.pagAperti = e.target.open; }, true);
 store.init().then(render);
