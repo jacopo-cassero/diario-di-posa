@@ -46,7 +46,12 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 
 /* ---------- stato ---------- */
 const CFG = window.DIARIO_CONFIG || {};
-const store = createStore(CFG, () => { render(); if (GESTORE()) { aggiornaCalendario(); caricaAccessi(); } });
+const store = createStore(CFG, () => {
+  render();
+  if (GESTORE()) { aggiornaCalendario(); caricaAccessi(); }
+  else if (store.st.ruolo === 'rivenditore' && RIV.carico && Date.now() - (RIV.t || 0) > 30000) caricaRiv(true);
+  else if (store.st.ruolo === 'dipendente' && DIP.carico && Date.now() - (DIP.t || 0) > 30000) caricaDip();
+});
 const S = store.S;
 const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
@@ -227,7 +232,7 @@ function cardPren(p, azioni) {
     ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
     ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
     ${schedaTesto(p) ? `<details class="small" ${azioni ? 'open' : ''}><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>` : '<div class="small muted">Nessun dettaglio del cantiere.</div>'}
-    ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.lavoro_id ? `<button class="linkbtn small" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}</div>`;
+    ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.stato === 'confermata' ? `<div class="row">${p.lavoro_id ? `<button class="btn sm" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}<button class="btn sm ghost" data-act="prenAnnulla" data-id="${p.id}" type="button">Annulla la data</button></div>` : ''}</div>`;
 }
 const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
 function sheetDaiAccesso(r = {}) {
@@ -287,6 +292,19 @@ async function confermaPren(p) {
   return { kind, id };
 }
 
+/** La posa nata da una prenotazione è stata tolta o spostata: il rivenditore lo deve vedere. */
+const ANNULLATA_INST = 'Annullata dall\'installatore';
+async function annullaPrenotazioniDi(lavoroId, motivo = '') {
+  if (!GESTORE() || store.st.mode === 'demo' || !lavoroId) return;
+  try {
+    const { data } = await store.tabella('prenotazioni').update({ stato: 'rifiutata', risposta: motivo ? `${ANNULLATA_INST}: ${motivo}` : ANNULLATA_INST, aggiornato: new Date().toISOString() }).eq('lavoro_id', lavoroId).eq('stato', 'confermata').select('id');
+    if (data?.length) toast('Data annullata anche per il rivenditore'); caricaAccessi(true);
+  } catch (e) { console.warn(e); }
+}
+async function spostaPrenotazioniDi(lavoroId, da, a) {
+  if (!GESTORE() || store.st.mode === 'demo' || !lavoroId || !da) return;
+  try { await store.tabella('prenotazioni').update({ data: da, data_fine: a && a > da ? a : da, aggiornato: new Date().toISOString() }).eq('lavoro_id', lavoroId).eq('stato', 'confermata'); caricaAccessi(true); } catch (e) { console.warn(e); }
+}
 /* ---------- vista RIVENDITORE ---------- */
 const RIV = { mese: TODAY.slice(0, 7), occ: new Set(), mesiCaricati: new Set(), mie: [], da: '', a: '', carico: false, err: '', listino: null, listinoCarico: false, listinoErr: '', prev: null };
 async function caricaRiv(forza) {
@@ -303,7 +321,7 @@ async function caricaRiv(forza) {
     if (error) throw error;
     RIV.mie = data; RIV.err = '';
   } catch (e) { console.warn(e); RIV.err = e.userMsg || 'Non riesco a leggere il calendario: controlla la rete.'; }
-  RIV.carico = true; render(); void A;
+  RIV.carico = true; RIV.t = Date.now(); render(); void A;
 }
 function statoGiorno(k) {
   const A = store.st.accesso, dow = pd(k).getDay();
@@ -331,7 +349,7 @@ function rRivenditore() {
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
   const vecchie = RIV.mie.filter(p => !attive.includes(p)).slice(0, 10);
-  return `<div class="rivhead"><div><div class="small muted">Calendario di</div><h2>${esc(A.installatore || 'Cassero Installazioni')}</h2></div>${A.telefonoInstallatore ? `<a class="btn sm" href="tel:${esc(A.telefonoInstallatore)}">Chiama</a>` : ''}</div>
+  return `<div class="rivhead"><div><div class="small muted">Calendario di</div><h2>${esc(A.installatore || 'Cassero Installazioni')}</h2></div><div class="row"><button class="btn sm" data-act="rivAggiorna" type="button">Aggiorna</button>${A.telefonoInstallatore ? `<a class="btn sm" href="tel:${esc(A.telefonoInstallatore)}">Chiama</a>` : ''}</div></div>
   <div class="small muted">Ciao ${esc(A.azienda || A.nome || '')}: le giornate <b>libere</b> si possono prenotare. Tocca il primo giorno e, se ti servono più giorni, l'ultimo. Ogni prenotazione la confermo io.</div>
   ${RIV.err ? `<div class="notice small">${esc(RIV.err)}</div>` : ''}
   <section class="stack">
@@ -352,7 +370,7 @@ function giorniLavorativi(da, a) {
   return out;
 }
 function cardMiaPren(p) {
-  const st = { richiesta: ['warn', 'Da confermare'], confermata: ['ok', 'Confermata'], rifiutata: ['bad', 'Non disponibile'], annullata: ['', 'Annullata'] }[p.stato];
+  const st = String(p.risposta || '').startsWith(ANNULLATA_INST) ? ['bad', 'Annullata'] : { richiesta: ['warn', 'Da confermare'], confermata: ['ok', 'Confermata'], rifiutata: ['bad', 'Non disponibile'], annullata: ['', 'Annullata da te'] }[p.stato];
   return `<div class="card"><div class="row between"><span class="t">${p.data_fine > p.data ? `${fmtD(p.data, { day: 'numeric', month: 'short' })} – ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'short', day: 'numeric', month: 'short' })}</span><span class="chip ${st[0]}">${st[1]}</span></div>
     <div class="small muted">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]} · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
     ${p.risposta ? `<div class="small">Risposta: ${esc(p.risposta)}</div>` : ''}
@@ -398,7 +416,7 @@ async function caricaDip() {
     const [l, m] = await Promise.all([store.rpc('miei_lavori', { da: piuGiorni(TODAY, -21), a: piuGiorni(TODAY, 180) }), store.rpc('miei_moduli')]);
     DIP.lavori = l || []; DIP.moduli = m || []; DIP.err = '';
   } catch (e) { console.warn(e); DIP.err = e.userMsg || 'Non riesco a leggere i lavori: controlla la rete.'; }
-  DIP.carico = true; render();
+  DIP.carico = true; DIP.t = Date.now(); render();
 }
 const fineLav = x => x.dataFine && x.dataFine > x.data ? x.dataFine : x.data;
 function rDipendente() {
@@ -735,6 +753,19 @@ document.addEventListener('click', async e => {
         if (error) throw Object.assign(error, { userMsg: 'Non riuscito' }); toast('Prenotazione rifiutata: le giornate tornano libere'); caricaAccessi(true);
       }, { saveLabel: 'Rifiuta' }); break;
     }
+    case 'prenAnnulla': {
+      const pr = ACC.pren.find(x => x.id === id); if (!pr) break;
+      const lav = pr.lavoro_id && (S.lavori.find(x => x.id === pr.lavoro_id) || S.interventi.find(x => x.id === pr.lavoro_id));
+      openSheet('Annulla la data', `<div class="small">Il rivenditore vedrà la prenotazione <b>annullata</b> e le giornate tornano libere.</div>
+        ${F('Motivo (lo vede il rivenditore)', inp('pmot', '', 'text', 'placeholder="Es. imprevisto, sentiamoci per una nuova data"'))}
+        ${lav ? `<label class="check"><input type="checkbox" name="ptogli" checked> Togli anche ${S.lavori.includes(lav) ? 'la posa' : 'l\'intervento'} dal mio calendario</label>` : ''}`,
+      async fd => {
+        const { error } = await store.tabella('prenotazioni').update({ stato: 'rifiutata', risposta: fd.get('pmot') ? `${ANNULLATA_INST}: ${String(fd.get('pmot')).trim()}` : ANNULLATA_INST, aggiornato: new Date().toISOString() }).eq('id', pr.id);
+        if (error) throw Object.assign(error, { userMsg: 'Non riuscito, riprova' });
+        if (lav && fd.get('ptogli')) store.drop(S.lavori.includes(lav) ? 'lavori' : 'interventi', lav.id);
+        toast('Data annullata: il rivenditore la vede annullata'); caricaAccessi(true);
+      }, { saveLabel: 'Annulla la data' }); break;
+    }
     case 'prenApri': { const p = ACC.pren.find(x => x.id === id); const l = p && S.lavori.find(x => x.id === p.lavoro_id); const i = p && S.interventi.find(x => x.id === p.lavoro_id); if (l) sheetLav(l); else if (i) sheetInt(i); else toast('Il lavoro non c\'è più nel calendario'); break; }
     case 'apriFile': e.preventDefault(); { const u = await store.fileUrl(arg); if (u) window.open(u, '_blank', 'noopener'); } break;
     case 'accRicontrolla': await store.leggiAccesso(); render(); if (['nessuno', 'sospeso'].includes(store.st.ruolo)) toast('Ancora nessun accesso'); else store.refresh(); break;
@@ -749,6 +780,7 @@ document.addEventListener('click', async e => {
       if (giorniLavorativi(RIV.da, arg).length > 11) { toast('Al massimo due settimane per prenotazione'); break; }
       RIV.a = arg; render(); break;
     }
+    case 'rivAggiorna': await caricaRiv(true); toast('Calendario aggiornato'); break;
     case 'rivAnnullaSel': RIV.da = RIV.a = ''; render(); break;
     case 'rivPrenota': if (RIV.da) sheetPrenota(); break;
     case 'pmAdd': $('#pmat').insertAdjacentHTML('beforeend', rigaMat()); break;
@@ -2066,6 +2098,7 @@ function sheetLav(l, prefill) {
     Object.assign(d, leggiOrario(fd));
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
+    if (!isNew && (l.data !== d.data || (l.dataFine || '') !== (d.dataFine || ''))) spostaPrenotazioniDi(id, d.data, d.dataFine);
     if (isNew && d.preventivoId) {
       const p = S.preventivi.find(x => x.id === d.preventivoId);
       if (p) store.put('preventivi', p.id, { ...stripId(p), stato: 'accettato', lavoroId: id });
@@ -2075,7 +2108,7 @@ function sheetLav(l, prefill) {
     const sov = sovrapposti('lavori', id, giorniPosa(d), d);
     toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : sov ? `Posa salvata. Attenzione: si sovrappone a ${sov}` : 'Posa salvata');
   }, {
-    del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); toast('Posa eliminata'); },
+    del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); annullaPrenotazioniDi(l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
   });
   if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
@@ -2129,10 +2162,12 @@ function sheetInt(i, day) {
     Object.assign(d, leggiOrario(fd));
     const idInt = store.put('interventi', isNew ? null : i.id, d);
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'interventi', idInt);
+    if (!isNew && d.dataProg && d.dataProg !== i.dataProg) spostaPrenotazioniDi(idInt, d.dataProg, d.dataProg);
+    if (!isNew && d.stato === 'annullato' && i.stato !== 'annullato') annullaPrenotazioniDi(idInt);
     const sov = d.dataProg ? sovrapposti('interventi', idInt, [d.dataProg], d) : '';
     toast(sov ? `Intervento salvato. Attenzione: si sovrappone a ${sov}` : 'Intervento salvato');
   }, {
-    del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); toast('Intervento eliminato'); },
+    del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); annullaPrenotazioniDi(i.id); toast('Intervento eliminato'); },
     extra: isNew ? '' : `${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
