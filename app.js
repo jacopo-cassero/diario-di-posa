@@ -161,7 +161,7 @@ function conSquadra(kind, id, d, fd) {
   const cur = id && S[kind].find(x => x.id === id);
   if (cur?.lavoroSquadra) d.lavoroSquadra = cur.lavoroSquadra;
   if (cur?.prenotazioneId) { d.prenotazioneId = cur.prenotazioneId; d.clienteFinale = cur.clienteFinale; }
-  for (const k of ['gruppoCons', 'importoCons', 'consAgg', 'giorniFatti']) if (cur && cur[k] != null) d[k] = cur[k];
+  for (const k of ['gruppoCons', 'importoCons', 'consAgg', 'giorniFatti', 'preventivoId']) if (cur && cur[k] != null && d[k] == null) d[k] = cur[k];
   return d;
 }
 
@@ -1995,6 +1995,7 @@ function sheetLav(l, prefill) {
     <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${l.clienteFinale ? `<div class="small muted">Cliente finale: <b>${esc(l.clienteFinale)}</b></div>` : ''}
+    ${isNew && l.preventivoId ? '' : boxPrevLavoro(l, 'lavori')}
     ${campoSquadra(l)}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
     <div class="g3">
@@ -2037,7 +2038,7 @@ function sheetLav(l, prefill) {
     if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
     if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
     const d = { data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
-    if (l.preventivoId) d.preventivoId = l.preventivoId;
+    { const cur = !isNew && S.lavori.find(x => x.id === l.id); const pv = cur ? cur.preventivoId : l.preventivoId; if (pv) d.preventivoId = pv; }
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
     moveStock(mats, -1);
@@ -2045,6 +2046,7 @@ function sheetLav(l, prefill) {
     conSquadra('lavori', isNew ? null : l.id, d, fd);
     Object.assign(d, leggiOrario(fd));
     const id = store.put('lavori', isNew ? null : l.id, d);
+    if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
     if (isNew && d.preventivoId) {
       const p = S.preventivi.find(x => x.id === d.preventivoId);
       if (p) store.put('preventivi', p.id, { ...stripId(p), stato: 'accettato', lavoroId: id });
@@ -2084,6 +2086,7 @@ function sheetInt(i, day) {
     ${F('Telefono', inp('telefono', i.telefono, 'tel'))}
     ${F('Indirizzo', inp('indirizzo', i.indirizzo))}
     ${campoSquadra(i)}
+    ${boxPrevLavoro(i, 'interventi')}
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
@@ -2106,6 +2109,7 @@ function sheetInt(i, day) {
     conSquadra('interventi', isNew ? null : i.id, d, fd);
     Object.assign(d, leggiOrario(fd));
     const idInt = store.put('interventi', isNew ? null : i.id, d);
+    if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'interventi', idInt);
     const sov = d.dataProg ? sovrapposti('interventi', idInt, [d.dataProg], d) : '';
     toast(sov ? `Intervento salvato. Attenzione: si sovrappone a ${sov}` : 'Intervento salvato');
   }, {
@@ -2449,11 +2453,63 @@ function sheetPrev(p) {
     ${F('Note per il cliente', `<textarea id="f_note" name="note" placeholder="Es. Materiale di consumo compreso">${esc(p.note || '')}</textarea>`)}
     <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
     <div class="fieldset firmatobox" id="firmatoBox">${firmatoHtml()}</div>
+    ${boxCollegaPrev(p, isNew)}
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
     del: isNew ? null : async () => { store.drop('preventivi', p.id); toast('Preventivo eliminato'); },
-    extra: `<button type="button" class="btn dark" data-act="prevPdf">PDF</button>${!isNew && p.stato === 'accettato' && !p.lavoroId ? '<button type="button" class="btn" data-act="pianifica">Metti in calendario</button>' : ''}`,
+    extra: `<button type="button" class="btn dark" data-act="prevPdf">PDF</button>`,
   });
   aggiornaTotali();
+}
+/* ---------- collegare preventivi e lavori del calendario ---------- */
+const lavoroDiPrev = p => p?.lavoroId ? (S[p.lavoroKind || 'lavori'] || []).find(x => x.id === p.lavoroId) || S.lavori.find(x => x.id === p.lavoroId) || S.interventi.find(x => x.id === p.lavoroId) : null;
+const kindDi = x => S.lavori.includes(x) ? 'lavori' : 'interventi';
+const descrLavoro = (x, k) => `${k === 'lavori' ? 'Posa' : 'Intervento'} · ${fmtD(k === 'lavori' ? x.data : (x.dataProg || x.data), { weekday: 'short', day: 'numeric', month: 'short' })}${k === 'lavori' && x.dataFine && x.dataFine > x.data ? ' – ' + fmtD(x.dataFine, { day: 'numeric', month: 'short' }) : ''} · ${x.cliente || ''}${x.indirizzo ? ' · ' + x.indirizzo : ''}`;
+function boxCollegaPrev(p, isNew) {
+  const x = lavoroDiPrev(p);
+  if (x) { const k = kindDi(x); return `<div class="fieldset collega"><span class="fs-t">In calendario</span><div class="small"><b>${esc(descrLavoro(x, k))}</b></div>
+    <div class="row"><button type="button" class="btn sm" data-act="apriLavPrev" data-arg="${k}" data-id="${x.id}">Apri</button><button type="button" class="btn sm ghost" data-act="scollegaPrev">Scollega</button></div></div>`; }
+  return `<div class="fieldset collega"><span class="fs-t">Calendario</span><div class="small muted">Collega il preventivo alla posa o all'intervento: se è già segnato in calendario sceglilo, altrimenti crealo da qui.</div>
+    <div class="row"><button type="button" class="btn sm primary" data-act="collegaPrevScegli">Collega a un lavoro già segnato</button>${isNew ? '' : '<button type="button" class="btn sm" data-act="pianifica">Nuova posa dal preventivo</button>'}</div></div>`;
+}
+function sheetScegliLavoro(p) {
+  const nome = normNome(p.cliente?.nome);
+  const tutti = [...S.lavori.map(x => ['lavori', x, x.data]), ...S.interventi.filter(i => i.stato !== 'annullato').map(x => ['interventi', x, x.dataProg || x.data])].filter(([, , d]) => d);
+  const punteggio = ([, x, d]) => (nome && (normNome(x.cliente) === nome || (x.clienteId && x.clienteId === p.clienteId)) ? 0 : 1) * 1e6 + Math.abs(daysTo(d)) + (d < TODAY ? 0.5 : 0);
+  const L = tutti.sort((a, b) => punteggio(a) - punteggio(b)).slice(0, 60);
+  const riga = ([k, x]) => `<button type="button" class="modchoice" data-act="collegaPrev" data-arg="${k}" data-id="${x.id}">${svg(k === 'lavori' ? 'cal' : 'int')}<span><b>${esc(x.cliente || 'Cliente')}</b><small>${esc(descrLavoro(x, k))}${x.preventivoId && x.preventivoId !== p.id ? ' · ha già un preventivo' : ''}</small></span><span class="go">›</span></button>`;
+  const stesso = L.filter(([, x]) => nome && normNome(x.cliente) === nome), altri = L.filter(r => !stesso.includes(r));
+  openSheet('Collega a un lavoro', `
+    ${F('Cerca', '<input id="cercaLavPrev" type="search" placeholder="Cliente o indirizzo…" autocomplete="off">')}
+    <div id="listaLavPrev" class="stack">
+      ${stesso.length ? `<div class="fs-t">Di ${esc(p.cliente?.nome || '')}</div>${stesso.map(riga).join('')}` : ''}
+      ${altri.length ? `<div class="fs-t">${stesso.length ? 'Altri lavori' : 'Lavori in calendario'}</div>${altri.map(riga).join('')}` : ''}
+      ${!L.length ? '<div class="empty small">Nessuna posa o intervento in calendario.</div>' : ''}
+    </div>`, null, { extra: '<button type="button" class="btn" data-act="collegaIndietro">‹ Torna al preventivo</button>' });
+}
+function collegaPrevLavoro(pid, kind, lid) {
+  const p = S.preventivi.find(x => x.id === pid), x = S[kind].find(r => r.id === lid); if (!p || !x) return;
+  // toglie i collegamenti vecchi da entrambe le parti
+  const vecchio = lavoroDiPrev(p); if (vecchio && vecchio.id !== lid) store.put(kindDi(vecchio), vecchio.id, { ...stripId(vecchio), preventivoId: '' });
+  if (x.preventivoId && x.preventivoId !== pid) { const altro = S.preventivi.find(q => q.id === x.preventivoId); if (altro) store.put('preventivi', altro.id, { ...stripId(altro), lavoroId: '', lavoroKind: '' }); }
+  const acc = ['bozza', 'inviato'].includes(p.stato || 'bozza');
+  store.put('preventivi', pid, { ...stripId(p), lavoroId: lid, lavoroKind: kind, stato: acc ? 'accettato' : p.stato });
+  store.put(kind, lid, { ...stripId(x), preventivoId: pid });
+  toast(`Collegato a ${kind === 'lavori' ? 'posa' : 'intervento'} del ${fmtD(kind === 'lavori' ? x.data : x.dataProg || x.data, { day: 'numeric', month: 'short' })}${acc ? ' · preventivo segnato accettato' : ''}`);
+}
+function scollegaPrev(pid) {
+  const p = S.preventivi.find(x => x.id === pid); if (!p) return;
+  const x = lavoroDiPrev(p); if (x) store.put(kindDi(x), x.id, { ...stripId(x), preventivoId: '' });
+  store.put('preventivi', pid, { ...stripId(p), lavoroId: '', lavoroKind: '' });
+}
+/** Nella posa e nell'intervento: preventivo collegato o da collegare. */
+function boxPrevLavoro(x, kind) {
+  const p = x.preventivoId && S.preventivi.find(q => q.id === x.preventivoId);
+  if (p) { const t = totPrev(p); return `<div class="fieldset collega"><span class="fs-t">Preventivo collegato</span><div class="small"><b>N. ${esc(p.numero || '')}</b> del ${fmtD(p.data)} · ${eur(t.imponibile)}${p.firmato ? ' · <span class="chip ok">firmato</span>' : ''}</div>
+    <div class="row"><button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri</button>${kind === 'lavori' && (p.righe || []).length ? '<button type="button" class="btn sm" data-act="vociDaPrev">Usa le voci del preventivo</button>' : ''}<button type="button" class="btn sm ghost" data-act="scollegaLavPrev" data-id="${p.id}">Scollega</button></div></div>`; }
+  const nome = normNome(x.cliente);
+  const opz = [...S.preventivi].filter(q => !q.lavoroId || q.lavoroId === x.id).sort((a, b) => ((normNome(a.cliente?.nome) === nome ? 0 : 1) - (normNome(b.cliente?.nome) === nome ? 0 : 1)) || String(b.data).localeCompare(a.data)).slice(0, 40);
+  if (!opz.length) return '';
+  return `<div class="fieldset collega"><span class="fs-t">Preventivo</span>${F('Collega un preventivo', `<select name="prevColl" id="f_prevColl"><option value="">Nessuno</option>${opz.map(q => `<option value="${q.id}">N. ${esc(q.numero || '')} · ${esc(q.cliente?.nome || '')} · ${eur(totPrev(q).imponibile)}</option>`).join('')}</select>`)}</div>`;
 }
 function salvaPrev(fd) {
   const { p, isNew } = prevCtx;
@@ -3149,6 +3205,22 @@ document.addEventListener('click', async e => {
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
     case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { store.put('preventivi', p.id, { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
+    case 'collegaPrevScegli': {
+      const form = $('#sheetForm'); if (!form.reportValidity()) break;
+      const saved = salvaPrev(new FormData(form)); prevCtx.isNew = false; sheetScegliLavoro(saved); break;
+    }
+    case 'collegaPrev': { const pid = prevCtx?.p?.id; if (!pid) break; collegaPrevLavoro(pid, arg, id); sheetPrev(S.preventivi.find(x => x.id === pid)); break; }
+    case 'collegaIndietro': { const pid = prevCtx?.p?.id; sheetPrev(S.preventivi.find(x => x.id === pid) || prevCtx.p); break; }
+    case 'scollegaPrev': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per scollegare'; break; } const pid = prevCtx?.p?.id; scollegaPrev(pid); toast('Scollegato dal calendario'); sheetPrev(S.preventivi.find(x => x.id === pid)); break; }
+    case 'apriLavPrev': { const x = S[arg].find(r => r.id === id); if (x) (arg === 'lavori' ? sheetLav : sheetInt)(x); break; }
+    case 'apriPrevLav': { const q = S.preventivi.find(r => r.id === id); if (q) sheetPrev(q); break; }
+    case 'scollegaLavPrev': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per scollegare'; break; } scollegaPrev(id); toast('Preventivo scollegato'); b.closest('.collega').remove(); break; }
+    case 'vociDaPrev': {
+      const pid = b.closest('.collega').querySelector('[data-act="apriPrevLav"]').dataset.id, q = S.preventivi.find(r => r.id === pid); if (!q) break;
+      const cal = $('#f_calcolo'); if (cal && cal.value !== 'pezzo') { cal.value = 'pezzo'; cambiaCalcolo('pezzo'); }
+      $('#righe').innerHTML = separaKm(q.righe).altre.map(rigaHtml).join(''); const ur = $('#f_urgApp'); if (ur && q.urgenza) ur.checked = true;
+      aggiornaTotali(); toast('Voci del preventivo copiate nella posa: controlla e salva'); break;
+    }
     case 'firmatoApri': if (prevFirmato) openFile(prevFirmato.path); break;
     case 'firmatoTogli': if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Togli?'; break; } prevFirmato = null; $('#firmatoBox').innerHTML = firmatoHtml(); toast('Tolto: tocca Salva'); break;
     case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { allegati: p.firmato ? [p.firmato] : [], cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
@@ -3208,6 +3280,7 @@ document.addEventListener('change', e => {
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
 document.addEventListener('input', e => {
+  if (e.target.id === 'cercaLavPrev') { const q = normNome(e.target.value); document.querySelectorAll('#listaLavPrev .modchoice').forEach(b => { b.hidden = q && !normNome(b.textContent).includes(q); }); return; }
   const t = e.target;
   if (t.id === 'f_cliente' || t.id === 'f_cnome') aggiornaCliInfo();
   if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
