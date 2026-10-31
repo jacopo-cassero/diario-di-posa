@@ -468,3 +468,14 @@ details.pagati[open] > summary h3::after{content:" ▾"}
 .authlogo{display:flex;justify-content:center;margin:18px 0 6px}
 .authlogo img{height:72px;width:auto;max-width:100%;background:var(--frame);border-radius:14px;padding:12px 18px;box-sizing:content-box}
 .dr-logo{display:block;height:34px;width:auto;margin-bottom:6px}
+.prevdet{border-top:1px solid var(--line);padding-top:6px;display:flex;flex-direction:column;gap:6px}
+.prevdet > summary{display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none;font-size:.92rem}
+.prevdet > summary::-webkit-details-marker{display:none}
+.prevdet > summary > span:first-of-type{flex:1}
+.prevdet > summary::after{content:"▸";color:var(--muted)}
+.prevdet[open] > summary::after{content:"▾"}
+.prevdet .i{width:16px;height:16px}
+.pvoci{display:flex;flex-direction:column;gap:2px;background:var(--sunk);border-radius:8px;padding:8px 10px}
+.pv{display:flex;justify-content:space-between;gap:10px;font-size:.88rem}
+.pv > span:last-child{white-space:nowrap}
+.pv.tot{border-top:1px solid var(--line);padding-top:4px;margin-top:2px;font-weight:700}

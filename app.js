@@ -926,6 +926,7 @@ function lavoroCard(l) {
       ${cart && isUrl(cart.url) ? `<a href="${esc(cart.url)}" target="_blank" rel="noopener">Cartella ${esc(cart.nome)}</a>` : ''}
       ${isUrl(l.cartellaUrl) ? `<a href="${esc(l.cartellaUrl)}" target="_blank" rel="noopener">Cartella cantiere</a>` : ''}
       ${nAll ? `<span class="small muted">${svg('clip', 'i')} ${nAll} ${nAll === 1 ? 'allegato' : 'allegati'}</span>` : ''}</div>` : ''}
+    ${dettaglioPrev(l)}
     <div class="row fattorow">${bottoneFatto('lavori', l)}</div>
   </div>`;
 }
@@ -955,6 +956,23 @@ function sovrapposti(kind, id, giorni, d) {
   const c = altri.find(x => { const p = orarioDi(x); return p && p[0] < mio[1] && fine(x) > mio[0]; });
   return c ? `${c.cliente || 'un altro lavoro'} (${testoOrario(c)})` : '';
 }
+/* ---------- preventivo collegato, visibile dal calendario ---------- */
+function vociPrevHtml(p) {
+  const L = LIST(), t = totali(p, L), um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
+  return `<div class="pvoci">${t.righe.map(r => `<div class="pv"><span>${r.voce === 'sconto' || r.voce === 'arrot' || !um(r) ? '' : `<b class="num">${num(r.qta, 2)}</b> ${um(r)} · `}${esc(r.descr || '')}${r.blindato ? ' (blindato)' : ''}${r.luce ? ' (in luce)' : ''}</span><span class="num">${r.prezzo === '' ? 'da concordare' : eur(totaleRiga(r, L))}</span></div>`).join('') || '<div class="small muted">Nessuna voce.</div>'}
+    ${t.urgenzaPct ? `<div class="pv"><span>Urgenza ${num(t.urgenzaPct)}%</span><span class="num">${eur(t.urgenza)}</span></div>` : ''}
+    <div class="pv tot"><span>${t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale'}</span><span class="num">${eur(t.ivaPct > 0 ? t.totale : t.imponibile)}</span></div></div>`;
+}
+function dettaglioPrev(x) {
+  const p = x.preventivoId && S.preventivi.find(q => q.id === x.preventivoId); if (!p) return '';
+  const t = totPrev(p), st = statoPrev(p.stato);
+  return `<details class="prevdet" ${UI.prevAperti?.has(p.id) ? 'open' : ''} data-pid="${p.id}"><summary data-act="noop">${svg('prev', 'i')} <span>Preventivo <b>N. ${esc(p.numero || '')}</b> · ${eur(t.ivaPct > 0 ? t.totale : t.imponibile)}</span><span class="chip ${p.firmato ? 'ok' : st[2]}">${p.firmato ? 'firmato' : st[1]}</span></summary>
+    ${p.oggetto ? `<div class="small prewrap">${esc(p.oggetto)}</div>` : ''}${p.cantiere ? `<div class="small muted">Cantiere: ${esc(p.cantiere)}</div>` : ''}
+    ${vociPrevHtml(p)}
+    ${p.note ? `<div class="small muted prewrap">${esc(p.note)}</div>` : ''}
+    <div class="row"><button type="button" class="btn sm dark" data-act="prevPdfDir" data-id="${p.id}">PDF</button>${p.firmato ? `<button type="button" class="btn sm" data-act="openPath" data-arg="${esc(p.firmato.path)}">Firmato</button>` : ''}<button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri il preventivo</button></div></details>`;
+}
+document.addEventListener('toggle', e => { const d = e.target; if (!d.classList?.contains('prevdet')) return; UI.prevAperti ||= new Set(); if (d.open) UI.prevAperti.add(d.dataset.pid); else UI.prevAperti.delete(d.dataset.pid); }, true);
 /* ---------- lavori della giornata: fatti e nascosti ---------- */
 const FILTRI_GIORNO = [['dafare', 'Da fare'], ['tutti', 'Tutto'], ['pose', 'Pose'], ['int', 'Interventi']];
 UI.dayFiltro = (() => { try { return localStorage.getItem('ddp:dayFiltro') || 'dafare'; } catch { return 'dafare'; } })();
@@ -988,6 +1006,7 @@ function intCard(i) {
     ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
+    ${dettaglioPrev(i)}
     ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ''}
   </div>`;
 }
@@ -2505,7 +2524,8 @@ function scollegaPrev(pid) {
 function boxPrevLavoro(x, kind) {
   const p = x.preventivoId && S.preventivi.find(q => q.id === x.preventivoId);
   if (p) { const t = totPrev(p); return `<div class="fieldset collega"><span class="fs-t">Preventivo collegato</span><div class="small"><b>N. ${esc(p.numero || '')}</b> del ${fmtD(p.data)} · ${eur(t.imponibile)}${p.firmato ? ' · <span class="chip ok">firmato</span>' : ''}</div>
-    <div class="row"><button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri</button>${kind === 'lavori' && (p.righe || []).length ? '<button type="button" class="btn sm" data-act="vociDaPrev">Usa le voci del preventivo</button>' : ''}<button type="button" class="btn sm ghost" data-act="scollegaLavPrev" data-id="${p.id}">Scollega</button></div></div>`; }
+    ${p.oggetto ? `<div class="small prewrap">${esc(p.oggetto)}</div>` : ''}${vociPrevHtml(p)}
+    <div class="row"><button type="button" class="btn sm dark" data-act="prevPdfDir" data-id="${p.id}">PDF</button>${p.firmato ? `<button type="button" class="btn sm" data-act="openPath" data-arg="${esc(p.firmato.path)}">Firmato</button>` : ''}<button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri</button>${kind === 'lavori' && (p.righe || []).length ? '<button type="button" class="btn sm" data-act="vociDaPrev">Usa le voci del preventivo</button>' : ''}<button type="button" class="btn sm ghost" data-act="scollegaLavPrev" data-id="${p.id}">Scollega</button></div></div>`; }
   const nome = normNome(x.cliente);
   const opz = [...S.preventivi].filter(q => !q.lavoroId || q.lavoroId === x.id).sort((a, b) => ((normNome(a.cliente?.nome) === nome ? 0 : 1) - (normNome(b.cliente?.nome) === nome ? 0 : 1)) || String(b.data).localeCompare(a.data)).slice(0, 40);
   if (!opz.length) return '';
@@ -3213,6 +3233,7 @@ document.addEventListener('click', async e => {
     case 'collegaIndietro': { const pid = prevCtx?.p?.id; sheetPrev(S.preventivi.find(x => x.id === pid) || prevCtx.p); break; }
     case 'scollegaPrev': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per scollegare'; break; } const pid = prevCtx?.p?.id; scollegaPrev(pid); toast('Scollegato dal calendario'); sheetPrev(S.preventivi.find(x => x.id === pid)); break; }
     case 'apriLavPrev': { const x = S[arg].find(r => r.id === id); if (x) (arg === 'lavori' ? sheetLav : sheetInt)(x); break; }
+    case 'prevPdfDir': { const q = S.preventivi.find(r => r.id === id); if (q) apriPdf('preventivo', q, null); break; }
     case 'apriPrevLav': { const q = S.preventivi.find(r => r.id === id); if (q) sheetPrev(q); break; }
     case 'scollegaLavPrev': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per scollegare'; break; } scollegaPrev(id); toast('Preventivo scollegato'); b.closest('.collega').remove(); break; }
     case 'vociDaPrev': {
