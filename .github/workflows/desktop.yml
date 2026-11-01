@@ -19,7 +19,7 @@ jobs:
             cmd: npx electron-builder --win --publish never
             files: desktop/dist/*.exe
           - os: macos-latest
-            cmd: npx electron-builder --mac --publish never
+            cmd: npx electron-builder --mac --publish never && bash ../.github/crea-dmg.sh
             files: desktop/dist/*.dmg
     runs-on: ${{ matrix.os }}
     defaults:

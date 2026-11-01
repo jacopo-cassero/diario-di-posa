@@ -46,7 +46,7 @@
     "mac": {
       "target": [
         {
-          "target": "dmg",
+          "target": "dir",
           "arch": [
             "x64",
             "arm64"
@@ -58,9 +58,6 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
-    },
-    "dmg": {
-      "title": "Diario di Posa"
     }
   }
 }
