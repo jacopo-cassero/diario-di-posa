@@ -30,6 +30,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Spegne Spotlight (evita l'errore di hdiutil sui Mac di GitHub)
+        if: runner.os == 'macOS'
+        run: sudo mdutil -a -i off || true
       - run: npm install --no-audit --no-fund
       - run: ${{ matrix.cmd }}
         env:
