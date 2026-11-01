@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['desktop/**', '.github/workflows/desktop.yml']
+    paths: ['desktop/**', '.github/workflows/desktop.yml', '.github/crea-dmg.sh']
 
 permissions:
   contents: write
