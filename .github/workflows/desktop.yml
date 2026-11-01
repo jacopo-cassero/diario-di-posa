@@ -1,0 +1,49 @@
+name: App per Windows e Mac
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            cmd: npx electron-builder --win --publish never
+            files: desktop/dist/*.exe
+          - os: macos-latest
+            cmd: npx electron-builder --mac --publish never
+            files: desktop/dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - run: ${{ matrix.cmd }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Pubblica nella pagina dei download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-desktop
+          name: Diario di Posa per Windows e Mac
+          body: |
+            Scarica il file per il tuo computer:
+            - **Windows:** Diario-di-Posa-win-x64.exe
+            - **Mac con chip Apple (M1, M2, M3…):** Diario-di-Posa-mac-arm64.dmg
+            - **Mac con processore Intel:** Diario-di-Posa-mac-x64.dmg
+            L'app si aggiorna da sola: i contenuti arrivano sempre dalla versione più recente.
+          files: ${{ matrix.files }}
+          make_latest: true

@@ -1,0 +1,66 @@
+{
+  "name": "diario-di-posa",
+  "productName": "Diario di Posa",
+  "version": "1.0.0",
+  "description": "Diario di Posa · CASSERO INSTALLAZIONI",
+  "author": "CASSERO INSTALLAZIONI di Cassero Jacopo Andrea",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "it.casseroinstallazioni.diariodiposa",
+    "productName": "Diario di Posa",
+    "copyright": "CASSERO INSTALLAZIONI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "icona.png"
+    ],
+    "artifactName": "Diario-di-Posa-${os}-${arch}.${ext}",
+    "publish": null,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icona-win.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Diario di Posa"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "icona.png",
+      "category": "public.app-category.business",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Diario di Posa"
+    }
+  }
+}
