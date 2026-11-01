@@ -5,6 +5,8 @@ cd dist
 for arch in x64 arm64; do
   dir=mac; [ "$arch" = arm64 ] && dir=mac-arm64
   app=$(ls -d "$dir"/*.app | head -1)
+  # firma "ad hoc": senza, sui Mac con chip Apple il programma risulterebbe "danneggiato"
+  codesign --force --deep --sign - "$app"
   stage=$(mktemp -d)
   cp -R "$app" "$stage/"
   ln -s /Applications "$stage/Applicazioni"
