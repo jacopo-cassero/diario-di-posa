@@ -315,7 +315,7 @@ begin
     select jsonb_agg(jsonb_build_object(
       'kind', r.kind, 'id', r.id,
       'data', coalesce(r.data->>'dataProg', r.data->>'data'), 'dataFine', r.data->>'dataFine', 'soloFeriali', r.data->'soloFeriali',
-      'cliente', r.data->>'cliente', 'telefono', r.data->>'telefono', 'indirizzo', r.data->>'indirizzo',
+      'cliente', r.data->>'cliente', 'riferimento', coalesce(r.data->>'riferimento', r.data->>'clienteFinale'), 'telefono', r.data->>'telefono', 'indirizzo', r.data->>'indirizzo',
       'installato', r.data->>'installato', 'descrizione', r.data->>'descrizione', 'note', r.data->>'note',
       'urgente', coalesce((r.data->>'urgenzaApplicata')::boolean, false) or coalesce(r.data->>'urgenza', '') in ('alta', 'critica'),
       'stato', r.data->>'stato',

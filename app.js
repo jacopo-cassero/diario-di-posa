@@ -440,7 +440,7 @@ function cardDip(x) {
   const giorni = x.dataFine && x.dataFine > x.data ? `dal ${fmtD(x.data, { weekday: 'short', day: 'numeric', month: 'short' })} al ${fmtD(x.dataFine, { weekday: 'short', day: 'numeric', month: 'short' })}` : fmtD(x.data, { weekday: 'long', day: 'numeric', month: 'long' });
   const voci = (x.voci || []).filter(v => v.descr);
   const altri = (x.squadra || []).map(s => s.nome).filter(n => n && n !== store.st.accesso.nome);
-  return `<div class="card dipcard"><div class="row between"><span class="t">${x.kind === 'lavori' ? 'Posa' : 'Intervento'} · ${esc(x.cliente || '')}</span>${mio.fatto ? '<span class="chip ok">Fatto</span>' : x.urgente ? '<span class="chip bad">Urgente</span>' : ''}</div>
+  return `<div class="card dipcard"><div class="row between"><span class="t">${x.kind === 'lavori' ? 'Posa' : 'Intervento'} · ${esc(x.cliente || '')}${rifDi(x) ? `<small class="rif">Rif. ${esc(rifDi(x))}</small>` : ''}</span>${mio.fatto ? '<span class="chip ok">Fatto</span>' : x.urgente ? '<span class="chip bad">Urgente</span>' : ''}</div>
     <div class="small"><b>${giorni}</b></div>
     ${x.indirizzo ? `<div class="small">${svg('pin', 'i')} ${esc(x.indirizzo)}</div>` : ''}
     ${x.telefono ? `<div class="small"><a href="tel:${esc(x.telefono)}">${esc(x.telefono)}</a></div>` : ''}
