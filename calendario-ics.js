@@ -50,7 +50,7 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
     const o = orarioDi(x);
     const ini = o ? o[0] : G.inizio, fin = o && o[1] ? o[1] : o ? `${pad(Math.min(+o[0].slice(0, 2) + 2, 23))}${o[0].slice(2)}` : G.fine;
     giorni.forEach((k, i) => evento(`posa-${x.id}-${k}`, [
-      `SUMMARY:${esc(`${x.urgenzaApplicata ? '⚠ ' : ''}Posa · ${x.cliente || 'Cliente'}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
+      `SUMMARY:${esc(`${x.urgenzaApplicata ? '⚠ ' : ''}Posa · ${x.cliente || 'Cliente'}${(x.riferimento || x.clienteFinale) ? ' · ' + (x.riferimento || x.clienteFinale) : ''}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(k)}T${hm(ini)}`,
       `DTEND;TZID=Europe/Rome:${compatto(k)}T${hm(fin)}`,
       ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
@@ -63,7 +63,7 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
     const inizio = hm(o ? o[0] : G.inizio), h = +inizio.slice(0, 2) + 2;
     const fine = o && o[1] ? hm(o[1]) : `${pad(Math.min(h, 23))}${inizio.slice(2)}`;
     evento(`int-${x.id}`, [
-      `SUMMARY:${esc(`${x.urgenza === 'critica' ? '⚠ ' : ''}Intervento · ${x.cliente || 'Cliente'}${x.stato === 'completato' ? ' (fatto)' : ''}`)}`,
+      `SUMMARY:${esc(`${x.urgenza === 'critica' ? '⚠ ' : ''}Intervento · ${x.cliente || 'Cliente'}${x.riferimento ? ' · ' + x.riferimento : ''}${x.stato === 'completato' ? ' (fatto)' : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(x.dataProg)}T${inizio}`,
       `DTEND;TZID=Europe/Rome:${compatto(x.dataProg)}T${fine}`,
       ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),

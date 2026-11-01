@@ -54,6 +54,7 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
   let yl = y, yr = y;
   pdf.text(X0, yl, prev ? 'SPETT.LE' : 'CLIENTE', { size: 7, font: 'bold', color: C.grigio }); yl += 4.5;
   yl = pdf.paragraph(X0, yl, cli.nome || '—', colW, { size: 10.5, font: 'bold', lead: 1.25 });
+  if (doc.riferimento) yl = pdf.paragraph(X0, yl, `Rif.: ${doc.riferimento}`, colW, { size: 9, font: 'bold', lead: 1.25, color: C.grigio });
   for (const t of [cli.indirizzo, [cli.piva && `P. IVA / C.F. ${cli.piva}`, cli.telefono && `Tel. ${cli.telefono}`].filter(Boolean).join(' · '), cli.email].filter(Boolean)) yl = pdf.paragraph(X0, yl, t, colW, { size: 8.5, lead: 1.25 });
   const xr = 110, wr = X1 - xr;
   if (doc.cantiere) { pdf.text(xr, yr, 'CANTIERE', { size: 7, font: 'bold', color: C.grigio }); yr = pdf.paragraph(xr, yr + 4.5, doc.cantiere, wr, { size: 9, lead: 1.25 }) + 1.5; }
@@ -214,6 +215,7 @@ export function docDaLavoro(x, tipoLavoro, azienda) {
     data: L ? x.data : (x.dataProg || x.data),
     dataFine: L ? (x.dataFine || '') : '',
     cliente: { nome: x.cliente, telefono: x.telefono || '' },
+    riferimento: x.riferimento ?? x.clienteFinale ?? '',
     cantiere: x.indirizzo,
     oggetto: L ? x.installato : x.descrizione,
     ore: x.ore,

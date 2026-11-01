@@ -279,7 +279,7 @@ async function confermaPren(p) {
   const s = p.scheda || {};
   const testo = schedaTesto(p);
   const mat = (s.materiale || []).filter(x => x.tipo || x.qta).map(x => `${n2(x.qta) || ''} ${x.tipo || ''}`.trim()).join(', ');
-  const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', amm: 'da_cons' };
+  const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', riferimento: p.cliente || '', amm: 'da_cons' };
   base.clienteId = assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
   let kind, d;
   if (p.tipo === 'posa') { kind = 'lavori'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: 'pezzo', righe: [], installato: mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · ') }; }
@@ -626,7 +626,7 @@ function preventivoDaRichiesta(r) {
   const az = AZ();
   return { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, iva: az.ivaPredefinita, condizioni: true,
     cliente: { nome: m.azienda || m.nome || 'Rivenditore', tipo: 'rivenditore', telefono: m.telefono || '', email: m.email || '' },
-    cantiere: r.indirizzo || '', oggetto: [r.cliente && `Cliente finale: ${r.cliente}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
+    riferimento: r.cliente || '', cantiere: r.indirizzo || '', oggetto: [r.cliente && `Cliente finale: ${r.cliente}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
     righe: s.righe.map(x => { const v = LIST().voci.find(y => y.id === x.voce); return v ? { ...rigaDaVoce(v, x.qta), descr: x.descr } : null; }).filter(Boolean),
     richiestaRiv: r.id };
 }
@@ -836,6 +836,7 @@ function render() {
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
     : st.syncing || pend ? '<span class="st busy">Sincronizzo</span>' : '<span class="st">Sincronizzato</span>';
   $('#matlist').innerHTML = S.magazzino.map(m => `<option value="${esc(m.nome)}"></option>`).join('');
+  { const rl = $('#riflist'); if (rl) rl.innerHTML = [...new Set([...S.lavori, ...S.interventi, ...S.preventivi].map(rifDi).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map(c => `<option value="${esc(c)}"></option>`).join(''); }
   $('#clilist').innerHTML = [...new Set([...S.clienti.map(c => c.nome), ...[...S.lavori, ...S.interventi].map(x => x.cliente)].filter(Boolean))].sort((a, b) => a.localeCompare(b)).map(c => `<option value="${esc(c)}"></option>`).join('');
 
   if (st.auth === 'checking') { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
@@ -945,7 +946,7 @@ function lavoroCard(l) {
   const cart = S.cartelle.find(c => c.id === l.cartellaId);
   const nAll = (l.allegati || []).length;
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
-    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}${rifDi(l) ? `<small class="rif">Rif. ${esc(rifDi(l))}</small>` : ''}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
     ${badgeOrario(l)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
@@ -988,6 +989,8 @@ function sovrapposti(kind, id, giorni, d) {
   const c = altri.find(x => { const p = orarioDi(x); return p && p[0] < mio[1] && fine(x) > mio[0]; });
   return c ? `${c.cliente || 'un altro lavoro'} (${testoOrario(c)})` : '';
 }
+/** Riferimento del lavoro (es. il cliente finale del rivenditore). */
+const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
 /* ---------- preventivo collegato, visibile dal calendario ---------- */
 function vociPrevHtml(p) {
   const L = LIST(), t = totali(p, L), um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
@@ -1032,7 +1035,7 @@ function intCard(i) {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
-    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
     ${i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
     ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
@@ -2043,12 +2046,12 @@ function sheetLav(l, prefill) {
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
+    ${F('Riferimento', inp('riferimento', l.riferimento ?? l.clienteFinale, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>
     <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
     ${campoOrario(l, 'lav')}
     <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
-    ${l.clienteFinale ? `<div class="small muted">Cliente finale: <b>${esc(l.clienteFinale)}</b></div>` : ''}
     ${isNew && l.preventivoId ? '' : boxPrevLavoro(l, 'lavori')}
     ${campoSquadra(l)}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
@@ -2091,7 +2094,7 @@ function sheetLav(l, prefill) {
     if (kmG > 0) righe = [...righe, { ...rigaKm(kmG * gg, n2(fd.get('euroKm'))), descr: gg > 1 ? `Trasferta (${gg} giorni × ${num(kmG, 1)} km)` : 'Trasferta', kmGiorno: kmG, giorni: gg }];
     if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
     if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
-    const d = { data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     { const cur = !isNew && S.lavori.find(x => x.id === l.id); const pv = cur ? cur.preventivoId : l.preventivoId; if (pv) d.preventivoId = pv; }
     if (l.esempio) d.esempio = true;
     if (!isNew) moveStock(l.materiali, +1);
@@ -2137,6 +2140,7 @@ function sheetInt(i, day) {
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
     ${campoCliente('cliente', 'Cliente', i.cliente)}
+    ${F('Riferimento', inp('riferimento', i.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>
     ${F('Telefono', inp('telefono', i.telefono, 'tel'))}
     ${F('Indirizzo', inp('indirizzo', i.indirizzo))}
@@ -2155,7 +2159,7 @@ function sheetInt(i, day) {
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
+    const d = { riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (i.esempio) d.esempio = true;
     if (!isNew) moveStock(i.materiali, +1);
@@ -2228,7 +2232,7 @@ function testoConsSingolo(x, kind, iva, adj = leggiAgg()) {
   const riga = r => r.prezzo === '' ? `- ${r.descr}: da concordare` : (r.voce === 'sconto' || r.voce === 'arrot') ? `- ${r.descr}: ${eur(totaleRiga(r, lis))}` : `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`.replace(/  +/g, ' ');
   if ($('#csInfo')) infoAgg(totali(doc0, lis), doc, t);
   return `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
-Cliente: ${x.cliente || ''}
+Cliente: ${x.cliente || ''}${rifDi(x) ? `\nRiferimento: ${rifDi(x)}` : ''}
 Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
 Cantiere: ${x.indirizzo || '—'}
 
@@ -2497,6 +2501,7 @@ function sheetPrev(p) {
     ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
     <div class="fieldset"><span class="fs-t">Cliente</span>
       ${campoCliente('cnome', 'Nome o ragione sociale', c.nome)}
+      ${F('Riferimento', inp('riferimento', p.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale)" list="riflist"'))}
       <div class="g2">${F('Tipo di cliente', sel('ctipo', [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']], c.tipo || 'finale'))}</div>
       <div class="cliline small" id="cliInfo"></div>
       ${F('Indirizzo', inp('cindirizzo', c.indirizzo))}
@@ -2574,7 +2579,7 @@ function salvaPrev(fd) {
   const d = { ...stripId(p),
     numero: fd.get('numero').trim(), data: fd.get('data'), validita: n2(fd.get('validita')), stato: fd.get('stato'),
     cliente: { nome: fd.get('cnome').trim(), tipo: fd.get('ctipo'), indirizzo: fd.get('cindirizzo').trim(), piva: fd.get('cpiva').trim(), telefono: fd.get('ctel').trim(), email: fd.get('cemail').trim() },
-    cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd), firmato: prevFirmato || null,
+    riferimento: String(fd.get('riferimento') || '').trim(), cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd), firmato: prevFirmato || null,
     urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
   d.clienteId = assicuraCliente(d.cliente.nome, { tipo: d.cliente.tipo, indirizzo: d.cliente.indirizzo, piva: d.cliente.piva, telefono: d.cliente.telefono, email: d.cliente.email });
@@ -2796,10 +2801,11 @@ function docMulti(sc, iva) {
     const righe = d.righe.map(r => ({ ...r }));
     if (t.urgenzaPct) righe.push({ descr: `Maggiorazione urgenza ${num(t.urgenzaPct)}%`, unita: 'corpo', qta: 1, prezzo: t.urgenza });
     ore += n2(j.x.ore);
-    return { titolo: `${fmtD(j.d, { weekday: 'long', day: 'numeric', month: 'long' })} · ${j.kind === 'lavori' ? 'Posa' : 'Intervento'}${j.x.indirizzo ? ' · ' + j.x.indirizzo : ''}`, righe };
+    return { titolo: `${fmtD(j.d, { weekday: 'long', day: 'numeric', month: 'long' })} · ${j.kind === 'lavori' ? 'Posa' : 'Intervento'}${rifDi(j.x) ? ' · Rif. ' + rifDi(j.x) : ''}${j.x.indirizzo ? ' · ' + j.x.indirizzo : ''}`, righe };
   });
   const indirizzi = [...new Set(sc.map(j => j.x.indirizzo).filter(Boolean))];
-  return { data: sc[0].d, dataFine: sc[sc.length - 1].d, cliente: { nome: sc[0].x.cliente || '', telefono: sc[0].x.telefono || '' }, cantiere: indirizzi.length === 1 ? indirizzi[0] : '', oggetto: `${sc.length} ${sc.length === 1 ? 'giornata' : 'giornate'} di lavoro`, ore, righe: gruppi.flatMap(g => g.righe), gruppi, iva, note: '' };
+  const rifs = [...new Set(sc.map(j => rifDi(j.x)).filter(Boolean))];
+  return { riferimento: rifs.join(', '), data: sc[0].d, dataFine: sc[sc.length - 1].d, cliente: { nome: sc[0].x.cliente || '', telefono: sc[0].x.telefono || '' }, cantiere: indirizzi.length === 1 ? indirizzi[0] : '', oggetto: `${sc.length} ${sc.length === 1 ? 'giornata' : 'giornate'} di lavoro`, ore, righe: gruppi.flatMap(g => g.righe), gruppi, iva, note: '' };
 }
 function aggiornaCM() {
   const pre = $('#consTxt'); if (!pre) return;
@@ -3282,7 +3288,7 @@ document.addEventListener('click', async e => {
     }
     case 'firmatoApri': if (prevFirmato) openFile(prevFirmato.path); break;
     case 'firmatoTogli': if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Togli?'; break; } prevFirmato = null; $('#firmatoBox').innerHTML = firmatoHtml(); toast('Tolto: tocca Salva'); break;
-    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { allegati: p.firmato ? [p.firmato] : [], cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
+    case 'pianifica': { const p = prevCtx?.p; if (!p) break; sheetLav(null, { riferimento: p.riferimento || '', allegati: p.firmato ? [p.firmato] : [], cliente: p.cliente?.nome || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', calcolo: 'pezzo', righe: p.righe || [], importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – '), preventivoId: p.id }); break; }
     case 'editListino': sheetListino(); break;
     case 'editAzienda': sheetAzienda(); break;
     case 'addL': b.insertAdjacentHTML('beforebegin', listinoRow({ id: 'v' + Date.now().toString(36), nome: '', variante: '', prezzo: '', unita: 'pz' })); b.previousElementSibling.querySelector('[name="ln"]').focus(); break;
