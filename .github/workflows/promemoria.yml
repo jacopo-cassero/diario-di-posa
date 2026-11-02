@@ -2,7 +2,7 @@ name: Promemoria del mattino
 
 on:
   schedule:
-    - cron: '7 * * * *'   # ogni ora: manda i promemoria agli orari scelti nell'app (GitHub può ritardare qualche minuto)
+    - cron: '*/5 * * * *'   # ogni 5 minuti: avvisi di prenotazioni e preventivi quasi subito; i promemoria del giorno partono una volta sola all'ora scelta
   workflow_dispatch:
     inputs:
       prova:
