@@ -46,3 +46,13 @@ drop trigger if exists avvisa_subito on public.richieste_preventivo;
 create trigger avvisa_subito after insert on public.richieste_preventivo for each row execute function public._avvisa_subito();
 drop trigger if exists avvisa_subito on public.richieste_accesso;
 create trigger avvisa_subito after insert on public.richieste_accesso for each row execute function public._avvisa_subito();
+
+-- avvisi al rivenditore quando confermi, sposti, rifiuti o annulli, e quando il preventivo è pronto
+drop trigger if exists avvisa_rivenditore on public.prenotazioni;
+create trigger avvisa_rivenditore after update of stato, data, data_fine on public.prenotazioni for each row
+  when (new.stato in ('confermata', 'rifiutata') and (old.stato, old.data, old.data_fine) is distinct from (new.stato, new.data, new.data_fine))
+  execute function public._avvisa_subito();
+drop trigger if exists avvisa_rivenditore on public.richieste_preventivo;
+create trigger avvisa_rivenditore after update of stato on public.richieste_preventivo for each row
+  when (new.stato in ('inviato', 'chiusa') and old.stato is distinct from new.stato)
+  execute function public._avvisa_subito();

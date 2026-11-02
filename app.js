@@ -358,6 +358,7 @@ function rRivenditore() {
     <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
     ${RIV.da ? `<div class="selbar"><div><b>${RIV.a && RIV.a !== RIV.da ? `Dal ${fmtD(RIV.da, { day: 'numeric', month: 'short' })} al ${fmtD(RIV.a, { day: 'numeric', month: 'short' })}` : fmtD(RIV.da, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div class="small">${lavorative} ${lavorative === 1 ? 'giornata' : 'giornate'} di lavoro${RIV.a ? '' : ' · tocca un altro giorno per prenderne di più'}</div></div><div class="row"><button class="btn sm" data-act="rivAnnullaSel" type="button">Annulla</button><button class="btn sm primary" data-act="rivPrenota" type="button">Prenota</button></div></div>` : ''}
   </section>
+  ${['granted', 'unsupported', 'notready'].includes(pushState()) ? '' : `<section class="panel stack"><div><b>Avvisi sul telefono</b><div class="small muted">Ti arriva una notifica quando confermo, sposto o annullo una prenotazione e quando il tuo preventivo è pronto.</div></div>${statoDispositivo()}</section>`}
   <section class="stack"><h3>Le tue prenotazioni</h3>
     ${attive.map(cardMiaPren).join('') || `<div class="empty small">Nessuna prenotazione in corso.</div>`}
     ${vecchie.length ? `<details><summary class="small muted">Precedenti e annullate</summary><div class="stack">${vecchie.map(cardMiaPren).join('')}</div></details>` : ''}

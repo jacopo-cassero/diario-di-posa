@@ -113,7 +113,47 @@ for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuovi
   scrivi(`Accessi: ${R.length} richieste e ${P.length} prenotazioni segnalate`);
 }
 
+// Avvisi al rivenditore: prenotazione confermata, spostata, rifiutata o annullata; preventivo pronto o richiesta chiusa.
+// (avviso_riv ricorda l'ultima situazione già comunicata, così ogni cambiamento si avvisa una volta sola)
+async function segnaAvvisoRiv(tab, id, firma) {
+  await fetch(`${base}/${tab}?id=eq.${id}`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ avviso_riv: firma }) }).catch(() => {});
+}
+const TIPO = { posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' };
+const quando = p => p.data_fine > p.data ? `dal ${dataIt(p.data)} al ${dataIt(p.data_fine)}` : `il ${dataIt(p.data)}`;
+const cambiPren = await leggiSeEsiste('/prenotazioni?stato=in.(confermata,rifiutata)&select=id,rivenditore,data,data_fine,tipo,cliente,stato,risposta,avviso_riv');
+for (const p of cambiPren || []) {
+  const firma = `${p.stato}|${p.data}|${p.data_fine}`;
+  if (p.avviso_riv === firma) continue;
+  const chi = p.cliente ? ` · ${p.cliente}` : '';
+  let title, body;
+  if (p.stato === 'confermata') {
+    const prima = String(p.avviso_riv || '').startsWith('confermata|');
+    title = prima ? 'Prenotazione spostata' : 'Prenotazione confermata';
+    body = `${TIPO[p.tipo] || 'Lavoro'} ${quando(p)}${chi}`;
+  } else {
+    const annullata = /^Annullata dall'installatore/.test(p.risposta || '');
+    const motivo = String(p.risposta || '').replace(/^Annullata dall'installatore:?\s*/, '');
+    title = annullata ? 'Data annullata' : 'Prenotazione non accettata';
+    body = `${TIPO[p.tipo] || 'Lavoro'} ${quando(p)}${chi}${motivo ? '\n' + motivo : ''}`;
+  }
+  await manda(p.rivenditore, JSON.stringify({ title, body, url: './', tag: `pren-${p.id}` }));
+  await segnaAvvisoRiv('prenotazioni', p.id, firma);
+  scrivi(`Rivenditore avvisato: ${title.toLowerCase()}`);
+}
+const cambiPrev = await leggiSeEsiste('/richieste_preventivo?stato=in.(inviato,chiusa)&select=id,rivenditore,indirizzo,cliente,stato,risposta,avviso_riv');
+for (const q of cambiPrev || []) {
+  if (q.avviso_riv === q.stato) continue;
+  const dove = q.cliente || q.indirizzo || 'la tua richiesta';
+  if (q.stato === 'inviato') await manda(q.rivenditore, JSON.stringify({ title: 'Preventivo pronto', body: `${dove}${q.risposta ? '\n' + q.risposta : ''}`, url: './', tag: `prev-${q.id}` }));
+  else if (q.avviso_riv !== 'inviato') await manda(q.rivenditore, JSON.stringify({ title: 'Richiesta di preventivo chiusa', body: `${dove}${q.risposta ? '\n' + q.risposta : ''}`, url: './', tag: `prev-${q.id}` }));
+  await segnaAvvisoRiv('richieste_preventivo', q.id, q.stato);
+  scrivi(`Rivenditore avvisato: preventivo ${q.stato}`);
+}
+
+// rivenditori e dipendenti ricevono solo gli avvisi che li riguardano, non i promemoria del titolare
+const soloAvvisi = new Set(((await leggiSeEsiste('/membri?ruolo=in.(rivenditore,dipendente)&select=user_id')) || []).map(m => m.user_id));
 for (const uid of users) {
+  if (soloAvvisi.has(uid)) continue;
   const rows = [];
   for (let from = 0; ; from += 1000) {
     const page = await get(`/records?user_id=eq.${uid}&deleted=eq.false&select=kind,id,data`, { Range: `${from}-${from + 999}` });
