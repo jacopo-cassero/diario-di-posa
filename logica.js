@@ -86,8 +86,6 @@ export function promemoria(S, today = oggi(), momento = 'app') {
     const di = all.filter(x => x.amm === 'fatt');
     if (N.incassi && di.length) out.push({ lvl: 'in', txt: `${di.length} ${di.length === 1 ? 'fattura da incassare' : 'fatture da incassare'}`, sub: eur(sum(di, x => x.importo)), act: 'fatt' });
 
-    const low = (S.magazzino || []).filter(m => n2(m.soglia) > 0 && n2(m.qta) <= n2(m.soglia));
-    if (N.materiale && low.length) out.push({ lvl: 'warn', txt: 'Materiale da riordinare', sub: low.map(m => m.nome).slice(0, 3).join(', ') + (low.length > 3 ? ` e altri ${low.length - 3}` : ''), act: 'mag' });
 
     const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
     if (N.urgenti && urg.length) out.push({ lvl: 'bad', txt: `${urg.length} ${urg.length === 1 ? 'intervento molto urgente' : 'interventi molto urgenti'} aperti`, sub: urg.map(i => i.cliente).slice(0, 2).join(', '), act: 'tab', arg: 'int' });

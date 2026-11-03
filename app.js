@@ -59,7 +59,7 @@ function readHash() {
   const h = location.hash.slice(1);
   if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste'].includes(h)) UI.tab = h;
   if (h === 'fatture') { UI.tab = 'conti'; UI.seg = 'fatt'; }
-  if (h === 'magazzino') { UI.tab = 'conti'; UI.seg = 'mag'; }
+  if (h === 'magazzino') { UI.tab = 'an'; }
 }
 readHash();
 window.addEventListener('hashchange', () => { readHash(); render(); });
@@ -796,20 +796,72 @@ document.addEventListener('click', async e => {
 });
 
 
-/* ---------- magazzino ---------- */
-function moveStock(items, sign, withCost) {
-  for (const it of items || []) {
-    const q = n2(it.qta); if (!it.nome || !q) continue;
-    const id = slug(it.nome);
-    const cur = S.magazzino.find(m => m.id === id);
-    const data = { nome: cur?.nome || String(it.nome).trim(), unita: cur?.unita || it.unita || 'pz', qta: Math.round(((cur?.qta || 0) + sign * q) * 100) / 100, costoMedio: cur?.costoMedio || 0, soglia: cur?.soglia || 0 };
-    if (cur?.esempio) data.esempio = true;
-    if (withCost && sign > 0 && n2(it.prezzoUnit) > 0) {
-      const oq = Math.max(cur?.qta || 0, 0);
-      data.costoMedio = Math.round(((oq * (cur?.costoMedio || 0)) + q * n2(it.prezzoUnit)) / (oq + q) * 100) / 100;
+/* ---------- materiale usato ---------- */
+function normNome(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+/** Prezzo unitario di un materiale: dall'ultimo acquisto registrato con le righe (o dal vecchio magazzino). */
+function prezzoMat(nome) {
+  const k = normNome(nome); let best = null;
+  for (const m of S.movimenti) if (m.categoria === 'materiale') for (const r of m.righe || []) if (normNome(r.nome) === k && n2(r.prezzoUnit) > 0 && (!best || String(m.data) > best.d)) best = { d: String(m.data), p: n2(r.prezzoUnit) };
+  return best ? best.p : n2(S.magazzino.find(x => normNome(x.nome) === k)?.costoMedio);
+}
+/** Unità di misura di un materiale, se la conosco dagli acquisti. */
+function unitaMat(nome) {
+  const k = normNome(nome);
+  for (const m of S.movimenti) for (const r of m.righe || []) if (normNome(r.nome) === k && r.unita) return r.unita;
+  return S.magazzino.find(x => normNome(x.nome) === k)?.unita || '';
+}
+/** Nomi di materiale già usati: per i suggerimenti mentre scrivi. */
+function nomiMateriale() {
+  const c = new Map();
+  for (const x of [...S.lavori, ...S.interventi]) for (const m of x.materiali || []) if (m.nome) { const k = normNome(m.nome); const v = c.get(k) || { nome: m.nome.trim(), n: 0 }; v.n++; c.set(k, v); }
+  for (const x of [...S.movimenti.flatMap(m => m.righe || []), ...S.magazzino]) if (x.nome && !c.has(normNome(x.nome))) c.set(normNome(x.nome), { nome: x.nome.trim(), n: 0 });
+  return [...c.values()].sort((a, b) => b.n - a.n || a.nome.localeCompare(b.nome)).map(v => v.nome);
+}
+/** Prodotti posati in un lavoro (voci al pezzo del listino), per dividere il materiale tra i prodotti. */
+function prodottiDi(l) {
+  const voci = LIST().voci;
+  const pr = (l.righe || []).filter(r => r.unita === 'pz' && n2(r.qta) > 0).map(r => ({ r, v: voci.find(x => x.id === r.voce) })).filter(x => x.v && !GRUPPI_NON_PEZZI.includes(x.v.gruppo))
+    .map(({ r, v }) => ({ k: (r.descr || [v.nome, v.variante].filter(Boolean).join(' · ')).trim(), q: n2(r.qta) }));
+  if (!pr.length && n2(l.pezzi) > 0) pr.push({ k: 'Serramenti (senza voci del listino)', q: n2(l.pezzi) });
+  return pr;
+}
+/**
+ * Quanto materiale serve per ogni prodotto, dai cantieri in cui hai segnato il materiale usato.
+ * Se in un cantiere hai posato più prodotti, il materiale si divide in proporzione ai pezzi.
+ */
+function materialePerProdotto(lavori = S.lavori) {
+  const P = new Map();
+  for (const l of lavori) {
+    const mats = (l.materiali || []).filter(m => m.nome && n2(m.qta) > 0); if (!mats.length) continue;
+    const pr = prodottiDi(l); const tot = sum(pr, p => p.q); if (!tot) continue;
+    const solo = new Set(pr.map(p => p.k)).size === 1;
+    for (const p of pr) {
+      const x = P.get(p.k) || { nome: p.k, pezzi: 0, cantieri: new Set(), puri: 0, mat: new Map() };
+      x.pezzi += p.q; x.cantieri.add(l.id); if (solo) x.puri++;
+      for (const m of mats) { const k = normNome(m.nome); const v = x.mat.get(k) || { nome: m.nome.trim(), q: 0 }; v.q += n2(m.qta) * p.q / tot; x.mat.set(k, v); }
+      P.set(p.k, x);
     }
-    store.put('magazzino', id, data);
   }
+  return [...P.values()].map(x => ({ ...x, n: x.cantieri.size, mat: [...x.mat.values()].map(m => ({ ...m, perPezzo: m.q / x.pezzi })).sort((a, b) => b.perPezzo - a.perPezzo) })).sort((a, b) => b.pezzi - a.pezzi);
+}
+/** Materiale stimato per le voci di una posa, dai consumi dei cantieri passati. */
+function stimaMateriale(righe) {
+  const tab = new Map(materialePerProdotto().map(p => [p.nome, p]));
+  const out = new Map(); let coperti = 0, totali = 0;
+  for (const p of prodottiDi({ righe })) {
+    totali += p.q; const t = tab.get(p.k); if (!t) continue; coperti += p.q;
+    for (const m of t.mat) { const k = normNome(m.nome); const v = out.get(k) || { nome: m.nome, q: 0 }; v.q += m.perPezzo * p.q; out.set(k, v); }
+  }
+  return { mat: [...out.values()].sort((a, b) => b.q - a.q), coperti, totali };
+}
+function aggiornaStimaMat(righe) {
+  const box = $('#stimaMat'); if (!box) return;
+  const st = stimaMateriale(righe);
+  box.hidden = !st.mat.length;
+  if (!st.mat.length) return;
+  box.innerHTML = `<div class="row between"><span class="small"><b>Materiale che ti serve, circa</b>${st.coperti < st.totali ? ` <span class="muted">(stima per ${num(st.coperti, 0)} pezzi su ${num(st.totali, 0)})</span>` : ''}</span><button type="button" class="btn sm" data-act="usaStimaMat">Usa la stima</button></div>
+    <div class="small muted">${st.mat.map(m => `${esc(m.nome)} <b class="num">${num(m.q, 1)}</b>${unitaMat(m.nome) ? ' ' + esc(unitaMat(m.nome)) : ''}`).join(' · ')}</div>`;
+  box._stima = st.mat;
 }
 const LIST = () => (S.listino && Array.isArray(S.listino.voci) ? { ...LISTINO_BASE, ...S.listino } : LISTINO_BASE);
 const AZ = () => ({ ...AZIENDA_BASE, ...(S.azienda || {}) });
@@ -820,7 +872,7 @@ async function caricaImmagini() {
     try { const r = await fetch(f); if (r.ok) IMG[k] = new Uint8Array(await r.arrayBuffer()); } catch {}
   }
 }
-const costoMat = list => sum(list || [], m => { const s = S.magazzino.find(x => x.id === slug(m.nome)); return n2(m.qta) * (s?.costoMedio || 0); });
+const costoMat = list => sum(list || [], m => n2(m.qta) * prezzoMat(m.nome));
 
 /* ---------- render ---------- */
 function render() {
@@ -836,7 +888,7 @@ function render() {
   $('#sync').innerHTML = logged && !pieno ? '' : st.mode === 'demo' ? '<span class="st off">Prova</span>'
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
     : st.syncing || pend ? '<span class="st busy">Sincronizzo</span>' : '<span class="st">Sincronizzato</span>';
-  $('#matlist').innerHTML = S.magazzino.map(m => `<option value="${esc(m.nome)}"></option>`).join('');
+  $('#matlist').innerHTML = nomiMateriale().map(n => `<option value="${esc(n)}"></option>`).join('');
   { const rl = $('#riflist'); if (rl) rl.innerHTML = [...new Set([...S.lavori, ...S.interventi, ...S.preventivi].map(rifDi).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map(c => `<option value="${esc(c)}"></option>`).join(''); }
   $('#clilist').innerHTML = [...new Set([...S.clienti.map(c => c.nome), ...[...S.lavori, ...S.interventi].map(x => x.cliente)].filter(Boolean))].sort((a, b) => a.localeCompare(b)).map(c => `<option value="${esc(c)}"></option>`).join('');
 
@@ -1104,7 +1156,8 @@ function rInt() {
 }
 
 function rConti() {
-  const seg = [['mov', 'Spese'], ['mag', 'Magazzino'], ['fatt', 'Fatture']];
+  const seg = [['mov', 'Spese'], ['fatt', 'Fatture']];
+  if (UI.seg === 'mag') UI.seg = 'mov';
   let h = `<div class="row between"><h2>Conti</h2></div><div class="seg" role="group" aria-label="Sezione">${seg.map(([k, l]) => `<button data-act="seg" data-arg="${k}" aria-pressed="${UI.seg === k}" type="button">${l}</button>`).join('')}</div>`;
   if (UI.seg === 'mov') {
     const L = S.movimenti.filter(m => (m.data || '').startsWith(UI.cMonth)).sort((a, b) => String(b.data).localeCompare(a.data));
@@ -1117,16 +1170,8 @@ function rConti() {
     <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><div class="l">Spese del mese</div><div class="v">${eur(out)}</div></div><div class="kpi"><div class="l">Altre entrate</div><div class="v">${eur(inn)}</div></div></div>
     <div class="panel">${L.map(m => `<button class="list-line mov" style="width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left" data-act="editMov" data-id="${m.id}" type="button">
       <span class="ico">${m.foto ? `<img data-file="${esc(m.foto)}" alt="">` : svg(m.categoria === 'materiale' ? 'box' : m.categoria === 'carburante' ? 'fuel' : m.categoria === 'furgone' ? 'van' : 'doc')}</span>
-      <span class="mid"><span class="t" style="display:block;font-weight:600">${esc(m.fornitore || m.descrizione || catName(m.categoria))}</span><span class="small muted">${fmtD(m.data, { day: 'numeric', month: 'short' })} · ${esc(catName(m.categoria))}${m.magazzino ? ' · in magazzino' : ''}${m.esempio ? ' · esempio' : ''}</span></span>
-      <span class="price amount ${m.tipo === 'entrata' ? 'pos' : 'neg'}">${m.tipo === 'entrata' ? '+' : '−'}${eur(m.importo)}</span></button>`).join('') || `<div class="muted small" style="padding:6px 0">Nessuna spesa in ${monthName(UI.cMonth)}. Fotografa uno scontrino: l'app prova a leggere importo, data e fornitore, e se è materiale carica il magazzino.</div>`}</div>`;
-  }
-  if (UI.seg === 'mag') {
-    const L = [...S.magazzino].sort((a, b) => a.nome.localeCompare(b.nome));
-    h += `<div class="row between"><span class="muted small">Valore in magazzino <b class="num">${eur(sum(L, m => Math.max(n2(m.qta), 0) * n2(m.costoMedio)))}</b></span><label class="btn sm primary" for="fatturaIn2">${svg('doc', 'i')} Carica fattura<input id="fatturaIn2" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label><button class="btn sm" data-act="newMag" type="button">${svg('plus')} Materiale</button></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Giacenza</th><th class="r">Costo medio</th><th>Stato</th></tr></thead><tbody>
-    ${L.map(m => { const low = n2(m.soglia) > 0 && n2(m.qta) <= n2(m.soglia); return `<tr data-act="editMag" data-id="${m.id}" style="cursor:pointer"><td><b>${esc(m.nome)}</b></td><td class="r num">${num(m.qta)} ${esc(m.unita)}</td><td class="r num">${eur(m.costoMedio)}</td><td>${n2(m.qta) < 0 ? '<span class="chip bad">Negativo</span>' : low ? '<span class="chip warn">Da riordinare</span>' : '<span class="chip ok">Ok</span>'}</td></tr>`; }).join('') || `<tr><td colspan="4" class="muted">Il magazzino si riempie da solo quando registri un acquisto di materiale.</td></tr>`}
-    </tbody></table></div>
-    <div class="small muted">La giacenza sale con gli acquisti e scende con il materiale usato nelle pose e negli interventi. Tocca una riga per correggerla o impostare la scorta minima.</div>`;
+      <span class="mid"><span class="t" style="display:block;font-weight:600">${esc(m.fornitore || m.descrizione || catName(m.categoria))}</span><span class="small muted">${fmtD(m.data, { day: 'numeric', month: 'short' })} · ${esc(catName(m.categoria))}${m.esempio ? ' · esempio' : ''}</span></span>
+      <span class="price amount ${m.tipo === 'entrata' ? 'pos' : 'neg'}">${m.tipo === 'entrata' ? '+' : '−'}${eur(m.importo)}</span></button>`).join('') || `<div class="muted small" style="padding:6px 0">Nessuna spesa in ${monthName(UI.cMonth)}. Fotografa uno scontrino: l'app prova a leggere importo, data e fornitore.</div>`}</div>`;
   }
   if (UI.seg === 'fatt') {
     const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
@@ -1197,14 +1242,6 @@ function rAn() {
   for (let v = 0; v <= top; v += step) ch += `<line class="grid" x1="${pl}" x2="${W - 6}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${pl - 6}" y="${sy(v) + 3}" text-anchor="end">${v >= 1000 ? num(v / 1000) + 'k' : v}</text>`;
   months.forEach((m, i) => { const x = pl + i * cw + cw * .15, bw = cw * .33; ch += `<rect class="e" x="${x}" y="${sy(m.e)}" width="${bw}" height="${Math.max(0, sy(0) - sy(m.e))}" rx="1.5"/><rect class="u" x="${x + bw + 1}" y="${sy(m.u)}" width="${bw}" height="${Math.max(0, sy(0) - sy(m.u))}" rx="1.5"/><text x="${pl + i * cw + cw / 2}" y="${H - 6}" text-anchor="middle">${MESI[i].slice(0, 3)}</text>`; });
   ch += '</svg>';
-  const usedAll = [...S.lavori.filter(l => l.data <= TODAY).map(l => ({ d: l.data, m: l.materiali })), ...S.interventi.map(i => ({ d: i.dataProg || i.data, m: i.materiali }))];
-  const matRows = S.magazzino.map(s => {
-    const used = sum(usedAll.filter(u => inPeriod(u.d)), u => sum((u.m || []).filter(m => slug(m.nome) === s.id), m => m.qta));
-    const buys = S.movimenti.filter(m => m.magazzino && (m.righe || []).some(r => slug(r.nome) === s.id)).map(m => m.data).filter(Boolean).sort();
-    const bought = sum(S.movimenti.filter(m => m.magazzino && inPeriod(m.data)), m => sum((m.righe || []).filter(r => slug(r.nome) === s.id), r => r.qta));
-    const gaps = buys.slice(1).map((d, i) => (pd(d) - pd(buys[i])) / 864e5);
-    return { s, used, bought, ordini: buys.length, ogni: gaps.length ? Math.round(sum(gaps, x => x) / gaps.length) : null, ultimo: buys[buys.length - 1] };
-  }).filter(r => r.used || r.bought || r.ordini).sort((a, b) => b.used * n2(b.s.costoMedio) - a.used * n2(a.s.costoMedio));
   const inc = lav.filter(l => n2(l.importo) > 0).map(l => ({ l, c: costoMat(l.materiali) })).map(x => ({ ...x, p: x.c / n2(x.l.importo) * 100 }));
   const incMed = inc.length ? sum(inc, x => x.c) / sum(inc, x => x.l.importo) * 100 : 0;
   return `<div class="row between"><h2>Analisi</h2><button class="btn sm" data-act="setAnalisi" type="button">Scegli statistiche</button></div><div class="row">
@@ -1230,15 +1267,11 @@ function rAn() {
   ${A.trasferte ? statTrasferte(lav, ints) : ''}
   ${A.materiale ? `
   <section class="stack"><div class="row between"><h3>Quanto incide il materiale</h3><span class="chip ${incMed > 15 ? 'warn' : 'ok'} num">media ${num(incMed)}%</span></div>
-    <div class="small muted">Costo del materiale usato in ogni posa (al costo medio di magazzino) rispetto a quanto incassato. Nel periodo: <b class="num">${eur(sum(inc, x => x.c))}</b> di materiale.</div>
+    <div class="small muted">Costo del materiale usato in ogni posa (ai prezzi dell'ultimo acquisto) rispetto a quanto incassato. Nel periodo: <b class="num">${eur(sum(inc, x => x.c))}</b> di materiale.</div>
     ${inc.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cantiere</th><th class="r">Incasso</th><th class="r">Materiale</th><th class="r">Incidenza</th><th class="r">€ / ora</th></tr></thead><tbody>${inc.sort((a, b) => String(b.l.data).localeCompare(a.l.data)).slice(0, 15).map(x => `<tr><td>${fmtD(x.l.data, { day: 'numeric', month: 'short' })} · ${esc(x.l.cliente)}</td><td class="r num">${eur(x.l.importo)}</td><td class="r num">${eur(x.c)}</td><td class="r num">${num(x.p)}%</td><td class="r num">${n2(x.l.ore) ? eur((n2(x.l.importo) - x.c) / n2(x.l.ore)) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Segna importo e materiale usato nelle pose per vedere l\'incidenza.</div>'}
   </section>
   ` : ''}
-  ${A.consumo ? `
-  <section class="stack"><h3>Consumo e ordini materiale</h3>
-    ${matRows.length ? `<div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Usato</th><th class="r">Comprato</th><th class="r">Ordini</th><th class="r">Ordini ogni</th><th>Ultimo</th></tr></thead><tbody>${matRows.map(r => `<tr><td><b>${esc(r.s.nome)}</b></td><td class="r num">${num(r.used)} ${esc(r.s.unita)}</td><td class="r num">${num(r.bought)} ${esc(r.s.unita)}</td><td class="r num">${r.ordini}</td><td class="r num">${r.ogni !== null ? r.ogni + ' gg' : '—'}</td><td class="num">${r.ultimo ? fmtD(r.ultimo, { day: 'numeric', month: 'short' }) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Qui vedrai quanto materiale usi e ogni quanti giorni lo riordini, appena registri acquisti e pose.</div>'}
-  </section>
-  ` : ''}
+  ${A.consumo ? statMateriale(lav, ints) : ''}
   ${Object.values(A).some(Boolean) ? '' : `<div class="empty">Nessuna statistica scelta. <button class="btn sm" data-act="setAnalisi" type="button">Scegli cosa vedere</button></div>`}
   <div class="row"><button class="btn sm" data-act="csv" data-arg="movimenti" type="button">Esporta spese (CSV)</button><button class="btn sm" data-act="csv" data-arg="lavori" type="button">Esporta lavori (CSV)</button></div>
   <div class="small muted">I file CSV si aprono con Excel o Numbers: utili per il commercialista.</div>`;
@@ -1725,7 +1758,6 @@ function sheetNotifiche() {
       <div class="togrow">${tog('preventivi', 'Preventivi senza risposta', N.preventivi)}${selN('preventiviGiorni', [[3, 'dopo 3 gg'], [5, 'dopo 5 gg'], [7, 'dopo 7 gg'], [10, 'dopo 10 gg'], [15, 'dopo 15 gg']], N.preventiviGiorni)}</div>
       <div class="g2" style="margin-top:6px">${F('Promemoria scontrini', selN('scontrini', [['mai', 'Mai'], ['sera', 'Ogni sera lavorativa'], ['settimanale', 'Una volta a settimana']], N.scontrini))}<label class="f" id="wrapScG" ${N.scontrini === 'settimanale' ? '' : 'hidden'}><span>Il giorno</span>${selN('scontriniGiorno', GIORNI_BREVI.map(([d]) => [d, NOMI_GIORNI[d]]), N.scontriniGiorno)}</label></div>
     </div>
-    <div class="fieldset"><span class="fs-t">Magazzino</span>${tog('materiale', 'Materiale da riordinare', N.materiale, 'quando scende sotto la scorta minima')}</div>
     <div class="small muted">Le stesse scelte valgono per il riquadro "Da fare" del calendario.</div>`,
   async fd => {
     const n = { ...N };
@@ -1770,7 +1802,7 @@ const SEZIONI_ANALISI = [
   ['Contabilità', [['contabilita', 'Situazione incassi', 'da consuntivare, da fatturare, da incassare, pagato'], ['spese', 'Dove vanno i soldi', 'spese per categoria'], ['preventivi', 'Preventivi', 'valore, accettati, tasso di accettazione']]],
   ['Clienti', [['clienti', 'Clienti', 'principali, nuovi, privati / rivenditori / imprese']]],
   ['Furgone e trasferte', [['furgone', 'Costi del furgone', 'carburante e manutenzione, costo per giorno'], ['trasferte', 'Trasferte', 'km fatturati e ricavi']]],
-  ['Materiale', [['materiale', 'Incidenza del materiale', 'sul prezzo di ogni posa'], ['consumo', 'Consumo e ordini', 'quanto usi e ogni quanto ricompri']]],
+  ['Materiale', [['materiale', 'Incidenza del materiale', 'sul prezzo di ogni posa'], ['consumo', 'Materiale usato', 'quanto ne usi in ogni cantiere e per ogni prodotto']]],
 ];
 function sheetAnalisi() {
   const A = IMP().analisi;
@@ -1809,6 +1841,32 @@ function statLavoro(lav, ints) {
     <div class="kpis">${tile('Giorni lavorati', `${nG}${disp ? `<span class="small muted"> / ${disp}</span>` : ''}`)}${tile('Occupazione', disp ? Math.round(nG / disp * 100) + '%' : '—')}${tile('Incasso al giorno', nG ? eur(incasso / nG) : '—')}${tile('Resa oraria', ore ? eur(incasso / ore) : '—')}</div>
     <div class="kpis">${tile('Pezzi posati', num(pezzi, 0))}${tile('Pezzi al giorno', nG ? num(pezzi / nG) : '—')}${tile('Ore lavorate', num(ore))}${tile('Giornate a ore', `${aOre}<span class="small muted"> / ${lav.length}</span>`)}</div>
     <div class="small muted">L'occupazione confronta i giorni lavorati con i giorni lavorativi del periodo, ferie escluse.</div></section>`;
+}
+function statMateriale(lav, ints) {
+  // materiale usato nel periodo, per materiale
+  const M = new Map(); let pezziConMat = 0;
+  for (const x of [...lav.map(l => ({ x: l, pose: true })), ...ints.map(i => ({ x: i, pose: false }))]) {
+    const mats = (x.x.materiali || []).filter(m => m.nome && n2(m.qta) > 0); if (!mats.length) continue;
+    if (x.pose) pezziConMat += n2(x.x.pezzi) || contaPezzi(x.x.righe);
+    for (const m of mats) { const k = normNome(m.nome); const v = M.get(k) || { nome: m.nome.trim(), q: 0, pose: 0, int: 0 }; v.q += n2(m.qta); x.pose ? v.pose++ : v.int++; M.set(k, v); }
+  }
+  const righe = [...M.values()].sort((a, b) => b.q * (prezzoMat(b.nome) || 1) - a.q * (prezzoMat(a.nome) || 1));
+  const conMat = lav.filter(l => (l.materiali || []).some(m => m.nome && n2(m.qta) > 0)).length;
+  const u = n => unitaMat(n) ? ' ' + esc(unitaMat(n)) : '';
+  const prod = materialePerProdotto();
+  const aperto = UI.matProd && prod.some(p => p.nome === UI.matProd) ? UI.matProd : prod[0]?.nome;
+  const P = prod.find(p => p.nome === aperto);
+  const vuoto = `<div class="small muted">Compare quando nelle pose segni il <b>Materiale usato</b> (schiuma, silicone, viti…) insieme alle voci del listino o ai pezzi posati.</div>`;
+  return `<section class="panel stack"><div class="row between"><h3>Materiale usato</h3><span class="small muted num">${conMat} su ${lav.length} pose con il materiale segnato</span></div>
+    ${righe.length ? `<div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Totale</th><th class="r">Per cantiere</th><th class="r">Per pezzo</th></tr></thead><tbody>${righe.map(r => `<tr><td><b>${esc(r.nome)}</b><div class="small muted">${r.pose ? `${r.pose} ${r.pose === 1 ? 'posa' : 'pose'}` : ''}${r.pose && r.int ? ' · ' : ''}${r.int ? `${r.int} ${r.int === 1 ? 'intervento' : 'interventi'}` : ''}</div></td><td class="r num">${num(r.q, 1)}${u(r.nome)}</td><td class="r num">${num(r.q / (r.pose + r.int), 1)}</td><td class="r num">${r.pose && pezziConMat ? num(r.q / pezziConMat, 2) : '—'}</td></tr>`).join('')}</tbody></table></div>
+    <div class="small muted">Nel periodo scelto. «Per pezzo» divide il materiale per i ${num(pezziConMat, 0)} pezzi posati nelle pose in cui l'hai segnato.</div>` : vuoto}
+  </section>
+  <section class="panel stack"><h3>Quanto materiale serve per prodotto</h3>
+    ${prod.length ? `<div class="small muted">Da tutti i cantieri in cui hai segnato il materiale. Se in una posa ci sono più prodotti, il materiale si divide in proporzione ai pezzi: più pose registri, più la stima è precisa.</div>
+    <div class="chips">${prod.map(p => `<button class="chipf" data-act="matProd" data-arg="${esc(p.nome)}" aria-pressed="${p.nome === aperto}" type="button">${esc(p.nome)} <span class="num">${num(p.pezzi, 0)}</span></button>`).join('')}</div>
+    ${P ? `<div class="tbl-wrap"><table><thead><tr><th>Per 1 ${esc(P.nome.toLowerCase())}</th><th class="r">Serve</th><th class="r">Per 10 pezzi</th></tr></thead><tbody>${P.mat.map(m => `<tr><td><b>${esc(m.nome)}</b></td><td class="r num">${num(m.perPezzo, 2)}${u(m.nome)}</td><td class="r num">${num(m.perPezzo * 10, 1)}${u(m.nome)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="small muted num">Su ${num(P.pezzi, 0)} pezzi in ${P.n} ${P.n === 1 ? 'cantiere' : 'cantieri'}${P.puri < P.n ? ` (${P.puri} con solo questo prodotto)` : ''}.${P.mat.some(m => prezzoMat(m.nome)) ? ` Costo del materiale per pezzo: <b>${eur(sum(P.mat, m => m.perPezzo * prezzoMat(m.nome)))}</b>.` : ''}</div>` : ''}` : vuoto}
+  </section>`;
 }
 function statVoci(lav, ints) {
   const m = new Map();
@@ -1950,7 +2008,7 @@ const matRow = (m = {}, buy = false) => buy
   : `<div class="matrow"><input name="mn" list="matlist" placeholder="Es. schiuma, silicone, viti" value="${esc(m.nome || '')}" aria-label="Materiale"><input name="mq" type="number" step="any" inputmode="decimal" placeholder="Q.tà" value="${esc(m.qta ?? '')}" aria-label="Quantità"><button type="button" data-act="rmrow" aria-label="Togli riga">×</button></div>`;
 function readMats(fd, buy = false) {
   const n = fd.getAll('mn'), q = fd.getAll('mq'), u = fd.getAll('mu'), p = fd.getAll('mp');
-  return n.map((x, i) => { const o = { nome: x.trim(), qta: n2(q[i]) }; if (buy) { o.unita = (u[i] || '').trim() || (S.magazzino.find(s => s.id === slug(x))?.unita) || 'pz'; o.prezzoUnit = n2(p[i]); } return o; }).filter(o => o.nome && o.qta);
+  return n.map((x, i) => { const o = { nome: x.trim(), qta: n2(q[i]) }; if (buy) { o.unita = (u[i] || '').trim() || unitaMat(x) || 'pz'; o.prezzoUnit = n2(p[i]); } return o; }).filter(o => o.nome && o.qta);
 }
 const matBox = (list, buy = false, title = 'Materiale usato') => `<div class="fieldset"><div class="row between"><span class="fs-t">${title}</span><button type="button" class="btn sm" data-act="addrow" data-arg="${buy ? 'buy' : ''}">+ Riga</button></div>${buy ? '<div class="small muted">Nome · quantità · unità · prezzo unitario</div>' : ''}<div class="matrows" id="matrows">${(list && list.length ? list : [{}]).map(m => matRow(m, buy)).join('')}</div></div>`;
 
@@ -2067,6 +2125,7 @@ function sheetLav(l, prefill) {
     <label class="check urgcheck"><input type="checkbox" id="f_urgApp" name="urgApp" ${l.urgenzaApplicata ? 'checked' : ''}> Posa urgente: maggiorazione urgenza ${num(LIST().urgenzaPct)}%</label>
     <div id="modoPezzo" ${calcolo === 'ore' ? 'hidden' : ''}>${righeBox(calcolo === 'ore' ? [] : KM.altre, 'lav')}</div>
     <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria (+ urgenza) + trasferta.</div>
+    <div id="stimaMat" class="panel stack" hidden></div>
     ${matBox(l.materiali)}
     <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note || notaVecchia))}</div>
     <div class="fieldset"><span class="fs-t">Cartella</span>
@@ -2098,8 +2157,6 @@ function sheetLav(l, prefill) {
     const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     { const cur = !isNew && S.lavori.find(x => x.id === l.id); const pv = cur ? cur.preventivoId : l.preventivoId; if (pv) d.preventivoId = pv; }
     if (l.esempio) d.esempio = true;
-    if (!isNew) moveStock(l.materiali, +1);
-    moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente);
     conSquadra('lavori', isNew ? null : l.id, d, fd);
     Object.assign(d, leggiOrario(fd));
@@ -2115,7 +2172,7 @@ function sheetLav(l, prefill) {
     const sov = sovrapposti('lavori', id, giorniPosa(d), d);
     toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : sov ? `Posa salvata. Attenzione: si sovrappone a ${sov}` : 'Posa salvata');
   }, {
-    del: isNew ? null : async () => { moveStock(l.materiali, +1); for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); annullaPrenotazioniDi(l.id); toast('Posa eliminata'); },
+    del: isNew ? null : async () => { for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); annullaPrenotazioniDi(l.id); toast('Posa eliminata'); },
     extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
   });
   if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
@@ -2163,8 +2220,6 @@ function sheetInt(i, day) {
     const d = { riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (i.esempio) d.esempio = true;
-    if (!isNew) moveStock(i.materiali, +1);
-    moveStock(mats, -1);
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
     Object.assign(d, leggiOrario(fd));
@@ -2175,7 +2230,7 @@ function sheetInt(i, day) {
     const sov = d.dataProg ? sovrapposti('interventi', idInt, [d.dataProg], d) : '';
     toast(sov ? `Intervento salvato. Attenzione: si sovrappone a ${sov}` : 'Intervento salvato');
   }, {
-    del: isNew ? null : async () => { moveStock(i.materiali, +1); for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); annullaPrenotazioniDi(i.id); toast('Intervento eliminato'); },
+    del: isNew ? null : async () => { for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); annullaPrenotazioniDi(i.id); toast('Intervento eliminato'); },
     extra: isNew ? '' : `${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
@@ -2287,11 +2342,11 @@ const stripId = o => { const { id, ...r } = o; return r; };
 
 /* movimento */
 function sheetMov(m, prefill) {
-  const isNew = !m; m = m || { tipo: 'uscita', data: TODAY, categoria: 'materiale', magazzino: true, ...(prefill || {}) };
+  const isNew = !m; m = m || { tipo: 'uscita', data: TODAY, categoria: 'materiale', ...(prefill || {}) };
   openSheet(isNew ? 'Nuova spesa' : 'Spesa', `
     ${m._preview ? `<img class="receipt" src="${m._preview}" alt="Foto dello scontrino">` : m.foto ? `<button type="button" data-act="openPath" data-arg="${esc(m.foto)}" style="border:0;background:none;padding:0"><img class="receipt" data-file="${esc(m.foto)}" alt="Foto dello scontrino"></button>` : ''}
     ${m.documento ? `<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="openPath" data-arg="${esc(m.documento.path)}">${esc(m.documento.nome)}</button></div>` : ''}
-    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto il documento in automatico.'} <b>Controlla categoria, importo${m.categoria === 'materiale' ? ' e materiali' : ''}</b> prima di salvare${m.categoria === 'materiale' ? ' e togli le righe che non vanno in magazzino (trasporto, servizi…)' : ''}.${m.categoria === 'carburante' && !m.km ? ' <b>Scrivi i km del furgone</b> per gli avvisi del tagliando.' : ''}${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
+    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto il documento in automatico.'} <b>Controlla categoria, importo${m.categoria === 'materiale' ? ' e materiali' : ''}</b> prima di salvare.${m.categoria === 'carburante' && !m.km ? ' <b>Scrivi i km del furgone</b> per gli avvisi del tagliando.' : ''}${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
     ${m._doppia ? `<div class="notice small bad">Attenzione: hai già registrato una fattura ${esc(m.numero)} di ${esc(m.fornitore)} il ${fmtD(m._doppia)}. Se è la stessa, non salvarla due volte.</div>` : ''}
     <div class="g2">${F('Tipo', sel('tipo', [['uscita', 'Spesa'], ['entrata', 'Entrata']], m.tipo))}${F('Data', inp('data', m.data, 'date', 'required'))}</div>
     <div class="g2">${F('Categoria', sel('categoria', CAT, m.categoria))}${F('Importo totale €', inp('importo', m.importo, 'number', 'required'))}</div>
@@ -2303,13 +2358,12 @@ function sheetMov(m, prefill) {
       <div class="small muted">I km aggiornano il furgone: quando ti avvicini al tagliando ti arriva l'avviso.</div>
     </div>
     <div id="buyBox" ${m.categoria === 'materiale' ? '' : 'hidden'}>
-      ${matBox(m.righe, true, 'Materiale acquistato')}
-      <label class="check" style="margin-top:8px"><input type="checkbox" id="f_magazzino" name="magazzino" ${m.magazzino !== false ? 'checked' : ''}> Carica questo materiale in magazzino</label>
+      ${matBox(m.righe, true, 'Materiale acquistato (facoltativo)')}
+      <div class="small muted">Serve solo a conoscere il prezzo di ogni materiale, per calcolare quanto costa il materiale usato nei cantieri.</div>
     </div>`, async fd => {
     const cat = fd.get('categoria');
     const righe = cat === 'materiale' ? readMats(fd, true) : [];
-    const mag = cat === 'materiale' && !!fd.get('magazzino') && righe.length > 0;
-    const d = { tipo: fd.get('tipo'), data: fd.get('data'), categoria: cat, importo: n2(fd.get('importo')), fornitore: fd.get('fornitore').trim(), numero: fd.get('numero').trim(), descrizione: fd.get('descrizione').trim(), righe, magazzino: mag };
+    const d = { tipo: fd.get('tipo'), data: fd.get('data'), categoria: cat, importo: n2(fd.get('importo')), fornitore: fd.get('fornitore').trim(), numero: fd.get('numero').trim(), descrizione: fd.get('descrizione').trim(), righe };
     if (m.foto) d.foto = m.foto;
     if (m.documento) d.documento = m.documento;
     if (['carburante', 'furgone'].includes(cat)) {
@@ -2321,12 +2375,10 @@ function sheetMov(m, prefill) {
       if (JSON.stringify(nf) !== JSON.stringify(f)) store.put('cfg', 'furgone', nf);
     }
     if (m.esempio) d.esempio = true;
-    if (!isNew && m.magazzino) moveStock(m.righe, -1);
-    if (mag) moveStock(righe, +1, true);
     store.put('movimenti', isNew ? null : m.id, d);
     UI.cMonth = d.data.slice(0, 7);
-    toast(mag ? 'Spesa salvata e magazzino aggiornato' : 'Spesa salvata');
-  }, { del: isNew ? null : async () => { if (m.magazzino) moveStock(m.righe, -1); if (m.foto) store.removeFile(m.foto).catch(() => {}); if (m.documento) store.removeFile(m.documento.path).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
+    toast('Spesa salvata');
+  }, { del: isNew ? null : async () => { if (m.foto) store.removeFile(m.foto).catch(() => {}); if (m.documento) store.removeFile(m.documento.path).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
 }
 
 /* ---------- voci e prezzi dal listino ---------- */
@@ -2421,6 +2473,7 @@ function aggiornaTotali() {
     target = Math.round((n2($('#f_ore')?.value) * n2($('#f_tariffa')?.value) * urgK + trasf) * 100) / 100; conVoci = target > 0;
   } else if (kind === 'lav') {
     const pz = $('#f_pezzi'); if (pz && pz.dataset.auto !== '0') pz.value = contaPezzi(righe) || '';
+    aggiornaStimaMat(righe);
     if (righe.length) $('#totBox').insertAdjacentHTML('beforeend', `<div class="small muted">Nel calendario: ${esc(riepilogoVoci(righe))}</div>`);
   }
   if (imp && conVoci && imp.dataset.auto !== '0') imp.value = target || '';
@@ -2602,7 +2655,6 @@ function compilaCliente(nome) {
 /* ---------- clienti (CRM) ---------- */
 const TIPI_CLIENTE = [['finale', 'Cliente finale'], ['rivenditore', 'Rivenditore'], ['impresa', 'Impresa edile']];
 const tipoCliente = k => (TIPI_CLIENTE.find(t => t[0] === k) || TIPI_CLIENTE[0])[1];
-const normNome = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const trovaCliente = nome => normNome(nome) ? S.clienti.find(c => normNome(c.nome) === normNome(nome)) : null;
 const nomeDi = x => typeof x.cliente === 'object' ? (x.cliente?.nome || '') : (x.cliente || '');
 /** Restituisce l'id del cliente con quel nome; se non esiste lo crea. Completa i dati mancanti. */
@@ -2964,7 +3016,7 @@ async function caricaFattura(file, mag = false) {
     } else if (file.type.startsWith('image/')) {
       passo('Leggo la foto…');
       await loadTesseract(); const { data } = await window.Tesseract.recognize(await shrink(file, 2400), 'ita');
-      const testo = data.text || '', sc = leggiScontrino(testo, S.magazzino.map(m => m.nome)), ft = leggiFatturaTesto(testo, { forfettario: forf });
+      const testo = data.text || '', sc = leggiScontrino(testo, nomiMateriale()), ft = leggiFatturaTesto(testo, { forfettario: forf });
       letto = { ...sc, ...ft, fornitore: ft.fornitore || sc.fornitore, numero: ft.numero || sc.numero, data: ft.data || sc.data, totale: ft.totale || sc.totale, righe: ft.righe.length ? ft.righe : sc.righe, tipo: 'testo', categoria: categoriaDa(testo), ...leggiCarburante(testo) };
     } else throw Object.assign(new Error('tipo'), { userMsg: 'Formato non riconosciuto: usa XML, .p7m, PDF o una foto' });
   } catch (e) { console.warn(e); toast(e.userMsg || 'Non sono riuscito a leggere la fattura: compila a mano'); }
@@ -2974,10 +3026,10 @@ async function caricaFattura(file, mag = false) {
   const doppia = L.numero && S.movimenti.find(x => x.numero && x.numero.trim().toLowerCase() === L.numero.trim().toLowerCase() && normNome(x.fornitore) === normNome(L.fornitore));
   const cat = L.categoria && L.categoria !== 'altro' ? L.categoria : (L.righe || []).length ? 'materiale' : (mag ? 'materiale' : 'altro');
   sheetMov(null, {
-    categoria: cat, magazzino: cat === 'materiale', documento, _fattura: letto ? letto.tipo : '', _forf: forf && cat === 'materiale' && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
+    categoria: cat, documento, _fattura: letto ? letto.tipo : '', _forf: forf && cat === 'materiale' && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
     data: L.data && L.data <= TODAY ? L.data : TODAY, importo: L.totale || '', fornitore: L.fornitore || '', numero: L.numero || '', km: L.km || '', litri: L.litri ? Math.round(L.litri * 100) / 100 : '',
     descrizione: cat === 'carburante' ? 'Carburante' : L.numero ? `Fattura ${L.numero}` : '',
-    righe: cat !== 'materiale' ? [] : (L.righe || []).map(r => ({ nome: (S.magazzino.find(m => normNome(m.nome) === normNome(r.nome)) || {}).nome || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
+    righe: cat !== 'materiale' ? [] : (L.righe || []).map(r => ({ nome: nomiMateriale().find(n => normNome(n) === normNome(r.nome)) || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
   });
   if (letto && !L.righe.length) toast('Non ho trovato le righe dei materiali: aggiungile a mano');
 }
@@ -2993,7 +3045,7 @@ async function onPhoto(file) {
       const st = $('#phStep'); if (st) st.textContent = 'Leggo lo scontrino…';
       await loadTesseract();
       const { data } = await window.Tesseract.recognize(blob, 'ita');
-      letto = { ...leggiScontrino(data.text || '', S.magazzino.map(m => m.nome)), ...leggiCarburante(data.text) };
+      letto = { ...leggiScontrino(data.text || '', nomiMateriale()), ...leggiCarburante(data.text) };
     } catch (e) { console.warn(e); toast('Lettura automatica non riuscita: compila a mano'); }
   }
   const ok = letto && (letto.totale || letto.fornitore);
@@ -3005,21 +3057,6 @@ async function onPhoto(file) {
   });
 }
 
-/* magazzino */
-function sheetMag(m) {
-  const isNew = !m; m = m || { unita: 'pz', qta: 0, costoMedio: 0, soglia: 0 };
-  openSheet(isNew ? 'Nuovo materiale' : m.nome, `
-    ${isNew ? F('Nome materiale', inp('nome', '', 'text', 'required placeholder="Es. Schiuma poliuretanica"')) : ''}
-    <div class="g2">${F('Giacenza attuale', inp('qta', m.qta, 'number', 'required'))}${F('Unità', inp('unita', m.unita, 'text', 'placeholder="pz, cartuccia, m…"'))}</div>
-    <div class="g2">${F('Costo medio €', inp('costoMedio', m.costoMedio, 'number'))}${F('Avvisami sotto quota', inp('soglia', m.soglia, 'number'))}</div>
-    <div class="small muted">Con "Avvisami sotto quota" il materiale compare nel riquadro "Da fare" quando sta per finire.</div>`,
-  async fd => {
-    const nome = isNew ? fd.get('nome').trim() : m.nome; const id = isNew ? slug(nome) : m.id;
-    const d = { nome, unita: fd.get('unita').trim() || 'pz', qta: n2(fd.get('qta')), costoMedio: n2(fd.get('costoMedio')), soglia: n2(fd.get('soglia')) };
-    if (m.esempio) d.esempio = true;
-    store.put('magazzino', id, d); toast('Magazzino aggiornato');
-  }, { del: isNew ? null : async () => { store.drop('magazzino', m.id); toast('Materiale tolto dal magazzino'); } });
-}
 
 /* cartelle */
 function sheetCart(c) {
@@ -3107,26 +3144,24 @@ function csv(kind) {
 function seed() {
   const d = n => { const x = pd(TODAY); x.setDate(x.getDate() + n); return iso(x); };
   const ex = { esempio: true };
-  const mag = [['Schiuma poliuretanica', 'bomboletta', 7.9, 4], ['Silicone neutro bianco', 'cartuccia', 5.4, 6], ['Viti 6x80 telaio', 'pz', .18, 100], ['Nastro autoespandente', 'rotolo', 9.5, 3], ['Cunei di spessoramento', 'conf', 4.2, 2]];
-  for (const [nome, unita, c, s] of mag) store.put('magazzino', slug(nome), { nome, unita, qta: 0, costoMedio: c, soglia: s, ...ex });
   const buys = [
     { data: d(-48), fornitore: 'Ferramenta Bianchi', importo: 159.6, righe: [{ nome: 'Schiuma poliuretanica', qta: 12, unita: 'bomboletta', prezzoUnit: 7.9 }, { nome: 'Silicone neutro bianco', qta: 12, unita: 'cartuccia', prezzoUnit: 5.4 }] },
     { data: d(-20), fornitore: 'Ferramenta Bianchi', importo: 110.7, righe: [{ nome: 'Schiuma poliuretanica', qta: 8, unita: 'bomboletta', prezzoUnit: 7.9 }, { nome: 'Nastro autoespandente', qta: 5, unita: 'rotolo', prezzoUnit: 9.5 }] },
     { data: d(-12), fornitore: 'Edilcolor', importo: 54, righe: [{ nome: 'Viti 6x80 telaio', qta: 300, unita: 'pz', prezzoUnit: .18 }] }];
-  for (const b of buys) { moveStock(b.righe, +1, true); store.put('movimenti', null, { tipo: 'uscita', categoria: 'materiale', numero: '', descrizione: 'Materiale di consumo', magazzino: true, ...b, ...ex }); }
-  store.put('movimenti', null, { tipo: 'uscita', data: d(-5), categoria: 'carburante', importo: 85, fornitore: 'Distributore', numero: '', descrizione: 'Gasolio', righe: [], magazzino: false, ...ex });
-  store.put('movimenti', null, { tipo: 'uscita', data: d(-30), categoria: 'furgone', importo: 240, fornitore: 'Officina Rossi', numero: '', descrizione: 'Tagliando furgone', righe: [], magazzino: false, ...ex });
+  for (const b of buys) store.put('movimenti', null, { tipo: 'uscita', categoria: 'materiale', numero: '', descrizione: 'Materiale di consumo', ...b, ...ex });
+  store.put('movimenti', null, { tipo: 'uscita', data: d(-5), categoria: 'carburante', importo: 85, fornitore: 'Distributore', numero: '', descrizione: 'Gasolio', righe: [], ...ex });
+  store.put('movimenti', null, { tipo: 'uscita', data: d(-30), categoria: 'furgone', importo: 240, fornitore: 'Officina Rossi', numero: '', descrizione: 'Tagliando furgone', righe: [], ...ex });
   const lav = [
-    { data: d(-15), cliente: 'Impresa Edil Nord', indirizzo: 'Via Nizza 120, Torino', installato: '6 finestre PVC 120×140 con controtelaio', pezzi: 6, ore: 9, importo: 720, materiali: [{ nome: 'Schiuma poliuretanica', qta: 3 }, { nome: 'Silicone neutro bianco', qta: 4 }, { nome: 'Viti 6x80 telaio', qta: 48 }], amm: 'fatt' },
-    { data: d(-8), cliente: 'Famiglia Ferrero', indirizzo: 'Corso Francia 45, Collegno', installato: '2 portefinestre alluminio + 2 persiane', pezzi: 4, ore: 7.5, importo: 560, materiali: [{ nome: 'Schiuma poliuretanica', qta: 2 }, { nome: 'Nastro autoespandente', qta: 2 }, { nome: 'Viti 6x80 telaio', qta: 24 }], amm: 'cons' },
-    { data: d(-2), cliente: 'Serramenti Alpi srl', indirizzo: 'Via Roma 8, Rivoli', installato: 'Sostituzione 5 finestre legno-alluminio', pezzi: 5, ore: 8, importo: 650, materiali: [{ nome: 'Schiuma poliuretanica', qta: 3 }, { nome: 'Silicone neutro bianco', qta: 3 }, { nome: 'Cunei di spessoramento', qta: 1 }], amm: 'da_cons' },
-    { data: d(3), cliente: 'Impresa Edil Nord', indirizzo: 'Via Nizza 120, Torino', installato: 'Secondo lotto: 8 finestre PVC', pezzi: 8, ore: 0, importo: 960, materiali: [], amm: 'da_cons' }];
-  for (const l of lav) { moveStock(l.materiali, -1); store.put('lavori', null, { note: '', allegati: [], ...l, ...ex }); }
+    { data: d(-15), cliente: 'Impresa Edil Nord', indirizzo: 'Via Nizza 120, Torino', installato: '6 finestre PVC 120×140 con controtelaio', righe: [{ voce: 'fin', descr: 'Finestra', qta: 6, unita: 'pz', prezzo: 80 }], pezzi: 6, ore: 9, importo: 720, materiali: [{ nome: 'Schiuma poliuretanica', qta: 3 }, { nome: 'Silicone neutro bianco', qta: 4 }, { nome: 'Viti 6x80 telaio', qta: 48 }], amm: 'fatt' },
+    { data: d(-8), cliente: 'Famiglia Ferrero', indirizzo: 'Corso Francia 45, Collegno', installato: '2 portefinestre alluminio + 2 persiane', righe: [{ voce: 'pf', descr: 'Portafinestra', qta: 2, unita: 'pz', prezzo: 90 }, { voce: 'ptf', descr: 'Persiana telaio finestra', qta: 2, unita: 'pz', prezzo: 40 }], pezzi: 4, ore: 7.5, importo: 560, materiali: [{ nome: 'Schiuma poliuretanica', qta: 2 }, { nome: 'Nastro autoespandente', qta: 2 }, { nome: 'Viti 6x80 telaio', qta: 24 }], amm: 'cons' },
+    { data: d(-2), cliente: 'Serramenti Alpi srl', indirizzo: 'Via Roma 8, Rivoli', installato: 'Sostituzione 5 finestre legno-alluminio', righe: [{ voce: 'fin', descr: 'Finestra', qta: 5, unita: 'pz', prezzo: 80 }], pezzi: 5, ore: 8, importo: 650, materiali: [{ nome: 'Schiuma poliuretanica', qta: 3 }, { nome: 'Silicone neutro bianco', qta: 3 }, { nome: 'Cunei di spessoramento', qta: 1 }], amm: 'da_cons' },
+    { data: d(3), cliente: 'Impresa Edil Nord', indirizzo: 'Via Nizza 120, Torino', installato: 'Secondo lotto: 8 finestre PVC', righe: [{ voce: 'fin', descr: 'Finestra', qta: 8, unita: 'pz', prezzo: 80 }], pezzi: 8, ore: 0, importo: 960, materiali: [], amm: 'da_cons' }];
+  for (const l of lav) { store.put('lavori', null, { note: '', allegati: [], ...l, ...ex }); }
   const ints = [
     { cliente: 'Sig.ra Martini', telefono: '', indirizzo: 'Via Cibrario 12, Torino', descrizione: 'Anta ribalta non chiude, da regolare', urgenza: 'critica', stato: 'aperto', data: d(-1), dataProg: '', costo: 80, ore: 0, materiali: [], amm: 'da_cons' },
     { cliente: 'Condominio Aurora', telefono: '', indirizzo: 'Corso Vittorio 30, Torino', descrizione: 'Infiltrazione sotto davanzale, rifare sigillatura', urgenza: 'alta', stato: 'programmato', data: d(-4), dataProg: d(2), costo: 150, ore: 0, materiali: [], amm: 'da_cons' },
     { cliente: 'Famiglia Ferrero', telefono: '', indirizzo: 'Corso Francia 45, Collegno', descrizione: 'Sostituita guarnizione portafinestra', urgenza: 'normale', stato: 'completato', data: d(-10), dataProg: d(-6), costo: 60, ore: 1, materiali: [{ nome: 'Silicone neutro bianco', qta: 1 }], amm: 'pag' }];
-  for (const i of ints) { moveStock(i.materiali, -1); store.put('interventi', null, { ...i, ...ex }); }
+  for (const i of ints) store.put('interventi', null, { ...i, ...ex });
   if (!S.furgone || !S.furgone.targa) store.put('cfg', 'furgone', { modello: 'Fiat Ducato (esempio)', targa: 'AB123CD', km: 148200, tagliandoKm: 150000, compagnia: '', assicurazione: d(18), bollo: d(64), revisione: d(210), tagliando: d(95), esempio: true });
   toast('Esempi caricati');
 }
@@ -3149,7 +3184,7 @@ document.addEventListener('click', async e => {
   switch (a) {
     case 'tab': UI.tab = arg; try { history.replaceState(null, '', '#' + arg); } catch {} go(); break;
     case 'fatt': UI.tab = 'conti'; UI.seg = 'fatt'; go(); break;
-    case 'mag': UI.tab = 'conti'; UI.seg = 'mag'; go(); break;
+    case 'mag': UI.tab = 'an'; go(); break;
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
     case 'cMonth': UI.cMonth = shiftMonth(UI.cMonth, +arg); render(); break;
     case 'day':
@@ -3168,8 +3203,6 @@ document.addEventListener('click', async e => {
     case 'editInt': sheetInt(S.interventi.find(x => x.id === id)); break;
     case 'newMov': sheetMov(null); break;
     case 'editMov': sheetMov(S.movimenti.find(x => x.id === id)); break;
-    case 'newMag': sheetMag(null); break;
-    case 'editMag': sheetMag(S.magazzino.find(x => x.id === id)); break;
     case 'newCart': sheetCart(null); break;
     case 'editCart': sheetCart(S.cartelle.find(x => x.id === id)); break;
     case 'editVan': sheetVan(); break;
@@ -3183,6 +3216,16 @@ document.addEventListener('click', async e => {
     case 'ammGruppo': { const L = lavoriGruppo(arg); if (!L.length) break; const i = AMM.findIndex(a => a[0] === statoGruppo(arg)); const nx = AMM[Math.min(i + 1, AMM.length - 1)][0]; for (const [k, x] of L) store.put(k, x.id, { ...stripId(x), amm: nx }); toast(`${ammOf(nx)[1]}: ${L.length} lavori`); render(); break; }
     case 'sciogliGruppo': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per separare'; break; } for (const [k, x] of lavoriGruppo(arg)) { const d = stripId(x); delete d.gruppoCons; delete d.importoCons; store.put(k, x.id, d); } toast('Lavori separati: tornano ai prezzi pieni'); render(); break; }
     case 'close': closeSheet(); break;
+    case 'usaStimaMat': {
+      const st = $('#stimaMat')?._stima || [], box = $('#matrows'); if (!box) break;
+      const gia = new Set([...box.querySelectorAll('[name="mn"]')].map(i => normNome(i.value)).filter(Boolean));
+      box.querySelectorAll('.matrow').forEach(r => { if (!r.querySelector('[name="mn"]').value.trim()) r.remove(); });
+      const nuovi = st.filter(m => !gia.has(normNome(m.nome)));
+      box.insertAdjacentHTML('beforeend', nuovi.map(m => matRow({ nome: m.nome, qta: Math.ceil(m.q - 0.05) || 1 })).join(''));
+      toast(nuovi.length ? 'Stima inserita: correggi le quantità con quelle vere a fine lavoro' : 'Il materiale stimato è già nella lista');
+      break;
+    }
+    case 'matProd': UI.matProd = arg; render(); break;
     case 'addrow': $('#matrows').insertAdjacentHTML('beforeend', matRow({}, arg === 'buy')); break;
     case 'rmrow': { const rows = $('#matrows'); if (rows.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = ''); break; }
     case 'rmFile': sheetFiles.splice(+arg, 1); $('#filesList').innerHTML = filesHtml(); break;
