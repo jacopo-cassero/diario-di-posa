@@ -54,11 +54,11 @@ const store = createStore(CFG, () => {
 });
 const S = store.S;
 const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['conti', 'Conti', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
+const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
   if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste'].includes(h)) UI.tab = h;
-  if (h === 'fatture') { UI.tab = 'conti'; UI.seg = 'fatt'; }
+  if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
 readHash();
@@ -800,15 +800,27 @@ document.addEventListener('click', async e => {
 function normNome(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 /** Prezzo unitario di un materiale: dall'ultimo acquisto registrato con le righe (o dal vecchio magazzino). */
 function prezzoMat(nome) {
-  const k = normNome(nome); let best = null;
+  const k = normNome(nome); const fisso = n2(S.prezziMat?.[k]?.prezzo); if (fisso > 0) return fisso; let best = null;
   for (const m of S.movimenti) if (m.categoria === 'materiale') for (const r of m.righe || []) if (normNome(r.nome) === k && n2(r.prezzoUnit) > 0 && (!best || String(m.data) > best.d)) best = { d: String(m.data), p: n2(r.prezzoUnit) };
   return best ? best.p : n2(S.magazzino.find(x => normNome(x.nome) === k)?.costoMedio);
 }
 /** Unità di misura di un materiale, se la conosco dagli acquisti. */
 function unitaMat(nome) {
-  const k = normNome(nome);
+  const k = normNome(nome); if (S.prezziMat?.[k]?.unita) return S.prezziMat[k].unita;
   for (const m of S.movimenti) for (const r of m.righe || []) if (normNome(r.nome) === k && r.unita) return r.unita;
   return S.magazzino.find(x => normNome(x.nome) === k)?.unita || '';
+}
+/** Prezzi del materiale (per sapere quanto costa il materiale di ogni prodotto). */
+function sheetPrezziMat() {
+  const nomi = nomiMateriale();
+  openSheet('Prezzi del materiale', `<div class="small muted">Scrivi quanto paghi ogni materiale: serve solo a calcolare il costo medio del materiale per ogni prodotto che posi.</div>
+    ${nomi.length ? `<div class="stack">${nomi.map((n, i) => `<div class="matrow buy"><input name="pn" value="${esc(n)}" readonly aria-label="Materiale" tabindex="-1"><input class="u" name="pu" placeholder="pz" value="${esc(unitaMat(n))}" aria-label="Unità"><input name="pp" type="number" step="any" inputmode="decimal" placeholder="€" value="${prezzoMat(n) || ''}" aria-label="Prezzo per unità"></div>`).join('')}</div><div class="small muted">Nome · unità (bomboletta, cartuccia, pz…) · prezzo per unità in €</div>`
+      : '<div class="empty small">Ancora nessun materiale: compare qui dopo che lo segni in una posa o in un intervento.</div>'}`,
+  async fd => {
+    const n = fd.getAll('pn'), u = fd.getAll('pu'), pr = fd.getAll('pp'), out = {};
+    n.forEach((x, i) => { const p = n2(pr[i]); if (x && (p > 0 || (u[i] || '').trim())) out[normNome(x)] = { nome: x, unita: (u[i] || '').trim(), prezzo: p }; });
+    store.put('cfg', 'prezziMat', out); toast('Prezzi salvati');
+  });
 }
 /** Nomi di materiale già usati: per i suggerimenti mentre scrivi. */
 function nomiMateriale() {
@@ -903,7 +915,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, conti: rConti, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -978,13 +990,11 @@ function sheetEvento(e, giorno) {
     <div class="g2">${F('Dal giorno', inp('edata', e.data, 'date', 'required'))}${F('Al giorno', inp('edataFine', e.dataFine, 'date'))}</div>
     <div class="g2">${F('Luogo', inp('eluogo', e.luogo))}${F('Orario', inp('eorario', e.orario, 'text', 'placeholder="Es. 9:00–17:00"'))}</div>
     <div class="g2">${F('Costo €', inp('ecosto', e.costo, 'number', 'placeholder="Iscrizione, ingresso…"'))}<span></span></div>
-    ${e.movimentoId ? '<div class="small muted">Il costo è già registrato tra le spese.</div>' : `<label class="check"><input type="checkbox" id="f_espesa" name="espesa"> Registra il costo tra le spese</label>`}
     ${F('Note', `<textarea id="f_enote" name="enote">${esc(e.note || '')}</textarea>`)}`,
   async fd => {
     const da = fd.get('edata'), a = fd.get('edataFine');
     if (a && a < da) throw Object.assign(new Error('date'), { userMsg: 'La data di fine è prima di quella di inizio' });
     const d = { ...stripId(e), tipo: fd.get('etipo'), titolo: fd.get('etitolo').trim(), data: da, dataFine: a && a > da ? a : '', luogo: fd.get('eluogo').trim(), orario: fd.get('eorario').trim(), costo: n2(fd.get('ecosto')), note: fd.get('enote').trim() };
-    if (fd.get('espesa') && d.costo > 0 && !d.movimentoId) d.movimentoId = store.put('movimenti', null, { tipo: 'uscita', data: da, categoria: 'altro', importo: d.costo, fornitore: '', numero: '', descrizione: d.titolo || tipoEv(d.tipo), righe: [], magazzino: false });
     store.put('eventi', isNew ? null : e.id, d);
     UI.day = da; UI.month = da.slice(0, 7);
     toast(`${tipoEv(d.tipo)} salvat${d.tipo === 'ferie' ? 'e' : d.tipo === 'altro' ? 'o' : 'a'}`);
@@ -1155,27 +1165,12 @@ function rInt() {
   <div class="stack">${L.map(intCard).join('') || `<div class="empty">Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span></div>`}</div>`;
 }
 
-function rConti() {
-  const seg = [['mov', 'Spese'], ['fatt', 'Fatture']];
-  if (UI.seg === 'mag') UI.seg = 'mov';
-  let h = `<div class="row between"><h2>Conti</h2></div><div class="seg" role="group" aria-label="Sezione">${seg.map(([k, l]) => `<button data-act="seg" data-arg="${k}" aria-pressed="${UI.seg === k}" type="button">${l}</button>`).join('')}</div>`;
-  if (UI.seg === 'mov') {
-    const L = S.movimenti.filter(m => (m.data || '').startsWith(UI.cMonth)).sort((a, b) => String(b.data).localeCompare(a.data));
-    const out = sum(L.filter(m => m.tipo !== 'entrata'), m => m.importo), inn = sum(L.filter(m => m.tipo === 'entrata'), m => m.importo);
-    h += `<div class="photo-cta">
-      <label class="btn primary" for="photo">${svg('cam')} Fotografa scontrino<input id="photo" type="file" accept="image/*" capture="environment"></label>
-      <label class="btn" for="fatturaIn">${svg('doc')} Carica PDF o fattura<input id="fatturaIn" type="file" accept=".pdf,.xml,.p7m,application/pdf,text/xml,application/xml,image/*" style="position:absolute;width:1px;height:1px;opacity:0"></label>
-      <button class="btn" data-act="newMov" type="button">${svg('plus')} A mano</button></div>
-    <div class="cal-head"><button class="iconbtn" data-act="cMonth" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h3 style="flex:1;text-align:center">${monthName(UI.cMonth)}</h3><button class="iconbtn" data-act="cMonth" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
-    <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><div class="l">Spese del mese</div><div class="v">${eur(out)}</div></div><div class="kpi"><div class="l">Altre entrate</div><div class="v">${eur(inn)}</div></div></div>
-    <div class="panel">${L.map(m => `<button class="list-line mov" style="width:100%;background:none;border-left:0;border-right:0;border-top:0;text-align:left" data-act="editMov" data-id="${m.id}" type="button">
-      <span class="ico">${m.foto ? `<img data-file="${esc(m.foto)}" alt="">` : svg(m.categoria === 'materiale' ? 'box' : m.categoria === 'carburante' ? 'fuel' : m.categoria === 'furgone' ? 'van' : 'doc')}</span>
-      <span class="mid"><span class="t" style="display:block;font-weight:600">${esc(m.fornitore || m.descrizione || catName(m.categoria))}</span><span class="small muted">${fmtD(m.data, { day: 'numeric', month: 'short' })} · ${esc(catName(m.categoria))}${m.esempio ? ' · esempio' : ''}</span></span>
-      <span class="price amount ${m.tipo === 'entrata' ? 'pos' : 'neg'}">${m.tipo === 'entrata' ? '+' : '−'}${eur(m.importo)}</span></button>`).join('') || `<div class="muted small" style="padding:6px 0">Nessuna spesa in ${monthName(UI.cMonth)}. Fotografa uno scontrino: l'app prova a leggere importo, data e fornitore.</div>`}</div>`;
-  }
-  if (UI.seg === 'fatt') {
+const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', cons: 'Segna fatturato', fatt: 'Segna incassato' };
+function rCons() {
+  let h = `<div class="row between"><h2>Consuntivi</h2></div>`;
+  {
     const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
-    h += `<div class="small muted">Ogni lavoro passa da consuntivo a fattura a pagamento. Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
+    h += `<div class="small muted">Ogni lavoro passa per cinque tappe: consuntivo da fare, da inviare, da fatturare, da incassare, incassato. Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
     AMM.forEach(([k, l, c]) => {
       let L = all.filter(x => (x.amm || 'da_cons') === k);
       // i pagati: solo gli ultimi 60 giorni, in una sezione chiusa
@@ -1184,11 +1179,11 @@ function rConti() {
       const gruppi = new Map(); const singoli = [];
       for (const x of L) { if (x.gruppoCons?.id && k !== 'da_cons') { if (statoGruppo(x.gruppoCons.id) !== k) continue; if (!gruppi.has(x.gruppoCons.id)) gruppi.set(x.gruppoCons.id, lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ ...y, _k: kk, _d: kk === 'lavori' ? y.data : (y.dataProg || y.data), _t: kk === 'lavori' ? y.installato : y.descrizione, importo: kk === 'lavori' ? y.importo : y.costo })).sort((a, b) => String(a._d).localeCompare(b._d))); } else singoli.push(x); }
       const voci = [...[...gruppi.values()].map(gg => ({ d: gg[0]._d, h: cardGruppoCons(gg, k) })), ...singoli.map(x => ({ d: x._d, h: null, x }))].sort((a, b) => String(a.d).localeCompare(b.d));
-      const testa = `<div class="row between"><h3>${k === 'pag' ? 'Pagati (ultimi 2 mesi)' : l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>`;
+      const testa = `<div class="row between"><h3>${k === 'pag' ? 'Incassati (ultimi 2 mesi)' : l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>`;
       if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}</details>`; return; }
       h += `<section class="stack">${testa}
       ${voci.map(v => v.h || ((x) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
-        <div class="row">${k === 'da_cons' ? `<button class="btn sm dark" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">Prepara consuntivo</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Segna consuntivo inviato' : k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
+        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
     });
   }
   return h;
@@ -1196,85 +1191,48 @@ function rConti() {
 
 function rVan() {
   const f = S.furgone || {};
-  const spY = S.movimenti.filter(m => ['furgone', 'carburante'].includes(m.categoria) && (m.data || '').startsWith(TODAY.slice(0, 4)));
-  return `<div class="row between"><h2>Furgone</h2><button class="btn sm" data-act="editVan" type="button">Dati mezzo</button></div>
+    return `<div class="row between"><h2>Furgone</h2><button class="btn sm" data-act="editVan" type="button">Dati mezzo</button></div>
   <div class="panel row between"><div><b>${esc(f.modello || 'Furgone')}</b> <span class="muted">${esc(f.targa || 'targa non inserita')}</span><div class="small muted">${kmFurgone(S) ? `<span class="num">${num(kmFurgone(S), 0)}</span> km` : 'km non inseriti'}${f.compagnia ? ' · ' + esc(f.compagnia) : ''}</div></div><button class="btn sm" data-act="km" type="button">Aggiorna km</button></div>
-  ${(() => { const km = kmFurgone(S), r = ritmoKm(S, TODAY), c = consumoMedio(S), manca = n2(f.tagliandoKm) - km;
-    const parti = [r ? `percorri circa <b class="num">${num(r * 7, 0)}</b> km a settimana` : '', c ? `consumo medio <b class="num">${num(c, 1)}</b> km/l` : '', n2(f.tagliandoKm) && km ? (manca > 0 ? `tagliando tra <b class="num">${num(manca, 0)}</b> km${r ? ` (verso il ${fmtD(piuGiorni(TODAY, Math.round(manca / r)), { day: 'numeric', month: 'long' })})` : ''}` : `<b>tagliando superato di ${num(-manca, 0)} km</b>`) : ''].filter(Boolean);
-    return parti.length ? `<div class="small ${manca <= 0 && n2(f.tagliandoKm) && km ? 'notice bad' : 'muted'}">${parti.join(' · ')}</div>` : `<div class="small muted">Segna i km quando fai carburante: l'app calcola quanto percorri e ti avvisa prima del tagliando.</div>`; })()}
+  ${(() => { const km = kmFurgone(S), r = ritmoKm(S, TODAY), manca = n2(f.tagliandoKm) - km;
+    const parti = [r ? `percorri circa <b class="num">${num(r * 7, 0)}</b> km a settimana` : '', n2(f.tagliandoKm) && km ? (manca > 0 ? `tagliando tra <b class="num">${num(manca, 0)}</b> km${r ? ` (verso il ${fmtD(piuGiorni(TODAY, Math.round(manca / r)), { day: 'numeric', month: 'long' })})` : ''}` : `<b>tagliando superato di ${num(-manca, 0)} km</b>`) : ''].filter(Boolean);
+    return parti.length ? `<div class="small ${manca <= 0 && n2(f.tagliandoKm) && km ? 'notice bad' : 'muted'}">${parti.join(' · ')}</div>` : `<div class="small muted">Aggiorna i km ogni tanto: l'app calcola quanto percorri e ti avvisa prima del tagliando.</div>`; })()}
   <div class="scad">${SCAD.map(([k, l]) => { const d = f[k]; const n = d ? daysTo(d) : null; const c = n === null ? '' : n < 0 ? 'bad' : n <= 30 ? 'warn' : 'ok'; return `<div class="card"><div class="row between"><span class="t">${l}</span>${n === null ? '<span class="chip">da inserire</span>' : `<span class="chip ${c}">${n < 0 ? 'Scaduta' : n === 0 ? 'Oggi' : n <= 30 ? 'Tra ' + n + ' gg' : 'Ok'}</span>`}</div>
     <div class="big">${d ? fmtD(d) : '—'}</div>${k === 'tagliando' && n2(f.tagliandoKm) ? `<div class="small muted">oppure a <span class="num">${num(f.tagliandoKm, 0)}</span> km</div>` : ''}
     <div><button class="btn sm" data-act="rinnova" data-arg="${k}" type="button">${d ? 'Registra rinnovo' : 'Imposta scadenza'}</button></div></div>`; }).join('')}</div>
   <div class="small muted">Le scadenze entro 30 giorni compaiono nel riquadro "Da fare" e, se attivi le notifiche, ti arrivano sul telefono.</div>
-  <section class="stack"><div class="row between"><h3>Spese mezzo ${TODAY.slice(0, 4)}</h3><span class="price">${eur(sum(spY, m => m.importo))}</span></div>
-  <div class="panel">${spY.sort((a, b) => String(b.data).localeCompare(a.data)).slice(0, 12).map(m => `<div class="list-line"><div><b>${esc(m.descrizione || m.fornitore || catName(m.categoria))}</b><div class="small muted">${fmtD(m.data)} · ${esc(catName(m.categoria))}</div></div><span class="price">${eur(m.importo)}</span></div>`).join('') || '<div class="small muted">Nessuna spesa per il furgone quest\'anno. Registra un rinnovo o fotografa lo scontrino del gasolio.</div>'}</div></section>`;
+`;
 }
 
 function inPeriod(d) { if (!d) return false; if (!d.startsWith(String(UI.anYear))) return false; return UI.anMonth === 'all' || d.slice(5, 7) === UI.anMonth; }
 function clientiPrincipali(lav, ints) {
   const m = new Map();
-  for (const [x, imp] of [...lav.map(l => [l, fatturato(l)]), ...ints.map(i => [i, fatturato(i)])]) {
+  for (const x of [...lav, ...ints]) {
     const k = x.clienteId || normNome(x.cliente); if (!k) continue;
-    const r = m.get(k) || { nome: (S.clienti.find(c => c.id === x.clienteId) || {}).nome || x.cliente, id: x.clienteId, imp: 0, n: 0 };
-    r.imp += imp; r.n++; m.set(k, r);
+    const r = m.get(k) || { nome: (S.clienti.find(c => c.id === x.clienteId) || {}).nome || x.cliente, id: x.clienteId, n: 0, pz: 0 };
+    r.n++; r.pz += n2(x.pezzi); m.set(k, r);
   }
-  const top = [...m.values()].sort((a, b) => b.imp - a.imp).slice(0, 5);
+  const top = [...m.values()].sort((a, b) => b.n - a.n || b.pz - a.pz).slice(0, 5);
   if (!top.length) return '';
-  const max = top[0].imp || 1, tot = sum([...m.values()], r => r.imp) || 1;
-  return `<section class="panel stack"><h3>Clienti principali</h3><div class="bars">${top.map(r => `<div ${r.id ? `role="button" tabindex="0" data-act="editCli" data-id="${r.id}" style="cursor:pointer"` : ''}><div class="bar-l"><span>${esc(r.nome)} <span class="muted small">· ${r.n} ${r.n === 1 ? 'lavoro' : 'lavori'}</span></span><span class="num">${eur(r.imp)} · ${num(r.imp / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${r.imp / max * 100}%"></div></div></div>`).join('')}</div></section>`;
+  const max = top[0].n || 1;
+  return `<section class="panel stack"><h3>Clienti principali</h3><div class="bars">${top.map(r => `<div ${r.id ? `role="button" tabindex="0" data-act="editCli" data-id="${r.id}" style="cursor:pointer"` : ''}><div class="bar-l"><span>${esc(r.nome)}</span><span class="num">${r.n} ${r.n === 1 ? 'lavoro' : 'lavori'}${r.pz ? ` · ${num(r.pz, 0)} pz` : ''}</span></div><div class="bar-t"><div class="bar-f" style="width:${r.n / max * 100}%"></div></div></div>`).join('')}</div></section>`;
 }
 function rAn() {
   const A = IMP().analisi;
-  const yrs = [...new Set([TODAY.slice(0, 4), ...S.lavori.map(l => (l.data || '').slice(0, 4)), ...S.movimenti.map(m => (m.data || '').slice(0, 4))].filter(Boolean))].sort().reverse();
+  const yrs = [...new Set([TODAY.slice(0, 4), ...S.lavori.map(l => (l.data || '').slice(0, 4)), ...S.interventi.map(i => (i.dataProg || i.data || '').slice(0, 4))].filter(Boolean))].sort().reverse();
   const lav = S.lavori.filter(l => inPeriod(l.data) && l.data <= TODAY);
   const ints = S.interventi.filter(i => i.stato === 'completato' && inPeriod(i.dataProg || i.data));
-  const mov = S.movimenti.filter(m => inPeriod(m.data));
-  const entr = sum(lav, l => l.importo) + sum(ints, i => i.costo) + sum(mov.filter(m => m.tipo === 'entrata'), m => m.importo);
-  const usc = sum(mov.filter(m => m.tipo !== 'entrata'), m => m.importo);
-  const utile = entr - usc, ore = sum(lav, l => l.ore) + sum(ints, i => i.ore);
-  const byCat = CAT.map(([k]) => [k, sum(mov.filter(m => m.tipo !== 'entrata' && m.categoria === k), m => m.importo)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
-  const maxC = Math.max(1, ...byCat.map(x => x[1]));
-  const months = [...Array(12)].map((_, i) => { const k = `${UI.anYear}-${String(i + 1).padStart(2, '0')}`; const e = sum(S.lavori.filter(l => (l.data || '').startsWith(k) && l.data <= TODAY), l => l.importo) + sum(S.interventi.filter(x => x.stato === 'completato' && (x.dataProg || x.data || '').startsWith(k)), x => x.costo) + sum(S.movimenti.filter(m => m.tipo === 'entrata' && (m.data || '').startsWith(k)), m => m.importo); const u = sum(S.movimenti.filter(m => m.tipo !== 'entrata' && (m.data || '').startsWith(k)), m => m.importo); return { e, u }; });
-  const mx = Math.max(100, ...months.flatMap(m => [m.e, m.u]));
-  const step = [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000].find(s => mx / s <= 4) || Math.ceil(mx / 4);
-  const top = Math.ceil(mx / step) * step, W = 400, H = 190, pl = 36, pb = 20, pt = 8, cw = (W - pl - 6) / 12, sy = v => pt + (H - pt - pb) * (1 - v / top);
-  let ch = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Entrate e uscite per mese">`;
-  for (let v = 0; v <= top; v += step) ch += `<line class="grid" x1="${pl}" x2="${W - 6}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${pl - 6}" y="${sy(v) + 3}" text-anchor="end">${v >= 1000 ? num(v / 1000) + 'k' : v}</text>`;
-  months.forEach((m, i) => { const x = pl + i * cw + cw * .15, bw = cw * .33; ch += `<rect class="e" x="${x}" y="${sy(m.e)}" width="${bw}" height="${Math.max(0, sy(0) - sy(m.e))}" rx="1.5"/><rect class="u" x="${x + bw + 1}" y="${sy(m.u)}" width="${bw}" height="${Math.max(0, sy(0) - sy(m.u))}" rx="1.5"/><text x="${pl + i * cw + cw / 2}" y="${H - 6}" text-anchor="middle">${MESI[i].slice(0, 3)}</text>`; });
-  ch += '</svg>';
-  const inc = lav.filter(l => n2(l.importo) > 0).map(l => ({ l, c: costoMat(l.materiali) })).map(x => ({ ...x, p: x.c / n2(x.l.importo) * 100 }));
-  const incMed = inc.length ? sum(inc, x => x.c) / sum(inc, x => x.l.importo) * 100 : 0;
+  const ore = sum(lav, l => l.ore) + sum(ints, i => i.ore);
   return `<div class="row between"><h2>Analisi</h2><button class="btn sm" data-act="setAnalisi" type="button">Scegli statistiche</button></div><div class="row">
     <select id="anY" data-change="anY" aria-label="Anno" class="btn sm">${yrs.map(y => `<option ${+y === UI.anYear ? 'selected' : ''}>${y}</option>`).join('')}</select>
-    <select id="anM" data-change="anM" aria-label="Mese" class="btn sm"><option value="all">Tutto l'anno</option>${MESI.map((m, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${UI.anMonth === v ? 'selected' : ''}>${m}</option>`; }).join('')}</select></div></div>
-  ${A.kpi ? `
-  <div class="kpis"><div class="kpi"><div class="l">Entrate</div><div class="v">${eur(entr)}</div></div><div class="kpi"><div class="l">Uscite</div><div class="v">${eur(usc)}</div></div><div class="kpi ${utile >= 0 ? 'pos' : 'neg'}"><div class="l">Utile</div><div class="v">${eur(utile)}</div></div><div class="kpi"><div class="l">Resa oraria</div><div class="v">${ore ? eur(utile / ore) : '—'}</div></div></div>
-  <div class="small muted num">${lav.length} pose · ${ints.length} interventi chiusi · ${num(ore)} ore lavorate · ${num(sum(lav, l => l.pezzi), 0)} serramenti posati</div>
-  ` : ''}
+    <select id="anM" data-change="anM" aria-label="Mese" class="btn sm"><option value="all">Tutto l'anno</option>${MESI.map((m, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${UI.anMonth === v ? 'selected' : ''}>${m}</option>`; }).join('')}</select></div>
+  ${A.kpi ? `<div class="kpis">${tile('Pose', lav.length)}${tile('Interventi chiusi', ints.length)}${tile('Ore lavorate', num(ore))}${tile('Pezzi posati', num(sum(lav, l => l.pezzi), 0))}</div>` : ''}
   ${A.lavoro ? statLavoro(lav, ints) : ''}
-  ${A.mensile ? `
-  <section class="panel stack"><div class="row between"><h3>Mese per mese ${UI.anYear}</h3><div class="legend"><span><i class="swatch" style="background:var(--in)"></i> entrate</span><span><i class="swatch" style="background:var(--tape)"></i> uscite</span></div></div>${ch}</section>
-  ` : ''}
   ${A.voci ? statVoci(lav, ints) : ''}
-  ${A.interventi ? statInterventi() : ''}
-  ${A.contabilita ? statContabilita(lav, ints) : ''}
-  ${A.spese ? `
-  <section class="panel stack"><h3>Dove vanno i soldi</h3>${byCat.length ? `<div class="bars">${byCat.map(([k, v]) => `<div><div class="bar-l"><span>${esc(catName(k))}</span><span class="num">${eur(v)} · ${num(v / usc * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f ${k === 'materiale' ? 'tape' : ''}" style="width:${v / maxC * 100}%"></div></div></div>`).join('')}</div>` : '<div class="small muted">Nessuna spesa nel periodo.</div>'}</section>
-  ` : ''}
-  ${A.preventivi ? statPreventivi() : ''}
-  ${A.clienti ? statClienti(lav, ints) : ''}
-  ${A.furgone ? statFurgone(mov, lav, ints) : ''}
-  ${A.trasferte ? statTrasferte(lav, ints) : ''}
-  ${A.materiale ? `
-  <section class="stack"><div class="row between"><h3>Quanto incide il materiale</h3><span class="chip ${incMed > 15 ? 'warn' : 'ok'} num">media ${num(incMed)}%</span></div>
-    <div class="small muted">Costo del materiale usato in ogni posa (ai prezzi dell'ultimo acquisto) rispetto a quanto incassato. Nel periodo: <b class="num">${eur(sum(inc, x => x.c))}</b> di materiale.</div>
-    ${inc.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cantiere</th><th class="r">Incasso</th><th class="r">Materiale</th><th class="r">Incidenza</th><th class="r">€ / ora</th></tr></thead><tbody>${inc.sort((a, b) => String(b.l.data).localeCompare(a.l.data)).slice(0, 15).map(x => `<tr><td>${fmtD(x.l.data, { day: 'numeric', month: 'short' })} · ${esc(x.l.cliente)}</td><td class="r num">${eur(x.l.importo)}</td><td class="r num">${eur(x.c)}</td><td class="r num">${num(x.p)}%</td><td class="r num">${n2(x.l.ore) ? eur((n2(x.l.importo) - x.c) / n2(x.l.ore)) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty small">Segna importo e materiale usato nelle pose per vedere l\'incidenza.</div>'}
-  </section>
-  ` : ''}
   ${A.consumo ? statMateriale(lav, ints) : ''}
-  ${Object.values(A).some(Boolean) ? '' : `<div class="empty">Nessuna statistica scelta. <button class="btn sm" data-act="setAnalisi" type="button">Scegli cosa vedere</button></div>`}
-  <div class="row"><button class="btn sm" data-act="csv" data-arg="movimenti" type="button">Esporta spese (CSV)</button><button class="btn sm" data-act="csv" data-arg="lavori" type="button">Esporta lavori (CSV)</button></div>
-  <div class="small muted">I file CSV si aprono con Excel o Numbers: utili per il commercialista.</div>`;
+  ${A.interventi ? statInterventi() : ''}
+  ${A.clienti ? statClienti(lav, ints) : ''}
+  ${A.trasferte ? statTrasferte(lav, ints) : ''}
+  ${Object.values(A).some(Boolean) ? '' : `<div class="empty">Nessuna statistica scelta. <button class="btn sm" data-act="setAnalisi" type="button">Scegli cosa vedere</button></div>`}`;
 }
 
 /* ---------- moduli compilabili ---------- */
@@ -1738,7 +1696,7 @@ function sheetNotifiche() {
     <div class="fieldset"><span class="fs-t">Su questo dispositivo</span>${statoDispositivo()}<div id="devList" class="stack"></div></div>
     <div class="fieldset"><span class="fs-t">Quando</span>
       <div class="togrow">${tog('mattino', 'Riepilogo del mattino', N.mattino, 'scadenze, fatture e lavori di oggi')}${selN('oraMattino', ore(5, 11), N.oraMattino)}</div>
-      <div class="togrow">${tog('sera', 'Promemoria della sera', N.sera, 'giornata da segnare, scontrini, programma di domani')}${selN('oraSera', ore(15, 22), N.oraSera)}</div>
+      <div class="togrow">${tog('sera', 'Promemoria della sera', N.sera, 'giornata da segnare, programma di domani')}${selN('oraSera', ore(15, 22), N.oraSera)}</div>
       ${tog('weekend', 'Anche sabato e domenica', N.weekend)}
       <div class="small muted">L'orario può slittare di qualche minuto.</div>
     </div>
@@ -1752,18 +1710,17 @@ function sheetNotifiche() {
       ${tog('urgenti', 'Interventi molto urgenti', N.urgenti)}
     </div>
     <div class="fieldset"><span class="fs-t">Contabilità</span>
-      ${tog('consuntivi', 'Lavori da consuntivare', N.consuntivi)}
-      ${tog('fatture', 'Fatture da emettere', N.fatture, 'consuntivo inviato, fattura non ancora fatta')}
-      ${tog('incassi', 'Fatture da incassare', N.incassi)}
+      ${tog('consuntivi', 'Consuntivi da fare e da inviare', N.consuntivi)}
+      ${tog('fatture', 'Da fatturare', N.fatture, 'consuntivo inviato, fattura non ancora fatta')}
+      ${tog('incassi', 'Da incassare', N.incassi)}
       <div class="togrow">${tog('preventivi', 'Preventivi senza risposta', N.preventivi)}${selN('preventiviGiorni', [[3, 'dopo 3 gg'], [5, 'dopo 5 gg'], [7, 'dopo 7 gg'], [10, 'dopo 10 gg'], [15, 'dopo 15 gg']], N.preventiviGiorni)}</div>
-      <div class="g2" style="margin-top:6px">${F('Promemoria scontrini', selN('scontrini', [['mai', 'Mai'], ['sera', 'Ogni sera lavorativa'], ['settimanale', 'Una volta a settimana']], N.scontrini))}<label class="f" id="wrapScG" ${N.scontrini === 'settimanale' ? '' : 'hidden'}><span>Il giorno</span>${selN('scontriniGiorno', GIORNI_BREVI.map(([d]) => [d, NOMI_GIORNI[d]]), N.scontriniGiorno)}</label></div>
     </div>
     <div class="small muted">Le stesse scelte valgono per il riquadro "Da fare" del calendario.</div>`,
   async fd => {
     const n = { ...N };
     for (const k of ['mattino', 'sera', 'weekend', 'furgone', 'programma', 'giornata', 'urgenti', 'consuntivi', 'fatture', 'incassi', 'preventivi', 'materiale']) n[k] = !!fd.get(k);
-    for (const k of ['oraMattino', 'oraSera', 'furgoneGiorni', 'furgoneKm', 'preventiviGiorni', 'scontriniGiorno']) n[k] = +fd.get(k);
-    n.scontrini = fd.get('scontrini');
+    for (const k of ['oraMattino', 'oraSera', 'furgoneGiorni', 'furgoneKm', 'preventiviGiorni']) n[k] = +fd.get(k);
+    n.scontrini = 'mai';
     salvaImp({ notifiche: n });
     toast('Notifiche salvate su tutti i dispositivi');
   });
@@ -1797,12 +1754,11 @@ function sheetGiornata() {
 
 /* ---------- statistiche da mostrare ---------- */
 const SEZIONI_ANALISI = [
-  ['Generale', [['kpi', 'Entrate, uscite e utile', 'con resa oraria'], ['mensile', 'Grafico mese per mese', 'entrate e uscite']]],
-  ['Lavoro', [['lavoro', 'Giorni lavorati e rendimento', 'occupazione, incasso al giorno, pezzi al giorno'], ['voci', 'Cosa posi di più', 'le voci del listino più usate'], ['interventi', 'Interventi', 'quanti, quanti urgenti, tempi di risposta']]],
-  ['Contabilità', [['contabilita', 'Situazione incassi', 'da consuntivare, da fatturare, da incassare, pagato'], ['spese', 'Dove vanno i soldi', 'spese per categoria'], ['preventivi', 'Preventivi', 'valore, accettati, tasso di accettazione']]],
+  ['Generale', [['kpi', 'Numeri del periodo', 'pose, interventi, ore e pezzi']]],
+  ['Lavoro', [['lavoro', 'Giorni lavorati e rendimento', 'occupazione, pezzi e ore al giorno'], ['voci', 'Cosa posi di più', 'le voci del listino più usate'], ['interventi', 'Interventi', 'quanti, quanti urgenti, tempi di risposta']]],
   ['Clienti', [['clienti', 'Clienti', 'principali, nuovi, privati / rivenditori / imprese']]],
-  ['Furgone e trasferte', [['furgone', 'Costi del furgone', 'carburante e manutenzione, costo per giorno'], ['trasferte', 'Trasferte', 'km fatturati e ricavi']]],
-  ['Materiale', [['materiale', 'Incidenza del materiale', 'sul prezzo di ogni posa'], ['consumo', 'Materiale usato', 'quanto ne usi in ogni cantiere e per ogni prodotto']]],
+  ['Trasferte', [['trasferte', 'Trasferte', 'km fatti per i cantieri']]],
+  ['Materiale', [['consumo', 'Materiale usato', 'quanto ne usi e quanto costa in media per prodotto']]],
 ];
 function sheetAnalisi() {
   const A = IMP().analisi;
@@ -1834,12 +1790,11 @@ function statLavoro(lav, ints) {
   lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g)));
   ints.forEach(i => giorni.add(i.dataProg || i.data));
   const nG = giorni.size, disp = giorniLavorabili();
-  const incasso = sum(lav, fatturato) + sum(ints, fatturato);
   const ore = sum(lav, l => l.ore) + sum(ints, i => i.ore), pezzi = sum(lav, l => l.pezzi);
   const aOre = lav.filter(l => calcoloDi(l) === 'ore').length;
   return `<section class="panel stack"><h3>Giorni lavorati e rendimento</h3>
-    <div class="kpis">${tile('Giorni lavorati', `${nG}${disp ? `<span class="small muted"> / ${disp}</span>` : ''}`)}${tile('Occupazione', disp ? Math.round(nG / disp * 100) + '%' : '—')}${tile('Incasso al giorno', nG ? eur(incasso / nG) : '—')}${tile('Resa oraria', ore ? eur(incasso / ore) : '—')}</div>
-    <div class="kpis">${tile('Pezzi posati', num(pezzi, 0))}${tile('Pezzi al giorno', nG ? num(pezzi / nG) : '—')}${tile('Ore lavorate', num(ore))}${tile('Giornate a ore', `${aOre}<span class="small muted"> / ${lav.length}</span>`)}</div>
+    <div class="kpis">${tile('Giorni lavorati', `${nG}${disp ? `<span class="small muted"> / ${disp}</span>` : ''}`)}${tile('Occupazione', disp ? Math.round(nG / disp * 100) + '%' : '—')}${tile('Pezzi al giorno', nG ? num(pezzi / nG) : '—')}${tile('Ore al giorno', nG && ore ? num(ore / nG) : '—')}</div>
+    <div class="kpis">${tile('Pezzi posati', num(pezzi, 0))}${tile('Ore lavorate', num(ore))}${tile('Ore per pezzo', pezzi && ore ? num(sum(lav, l => l.ore) / pezzi, 1) : '—')}${tile('Giornate a ore', `${aOre}<span class="small muted"> / ${lav.length}</span>`)}</div>
     <div class="small muted">L'occupazione confronta i giorni lavorati con i giorni lavorativi del periodo, ferie escluse.</div></section>`;
 }
 function statMateriale(lav, ints) {
@@ -1861,6 +1816,10 @@ function statMateriale(lav, ints) {
     ${righe.length ? `<div class="tbl-wrap"><table><thead><tr><th>Materiale</th><th class="r">Totale</th><th class="r">Per cantiere</th><th class="r">Per pezzo</th></tr></thead><tbody>${righe.map(r => `<tr><td><b>${esc(r.nome)}</b><div class="small muted">${r.pose ? `${r.pose} ${r.pose === 1 ? 'posa' : 'pose'}` : ''}${r.pose && r.int ? ' · ' : ''}${r.int ? `${r.int} ${r.int === 1 ? 'intervento' : 'interventi'}` : ''}</div></td><td class="r num">${num(r.q, 1)}${u(r.nome)}</td><td class="r num">${num(r.q / (r.pose + r.int), 1)}</td><td class="r num">${r.pose && pezziConMat ? num(r.q / pezziConMat, 2) : '—'}</td></tr>`).join('')}</tbody></table></div>
     <div class="small muted">Nel periodo scelto. «Per pezzo» divide il materiale per i ${num(pezziConMat, 0)} pezzi posati nelle pose in cui l'hai segnato.</div>` : vuoto}
   </section>
+  <section class="panel stack"><div class="row between"><h3>Costo medio del materiale per prodotto</h3><button class="btn sm" data-act="prezziMat" type="button">Prezzi materiale</button></div>
+    ${prod.length ? (() => { const C = prod.map(p => ({ p, c: sum(p.mat, m => m.perPezzo * prezzoMat(m.nome)), manca: p.mat.filter(m => !prezzoMat(m.nome)).length })); return `<div class="tbl-wrap"><table><thead><tr><th>Prodotto</th><th class="r">Pezzi</th><th class="r">€ / pezzo</th></tr></thead><tbody>${C.map(({ p, c, manca }) => `<tr><td><b>${esc(p.nome)}</b>${manca ? `<div class="small muted">${manca} ${manca === 1 ? 'materiale' : 'materiali'} senza prezzo</div>` : ''}</td><td class="r num">${num(p.pezzi, 0)}</td><td class="r num">${c ? eur(c) : '—'}</td></tr>`).join('')}</tbody></table></div>
+    <div class="small muted">Media su tutti i cantieri in cui hai segnato il materiale, con i prezzi che trovi in «Prezzi materiale».</div>`; })() : vuoto}
+  </section>
   <section class="panel stack"><h3>Quanto materiale serve per prodotto</h3>
     ${prod.length ? `<div class="small muted">Da tutti i cantieri in cui hai segnato il materiale. Se in una posa ci sono più prodotti, il materiale si divide in proporzione ai pezzi: più pose registri, più la stima è precisa.</div>
     <div class="chips">${prod.map(p => `<button class="chipf" data-act="matProd" data-arg="${esc(p.nome)}" aria-pressed="${p.nome === aperto}" type="button">${esc(p.nome)} <span class="num">${num(p.pezzi, 0)}</span></button>`).join('')}</div>
@@ -1871,14 +1830,14 @@ function statMateriale(lav, ints) {
 function statVoci(lav, ints) {
   const m = new Map();
   for (const x of [...lav, ...ints]) for (const r of x.righe || []) {
-    if (['km', 'ora'].includes(r.voce) || r.unita === 'ora' || !r.descr) continue;
-    const k = r.descr; const v = m.get(k) || { q: 0, e: 0 };
-    v.q += n2(r.qta); v.e += totaleRiga(r, LIST()); m.set(k, v);
+    if (['km', 'ora', 'sconto', 'arrot'].includes(r.voce) || r.unita === 'ora' || !r.descr) continue;
+    const k = r.descr; const v = m.get(k) || { q: 0, n: 0 };
+    v.q += n2(r.qta); v.n++; m.set(k, v);
   }
-  const top = [...m.entries()].sort((a, b) => b[1].e - a[1].e).slice(0, 8);
+  const top = [...m.entries()].sort((a, b) => b[1].q - a[1].q).slice(0, 8);
   if (!top.length) return `<section class="panel stack"><h3>Cosa posi di più</h3><div class="small muted">Compare quando usi le voci del listino nelle pose.</div></section>`;
-  const max = top[0][1].e || 1;
-  return `<section class="panel stack"><h3>Cosa posi di più</h3><div class="bars">${top.map(([k, v]) => `<div><div class="bar-l"><span>${esc(k)} <span class="muted small">· ${num(v.q, 1)}</span></span><span class="num">${eur(v.e)}</span></div><div class="bar-t"><div class="bar-f tape" style="width:${v.e / max * 100}%"></div></div></div>`).join('')}</div></section>`;
+  const max = top[0][1].q || 1;
+  return `<section class="panel stack"><h3>Cosa posi di più</h3><div class="bars">${top.map(([k, v]) => `<div><div class="bar-l"><span>${esc(k)}</span><span class="num">${num(v.q, 0)} <span class="muted small">in ${v.n} ${v.n === 1 ? 'lavoro' : 'lavori'}</span></span></div><div class="bar-t"><div class="bar-f tape" style="width:${v.q / max * 100}%"></div></div></div>`).join('')}</div></section>`;
 }
 function statInterventi() {
   const L = S.interventi.filter(i => inPeriod(i.data));
@@ -1886,42 +1845,21 @@ function statInterventi() {
   const urg = L.filter(i => i.urgenza && i.urgenza !== 'normale');
   const attese = L.filter(i => i.dataProg && i.data).map(i => Math.max(0, (pd(i.dataProg) - pd(i.data)) / 864e5));
   return `<section class="panel stack"><h3>Interventi</h3><div class="kpis">${tile('Richiesti', L.length)}${tile('Completati', chiusi.length)}${tile('Urgenti', L.length ? Math.round(urg.length / L.length * 100) + '%' : '—')}${tile('Attesa media', attese.length ? num(sum(attese, x => x) / attese.length) + ' gg' : '—')}</div>
-    <div class="small muted">Incasso medio per intervento: <b>${chiusi.length ? eur(sum(chiusi, i => i.costo) / chiusi.length) : '—'}</b>. L'attesa è il tempo tra la richiesta e il giorno dell'intervento.</div></section>`;
-}
-function statContabilita(lav, ints) {
-  const jobs = [...lav.map(l => ({ a: l.amm, v: fatturato(l) })), ...ints.map(i => ({ a: i.amm, v: fatturato(i) }))];
-  const tot = sum(jobs, j => j.v) || 1;
-  const righe = AMM.map(([k, l, c]) => ({ l, c, v: sum(jobs.filter(j => (j.a || 'da_cons') === k), j => j.v), n: jobs.filter(j => (j.a || 'da_cons') === k).length }));
-  return `<section class="panel stack"><h3>Situazione incassi</h3><div class="bars">${righe.map(r => `<div><div class="bar-l"><span>${r.l} <span class="muted small">· ${r.n}</span></span><span class="num">${eur(r.v)} · ${num(r.v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f st-${r.c || 'x'}" style="width:${r.v / tot * 100}%"></div></div></div>`).join('')}</div>
-    <div class="small muted">Lavori del periodo per stato. Da incassare in tutto: <b>${eur(sum(righe.slice(0, 3), r => r.v))}</b>.</div></section>`;
-}
-function statPreventivi() {
-  const P = S.preventivi.filter(p => inPeriod(p.data));
-  const v = p => totPrev(p).imponibile;
-  const acc = P.filter(p => p.stato === 'accettato'), rif = P.filter(p => p.stato === 'rifiutato'), att = P.filter(p => p.stato === 'inviato');
-  return `<section class="panel stack"><h3>Preventivi</h3><div class="kpis">${tile('Fatti', P.length)}${tile('Valore', eur(sum(P, v)))}${tile('Accettati', `${acc.length}<span class="small muted"> · ${eur(sum(acc, v))}</span>`)}${tile('Tasso', acc.length + rif.length ? Math.round(acc.length / (acc.length + rif.length) * 100) + '%' : '—')}</div>
-    <div class="small muted">In attesa di risposta: <b>${att.length}</b> (${eur(sum(att, v))}). Valore medio: <b>${P.length ? eur(sum(P, v) / P.length) : '—'}</b>. Importi IVA esclusa.</div></section>`;
+    <div class="small muted">L'attesa è il tempo tra la richiesta e il giorno dell'intervento.</div></section>`;
 }
 function statClienti(lav, ints) {
   const attivi = new Set([...lav, ...ints].map(x => x.clienteId || normNome(x.cliente)).filter(Boolean));
   const nuovi = S.clienti.filter(c => c.creato && inPeriod(c.creato));
-  const perTipo = TIPI_CLIENTE.map(([k, l]) => [l, sum([...lav.map(x => [x, fatturato(x)]), ...ints.map(x => [x, fatturato(x)])].filter(([x]) => ((cliDi(x) || {}).tipo || 'finale') === k), ([, v]) => n2(v))]);
+  const perTipo = TIPI_CLIENTE.map(([k, l]) => [l, [...lav, ...ints].filter(x => ((cliDi(x) || {}).tipo || 'finale') === k).length]);
   const tot = sum(perTipo, x => x[1]) || 1;
   return `<section class="panel stack"><h3>Clienti</h3><div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">${tile('Clienti con lavori', attivi.size)}${tile('Nuovi in rubrica', nuovi.length)}</div>
-    <div class="bars">${perTipo.map(([l, v]) => `<div><div class="bar-l"><span>${l}</span><span class="num">${eur(v)} · ${num(v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${v / tot * 100}%"></div></div></div>`).join('')}</div></section>
+    <div class="bars">${perTipo.map(([l, v]) => `<div><div class="bar-l"><span>${l}</span><span class="num">${v} ${v === 1 ? 'lavoro' : 'lavori'} · ${num(v / tot * 100, 0)}%</span></div><div class="bar-t"><div class="bar-f" style="width:${v / tot * 100}%"></div></div></div>`).join('')}</div></section>
   ${clientiPrincipali(lav, ints)}`;
 }
 function statTrasferte(lav, ints) {
   const km = [...lav, ...ints].map(x => (x.righe || []).find(r => r.voce === 'km')).filter(Boolean);
-  const tot = sum(km, r => r.qta), ric = sum(km, r => totaleRiga(r, LIST()));
-  return `<section class="panel stack"><h3>Trasferte</h3><div class="kpis">${tile('Km fatturati', num(tot, 0))}${tile('Ricavo', eur(ric))}${tile('Lavori con trasferta', km.length)}${tile('Km medi', km.length ? num(tot / km.length, 0) : '—')}</div></section>`;
-}
-function statFurgone(mov, lav, ints) {
-  const sp = mov.filter(m => m.tipo !== 'entrata' && ['furgone', 'carburante'].includes(m.categoria));
-  const carb = sum(sp.filter(m => m.categoria === 'carburante'), m => m.importo), manut = sum(sp.filter(m => m.categoria === 'furgone'), m => m.importo);
-  const giorni = new Set(); lav.forEach(l => giorniPosa(l).filter(g => inPeriod(g) && g <= TODAY).forEach(g => giorni.add(g))); ints.forEach(i => giorni.add(i.dataProg || i.data));
-  const entr = sum(lav, fatturato) + sum(ints, fatturato);
-  return `<section class="panel stack"><h3>Costi del furgone</h3><div class="kpis">${tile('Carburante', eur(carb))}${tile('Manutenzione e tasse', eur(manut))}${tile('Al giorno lavorato', giorni.size ? eur((carb + manut) / giorni.size) : '—')}${tile('Sul fatturato', entr ? num((carb + manut) / entr * 100, 1) + '%' : '—')}</div></section>`;
+  const tot = sum(km, r => r.qta);
+  return `<section class="panel stack"><h3>Trasferte</h3><div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">${tile('Km in trasferta', num(tot, 0))}${tile('Lavori con trasferta', km.length)}${tile('Km medi', km.length ? num(tot / km.length, 0) : '—')}</div></section>`;
 }
 
 /* ---------- impostazioni e cartelle ---------- */
@@ -2330,7 +2268,7 @@ function sheetCons(kind, id) {
     ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}
     ${campoAggiustamenti(consCtx.adj)}`,
     async fd => {
-      const adj = leggiAgg(), d = { ...stripId(x), iva: fd.get('iva'), amm: (x.amm || 'da_cons') === 'da_cons' ? 'cons' : x.amm, consAgg: adj };
+      const adj = leggiAgg(), d = { ...stripId(x), iva: fd.get('iva'), amm: (x.amm || 'da_cons') === 'da_cons' ? 'inv' : x.amm, consAgg: adj };
       if (adj.sconto || adj.totale) d.importoCons = totali(conAggiustamenti({ ...docDaLavoro(x, kind, AZ()), iva: fd.get('iva') }, adj), LIST()).imponibile; else delete d.importoCons;
       delete d.gruppoCons;
       store.put(kind, id, d); toast('Consuntivo segnato come inviato');
@@ -2832,7 +2770,7 @@ function sheetConsMulti(adj = {}) {
       // ogni lavoro tiene la sua parte del totale scontato (proporzionale), così analisi e fatture tornano
       const quota = i === sc.length - 1 ? Math.round(resto * 100) / 100 : Math.round((somma ? t.imponibile * lordi[i] / somma : t.imponibile / sc.length) * 100) / 100;
       resto -= quota;
-      store.put(j.kind, j.x.id, { ...stripId(j.x), amm: (j.x.amm || 'da_cons') === 'da_cons' ? 'cons' : j.x.amm, iva, gruppoCons: g, importoCons: quota });
+      store.put(j.kind, j.x.id, { ...stripId(j.x), amm: (j.x.amm || 'da_cons') === 'da_cons' ? 'inv' : j.x.amm, iva, gruppoCons: g, importoCons: quota });
     });
     UI.sel = null; toast(`Consuntivo unico inviato: ${sc.length} ${sc.length === 1 ? 'lavoro' : 'lavori'}, ${eur(t.imponibile)}${t.ivaPct > 0 ? ' + IVA' : ''}`);
   }, { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consMultiPdf">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
@@ -3086,7 +3024,7 @@ function sheetVan() {
 }
 function sheetKm() {
   const f = S.furgone || {};
-  openSheet('Aggiorna chilometri', F('Km attuali', inp('km', f.km, 'number', 'required')), async fd => { store.put('cfg', 'furgone', { ...f, km: n2(fd.get('km')) }); toast('Km aggiornati'); });
+  openSheet('Aggiorna chilometri', F('Km attuali', inp('km', f.km, 'number', 'required')), async fd => { const km = n2(fd.get('km')); const letture = [...(f.letture || []).filter(x => x.data !== TODAY), { data: TODAY, km }].slice(-40); store.put('cfg', 'furgone', { ...f, km, letture }); toast('Km aggiornati'); });
 }
 function sheetRinnova(k) {
   const f = S.furgone || {}; const [, lab, yy] = SCAD.find(s => s[0] === k);
@@ -3094,12 +3032,10 @@ function sheetRinnova(k) {
   openSheet(lab, `
     ${F('Nuova scadenza', inp('scad', next, 'date', 'required'))}
     ${k === 'tagliando' ? F('Prossimo tagliando a km', inp('tkm', n2(f.km) ? n2(f.km) + 30000 : f.tagliandoKm, 'number')) : ''}
-    <div class="g2">${F('Importo pagato €', inp('importo', '', 'number', 'placeholder="vuoto se nessuna spesa"'))}${F('Data pagamento', inp('data', TODAY, 'date'))}</div>
-    <div class="small muted">Se inserisci l'importo, la spesa viene registrata nei conti alla voce Furgone.</div>`,
+`,
   async fd => {
     const d = { ...f, [k]: fd.get('scad') }; if (k === 'tagliando' && fd.get('tkm')) d.tagliandoKm = n2(fd.get('tkm'));
     store.put('cfg', 'furgone', d);
-    if (n2(fd.get('importo')) > 0) store.put('movimenti', null, { tipo: 'uscita', data: fd.get('data') || TODAY, categoria: 'furgone', importo: n2(fd.get('importo')), fornitore: k === 'assicurazione' ? (f.compagnia || '') : '', numero: '', descrizione: `${lab} furgone`, righe: [], magazzino: false });
     toast(`${lab} aggiornata`);
   });
 }
@@ -3116,7 +3052,7 @@ function cardGruppoCons(gg, k) {
     <div class="small"><span class="chip in">Consuntivo unico</span> ${gg.length} ${gg.length === 1 ? 'lavoro' : 'lavori'} · ${g.dal === g.al ? fmtD(g.dal) : `dal ${fmtD(g.dal, { day: 'numeric', month: 'short' })} al ${fmtD(g.al, { day: 'numeric', month: 'short', year: 'numeric' })}`}</div>
     <div class="small muted">${Math.abs(sconto) > 0.009 ? `Prezzo pieno <s>${eur(g.lordo)}</s> · ${sconto > 0 ? 'sconto' : 'in più'} ${eur(Math.abs(sconto))} · ` : ''}${ivaL[2] > 0 ? `totale IVA compresa ${eur(g.totale)}` : esc(ivaL[1])}</div>
     <details class="small"><summary>Lavori compresi</summary>${gg.map(x => `<div>${fmtD(x._d, { day: 'numeric', month: 'short' })} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''} · ${eur(x.importoCons ?? x.importo)}</div>`).join('')}</details>
-    <div class="row">${k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${k === 'cons' ? 'Segna fatturato' : 'Segna pagato'}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
+    <div class="row">${k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${PROSSIMO[k]}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
 }
 /** Stato del consuntivo unico: quello del lavoro più indietro. */
 function statoGruppo(gid) { const L = lavoriGruppo(gid); return AMM[Math.min(...L.map(([, x]) => Math.max(0, AMM.findIndex(a => a[0] === (x.amm || 'da_cons')))))][0]; }
@@ -3183,7 +3119,7 @@ document.addEventListener('click', async e => {
   const go = () => { render(); window.scrollTo({ top: 0 }); };
   switch (a) {
     case 'tab': UI.tab = arg; try { history.replaceState(null, '', '#' + arg); } catch {} go(); break;
-    case 'fatt': UI.tab = 'conti'; UI.seg = 'fatt'; go(); break;
+    case 'fatt': UI.tab = 'cons'; go(); break;
     case 'mag': UI.tab = 'an'; go(); break;
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
     case 'cMonth': UI.cMonth = shiftMonth(UI.cMonth, +arg); render(); break;
@@ -3201,8 +3137,6 @@ document.addEventListener('click', async e => {
     case 'editLav': sheetLav(S.lavori.find(x => x.id === id)); break;
     case 'newInt': sheetInt(null, arg); break;
     case 'editInt': sheetInt(S.interventi.find(x => x.id === id)); break;
-    case 'newMov': sheetMov(null); break;
-    case 'editMov': sheetMov(S.movimenti.find(x => x.id === id)); break;
     case 'newCart': sheetCart(null); break;
     case 'editCart': sheetCart(S.cartelle.find(x => x.id === id)); break;
     case 'editVan': sheetVan(); break;
@@ -3225,6 +3159,7 @@ document.addEventListener('click', async e => {
       toast(nuovi.length ? 'Stima inserita: correggi le quantità con quelle vere a fine lavoro' : 'Il materiale stimato è già nella lista');
       break;
     }
+    case 'prezziMat': sheetPrezziMat(); break;
     case 'matProd': UI.matProd = arg; render(); break;
     case 'addrow': $('#matrows').insertAdjacentHTML('beforeend', matRow({}, arg === 'buy')); break;
     case 'rmrow': { const rows = $('#matrows'); if (rows.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = ''); break; }
@@ -3379,7 +3314,6 @@ document.addEventListener('change', e => {
   if (t.name === 'mc_tipo') { const o = t.closest('.mcampo').querySelector('[name="mc_opz"]'); o.hidden = !['scelta', 'tabella'].includes(t.value); o.placeholder = t.value === 'tabella' ? 'Colonne, separate da virgola' : 'Scelte, separate da virgola'; return; }
   if (t.id === 'pickCli') { const c = S.clienti.find(x => x.id === t.value); const target = $('#' + t.dataset.for); t.value = ''; if (c && target) { target.value = c.nome; if (target.id === 'f_cnome') compilaCliente(c.nome); else compilaDaRubrica(c.nome); aggiornaCliInfo(); if (target.id === 'f_mcliente') aggiornaCliInfoModulo(); } return; }
   if (t.id === 'f_calcolo') { cambiaCalcolo(t.value); return; }
-  if (t.id === 'f_scontrini') { $('#wrapScG').hidden = t.value !== 'settimanale'; return; }
   if (t.id === 'f_gpausa' && $('#oreStd')) { $('#oreStd').textContent = num(oreGiornata({ inizio: $('#f_ginizio').value, fine: $('#f_gfine').value, pausa: t.value })) + ' ore'; return; }
   if (['f_data', 'f_dataFine', 'f_soloFeriali'].includes(t.id) && $('#giorniInfo')) { aggiornaGiorni(); aggiornaTotali(); }
   if (t.id === 'f_cmCliente') { disegnaListaCM(t.value); return; }

@@ -2,7 +2,7 @@
 // Nessuna dipendenza: funziona nel browser e in Node.
 
 export const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
-export const AMM = [['da_cons','Da consuntivare','bad'],['cons','Consuntivo inviato','warn'],['fatt','Fatturato','in'],['pag','Pagato','ok']];
+export const AMM = [['da_cons','Consuntivo da fare','bad'],['inv','Da inviare','warn'],['cons','Da fatturare','warn'],['fatt','Da incassare','in'],['pag','Incassato','ok']];
 export const STATI = [['aperto','Aperto','bad'],['programmato','Programmato','in'],['in_corso','In corso','warn'],['completato','Completato','ok'],['annullato','Annullato','']];
 export const URG = [['normale','Normale',''],['alta','Urgente','warn'],['critica','Molto urgente','bad']];
 export const CAT = [['materiale','Materiale da posa'],['furgone','Furgone (assic., bollo, tagliandi)'],['carburante','Carburante'],['attrezzatura','Attrezzatura'],['telefono','Telefono e ufficio'],['altro','Altro']];
@@ -31,7 +31,7 @@ export const IMPOSTAZIONI_BASE = {
     preventivi: true, preventiviGiorni: 7,
     materiale: true, urgenti: true,
     programma: true, giornata: true,
-    scontrini: 'settimanale', scontriniGiorno: 5,
+    scontrini: 'mai', scontriniGiorno: 5,
   },
   giornata: { inizio: '07:30', fine: '17:00', pausa: 60, giorni: [1, 2, 3, 4, 5], precompila: true },
   analisi: { kpi: true, mensile: true, lavoro: true, voci: true, interventi: true, contabilita: true, spese: true, preventivi: true, clienti: true, trasferte: true, furgone: true, materiale: true, consumo: true },
@@ -80,9 +80,11 @@ export function promemoria(S, today = oggi(), momento = 'app') {
       ...(S.interventi || []).filter(i => i.stato === 'completato').map(x => ({ ...x, _d: x.dataProg || x.data, importo: x.costo })),
     ].filter(x => x._d && x._d <= today && n2(x.importo) > 0);
     const dc = all.filter(x => (x.amm || 'da_cons') === 'da_cons');
-    if (N.consuntivi && dc.length) out.push({ lvl: 'bad', txt: `${dc.length} ${dc.length === 1 ? 'lavoro da consuntivare' : 'lavori da consuntivare'}`, sub: eur(sum(dc, x => x.importo)), act: 'fatt' });
+    if (N.consuntivi && dc.length) out.push({ lvl: 'bad', txt: `${dc.length} ${dc.length === 1 ? 'consuntivo da fare' : 'consuntivi da fare'}`, sub: eur(sum(dc, x => x.importo)), act: 'fatt' });
+    const dv = all.filter(x => x.amm === 'inv');
+    if (N.consuntivi && dv.length) out.push({ lvl: 'warn', txt: `${dv.length} ${dv.length === 1 ? 'consuntivo da inviare' : 'consuntivi da inviare'}`, sub: eur(sum(dv, x => x.importo)), act: 'fatt' });
     const df = all.filter(x => x.amm === 'cons');
-    if (N.fatture && df.length) out.push({ lvl: 'warn', txt: `${df.length} ${df.length === 1 ? 'fattura da emettere' : 'fatture da emettere'}`, sub: eur(sum(df, x => x.importo)), act: 'fatt' });
+    if (N.fatture && df.length) out.push({ lvl: 'warn', txt: `${df.length} ${df.length === 1 ? 'lavoro da fatturare' : 'lavori da fatturare'}`, sub: eur(sum(df, x => x.importo)), act: 'fatt' });
     const di = all.filter(x => x.amm === 'fatt');
     if (N.incassi && di.length) out.push({ lvl: 'in', txt: `${di.length} ${di.length === 1 ? 'fattura da incassare' : 'fatture da incassare'}`, sub: eur(sum(di, x => x.importo)), act: 'fatt' });
 
@@ -114,8 +116,6 @@ export function promemoria(S, today = oggi(), momento = 'app') {
     const inFerie = (S.eventi || []).some(e => e.tipo === 'ferie' && today >= e.data && today <= (e.dataFine || e.data));
     const segnato = (S.lavori || []).some(l => today >= l.data && today <= (l.dataFine || l.data)) || (S.interventi || []).some(i => (i.dataProg || '') === today) || (S.eventi || []).some(e => today >= e.data && today <= (e.dataFine || e.data));
     if (N.giornata && lavorativo && !inFerie && !segnato) out.push({ lvl: 'warn', txt: 'Non hai ancora segnato il lavoro di oggi', sub: 'Aggiungi la posa o l\'intervento finché te lo ricordi', act: 'day', arg: today });
-    const oggiScontrini = N.scontrini === 'sera' ? lavorativo : N.scontrini === 'settimanale' && dow === n2(N.scontriniGiorno);
-    if (oggiScontrini) out.push({ lvl: 'in', txt: 'Hai scontrini da caricare?', sub: N.scontrini === 'settimanale' ? `Promemoria del ${GIORNI_SETT[dow]}: fotografali in Conti` : 'Fotografali in Conti prima di perderli', act: 'tab', arg: 'conti' });
   }
   return out;
 }
@@ -199,7 +199,8 @@ export function kmFurgone(S) {
 }
 /** Km al giorno degli ultimi mesi, dalle letture segnate nelle spese (0 se non bastano). */
 export function ritmoKm(S, today = oggi()) {
-  const L = (S.movimenti || []).filter(m => n2(m.km) > 0 && m.data && daysBetween(m.data, today) <= 180).map(m => [m.data, n2(m.km)]).sort((a, b) => a[0].localeCompare(b[0]));
+  const L = [...(S.movimenti || []).filter(m => n2(m.km) > 0 && m.data).map(m => [m.data, n2(m.km)]), ...((S.furgone || {}).letture || []).filter(x => n2(x.km) > 0 && x.data).map(x => [x.data, n2(x.km)])]
+    .filter(([d]) => daysBetween(d, today) <= 180).sort((a, b) => a[0].localeCompare(b[0]));
   if (L.length < 2) return 0;
   const gg = daysBetween(L[0][0], L[L.length - 1][0]), km = L[L.length - 1][1] - L[0][1];
   return gg >= 7 && km > 0 ? km / gg : 0;
