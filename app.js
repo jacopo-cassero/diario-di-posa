@@ -2229,11 +2229,7 @@ function testoConsSingolo(x, kind, iva, adj = leggiAgg()) {
 Cliente: ${x.cliente || ''}${rifDi(x) ? `\nRiferimento: ${rifDi(x)}` : ''}
 Data: ${fmtD(doc.data, { day: '2-digit', month: '2-digit', year: 'numeric' })}
 Cantiere: ${x.indirizzo || '—'}
-
-Lavori eseguiti:
-${(L ? x.installato : x.descrizione) || '—'}${L && n2(x.pezzi) ? `\nPezzi posati: ${num(x.pezzi, 0)}` : ''}
-Ore impiegate: ${n2(x.ore) ? num(x.ore) : '—'}
-${t.righe.length ? `\nDettaglio:\n${t.righe.map(riga).join('\n')}\n` : ''}${t.urgenzaPct ? `Maggiorazione urgenza ${num(t.urgenzaPct)}%: ${eur(t.urgenza)}\n` : ''}${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
+${t.righe.length ? '' : `\nLavori eseguiti:\n${(L ? x.installato : x.descrizione) || '—'}\n`}${t.righe.length ? `\nDettaglio:\n${t.righe.map(riga).join('\n')}\n` : ''}${t.urgenzaPct ? `Maggiorazione urgenza ${num(t.urgenzaPct)}%: ${eur(t.urgenza)}\n` : ''}${mats.length ? `\nMateriale di consumo utilizzato:\n${mats.map(m => `- ${m.nome}: ${num(m.qta)} ${S.magazzino.find(s => s.id === slug(m.nome))?.unita || ''}`).join('\n')}\n` : ''}
 ${righeTotale(t)}`;
 }
 function aggiornaCons() {
@@ -2785,18 +2781,17 @@ function jobsScelti() {
   return [...document.querySelectorAll('.cmChk:checked')].map(c => cmCtx.jobs.find(j => j.kind === c.dataset.kind && j.x.id === c.dataset.id)).filter(Boolean);
 }
 function docMulti(sc, iva) {
-  const L = LIST(); let ore = 0;
+  const L = LIST();
   const gruppi = sc.map(j => {
     const d = docDaLavoro(j.x, j.kind, AZ());
     const t = totali(d, L);
     const righe = d.righe.map(r => ({ ...r }));
     if (t.urgenzaPct) righe.push({ descr: `Maggiorazione urgenza ${num(t.urgenzaPct)}%`, unita: 'corpo', qta: 1, prezzo: t.urgenza });
-    ore += n2(j.x.ore);
     return { titolo: `${fmtD(j.d, { weekday: 'long', day: 'numeric', month: 'long' })} · ${j.kind === 'lavori' ? 'Posa' : 'Intervento'}${rifDi(j.x) ? ' · Rif. ' + rifDi(j.x) : ''}${j.x.indirizzo ? ' · ' + j.x.indirizzo : ''}`, righe };
   });
   const indirizzi = [...new Set(sc.map(j => j.x.indirizzo).filter(Boolean))];
   const rifs = [...new Set(sc.map(j => rifDi(j.x)).filter(Boolean))];
-  return { riferimento: rifs.join(', '), data: sc[0].d, dataFine: sc[sc.length - 1].d, cliente: { nome: sc[0].x.cliente || '', telefono: sc[0].x.telefono || '' }, cantiere: indirizzi.length === 1 ? indirizzi[0] : '', oggetto: `${sc.length} ${sc.length === 1 ? 'giornata' : 'giornate'} di lavoro`, ore, righe: gruppi.flatMap(g => g.righe), gruppi, iva, note: '' };
+  return { riferimento: rifs.join(', '), data: sc[0].d, dataFine: sc[sc.length - 1].d, cliente: { nome: sc[0].x.cliente || '', telefono: sc[0].x.telefono || '' }, cantiere: indirizzi.length === 1 ? indirizzi[0] : '', oggetto: '', righe: gruppi.flatMap(g => g.righe), gruppi, iva, note: '' };
 }
 function aggiornaCM() {
   const pre = $('#consTxt'); if (!pre) return;
@@ -2813,7 +2808,6 @@ Periodo: ${dd(doc.data)}${doc.dataFine !== doc.data ? ' – ' + dd(doc.dataFine)
 ${doc.cantiere ? 'Cantiere: ' + doc.cantiere + '\n' : ''}
 ${doc.gruppi.map(g => `${g.titolo.toUpperCase()}\n${g.righe.map(riga).join('\n') || '- nessuna voce'}`).join('\n\n')}
 
-Ore totali: ${num(doc.ore, 2)}
 ${righeTotale(t)}`;
   infoAgg(totali(docMulti(sc, iva), L), doc, t);
 }

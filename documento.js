@@ -59,7 +59,6 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
   const xr = 110, wr = X1 - xr;
   if (doc.cantiere) { pdf.text(xr, yr, 'CANTIERE', { size: 7, font: 'bold', color: C.grigio }); yr = pdf.paragraph(xr, yr + 4.5, doc.cantiere, wr, { size: 9, lead: 1.25 }) + 1.5; }
   if (doc.oggetto) { pdf.text(xr, yr, prev ? 'OGGETTO' : 'LAVORI ESEGUITI', { size: 7, font: 'bold', color: C.grigio }); yr = pdf.paragraph(xr, yr + 4.5, doc.oggetto, wr, { size: 9, lead: 1.25 }) + 1.5; }
-  if (!prev && +doc.ore > 0) { pdf.text(xr, yr, 'ORE IMPIEGATE', { size: 7.5, font: 'bold', color: C.grigio }); pdf.text(xr, yr + 5, qtaFmt(doc.ore), { size: 9.5 }); yr += 9; }
   y = Math.max(yl, yr) + 3;
 
   // Tabella
@@ -217,8 +216,7 @@ export function docDaLavoro(x, tipoLavoro, azienda) {
     cliente: { nome: x.cliente, telefono: x.telefono || '' },
     riferimento: x.riferimento ?? x.clienteFinale ?? '',
     cantiere: x.indirizzo,
-    oggetto: L ? x.installato : x.descrizione,
-    ore: x.ore,
+    oggetto: '', // la descrizione è già nelle voci della tabella
     righe,
     urgenza: !!x.urgenzaApplicata,
     urgenzaPct: x.urgenzaPct,
