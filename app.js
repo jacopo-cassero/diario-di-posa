@@ -433,7 +433,7 @@ function rDipendente() {
   <section class="stack"><h3>Prossimi</h3>${pross.map(cardDip).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}</section>
   ${fatti.length ? `<section class="stack"><h3>Ultimi giorni</h3>${fatti.slice(0, 15).map(cardDip).join('')}</section>` : ''}
   <section class="stack"><div class="row between"><h3>Moduli</h3><button class="btn sm primary" data-act="dipModNuovo" type="button">${svg('plus')} Nuovo modulo</button></div>
-    <div class="small muted">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo, consenso foto e video: si compilano qui, si firmano sullo schermo e diventano PDF. Dal tasto Modulo di un lavoro i dati del cliente sono già scritti.</div>${DIP.moduli.map(m => `<div class="card" role="button" tabindex="0" data-act="dipMod" data-id="${esc(m.id)}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || '')} · ${fmtD(m.data)}</div></div>`).join('') || '<div class="empty small">Ancora nessuno: li compili dal lavoro, con il tasto Modulo.</div>'}</section>
+    <div class="small muted">Rapporto di assistenza, scheda di manutenzione, verbale di corretta installazione, consenso foto e video: si compilano qui, si firmano sullo schermo e diventano PDF. Dal tasto Modulo di un lavoro i dati del cliente sono già scritti.</div>${DIP.moduli.map(m => `<div class="card" role="button" tabindex="0" data-act="dipMod" data-id="${esc(m.id)}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || '')} · ${fmtD(m.data)}</div></div>`).join('') || '<div class="empty small">Ancora nessuno: li compili dal lavoro, con il tasto Modulo.</div>'}</section>
   <div class="row between small muted"><span>${esc(store.st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`;
 }
 function cardDip(x) {
@@ -1239,7 +1239,7 @@ function rAn() {
 // I moduli CASSERO (i PDF originali) sostituiscono i vecchi modelli generici; restano i modelli creati a mano.
 const VECCHI_BASE = new Set(MODELLI_BASE.map(b => b.id));
 const modelli = () => [
-  ...MODELLI_UFFICIALI,
+  ...MODELLI_UFFICIALI.filter(m => !m.nascosto),
   ...S.modelli.filter(m => !VECCHI_BASE.has(m.id) && !MODELLI_UFFICIALI.some(u => u.id === m.id)).map(m => ({ ...m, mio: true })),
 ];
 const ufficiale = id => MODELLI_UFFICIALI.find(m => m.id === id);
@@ -1413,7 +1413,7 @@ function valoriUfficiali(m, ctx) {
   }
   if (x.km) v._km = String(x.km);
   // prodotti della posa nelle righe del verbale
-  const pref = m.id === 'verbale-collaudo' ? 'prod' : m.id === 'scheda-manutenzione' ? 'serr' : '';
+  const pref = ['verbale-collaudo', 'verbale-installazione'].includes(m.id) ? 'prod' : m.id === 'scheda-manutenzione' ? 'serr' : '';
   if (pref) (x.righe || []).slice(0, 4).forEach((r, i) => { v[`${pref}${i + 1}_qta`] = n2(r.qta) ? String(n2(r.qta)) : ''; v[`${pref}${i + 1}_note`] = r.descr || ''; });
   if (m.id === 'rapporto-assistenza') calcolaRapporto(v);
   return v;
@@ -1488,7 +1488,7 @@ function salvaModuloU(fd) {
   const firme = campiUfficiali(m).filter(c => c.t === 'firma');
   const dip = !GESTORE() && store.st.mode !== 'demo';
   const d = { ...stripId(mod), modelloId: m.id, ufficiale: true, titolo: m.nome, valori, toccati, cliente, clienteId: cliente && !dip ? assicuraCliente(cliente) : '',
-    stato: firme.every(f => valori[f.n]) ? 'firmato' : 'bozza', data: valori.data_intervento || valori.data_collaudo || valori.data || mod.data || TODAY };
+    stato: firme.every(f => valori[f.n]) ? 'firmato' : 'bozza', data: valori.data_intervento || valori.data_fine || valori.data_collaudo || valori.data || mod.data || TODAY };
   let id;
   if (dip) {
     id = mod.id || (crypto.randomUUID ? crypto.randomUUID() : 'm' + Date.now().toString(36));

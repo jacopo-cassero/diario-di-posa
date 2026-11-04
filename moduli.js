@@ -242,7 +242,28 @@ export const MODELLI_UFFICIALI = [
     { titolo: '6. Importo e pagamento', campi: [{ n: 'importo', t: 'euro', l: 'Importo €' }, { n: 'pag_contanti', t: 'check', l: 'Contanti' }, { n: 'pag_bonifico', t: 'check', l: 'Bonifico' }, { n: 'pag_pos', t: 'check', l: 'POS' }, { n: 'pag_satispay', t: 'check', l: 'Satispay' }] },
     { titolo: '7. Firme', campi: [{ n: 'firma_tecnico', t: 'firma', l: 'Firma tecnico' }, { n: 'firma_cliente', t: 'firma', l: 'Firma cliente' }] },
   ] },
-  { id: 'verbale-collaudo', ufficiale: true, nome: 'Verbale di collaudo finale', descr: 'Posa serramenti e complementi · posa qualificata UNI 11673-2', sezioni: [
+  { id: 'verbale-installazione', ufficiale: true, nome: 'Verbale di corretta installazione e conclusione cantiere', descr: 'Posa qualificata UNI 11673-2 · verifiche, cantiere concluso, firme', sezioni: [
+    { titolo: '', campi: [{ n: 'data_inizio', t: 'data', l: 'Inizio lavori', auto: 'dataLavoro' }, { n: 'data_fine', t: 'data', l: 'Fine cantiere', auto: 'oggi' }] },
+    { titolo: '1. Dati cliente e cantiere', campi: [
+      { n: 'cliente', t: 'testo', l: 'Cliente / ragione sociale', auto: 'cliente', full: 1 },
+      { n: 'tel', t: 'testo', l: 'Tel. / cell.', auto: 'telefono', tipo: 'tel' }, { n: 'email', t: 'testo', l: 'E-mail', auto: 'email', tipo: 'email' },
+      { n: 'indirizzo_cantiere', t: 'testo', l: 'Indirizzo cantiere', auto: 'indirizzo', full: 1 },
+      { n: 'rif_ordine', t: 'testo', l: 'Rif. ordine / preventivo', auto: 'rif' },
+    ] },
+    { titolo: '2. Prodotti installati', campi: [{ t: 'griglia', col: [{ l: 'Tipologia', t: 'scelta', opz: OPZ_TIPO_C }, { l: 'Q.tà', t: 'numero' }, { l: 'Ambiente / posizione' }, { l: 'Note (modello, colore, misure)' }], righe: righe4('prod'), auto: 'prodotti' }] },
+    { titolo: '3. Verifiche di corretta installazione', campi: [{ t: 'controlli', opz: [['OK', 'OK'], ['NON_OK', 'Non OK'], ['NA', 'N.A.']], gruppi: [{ l: '', righe: [
+      ['verifica_01', 'Fissaggio e stabilità del telaio'], ['verifica_02', 'Piombo, livello e squadra'], ['verifica_03', 'Sigillatura e isolamento del giunto'],
+      ['verifica_04', 'Apertura, chiusura e regolazione ante'], ['verifica_05', 'Ferramenta, maniglie e serrature'], ['verifica_06', 'Tenuta guarnizioni'],
+      ['verifica_07', 'Integrità vetri e superfici'], ['verifica_08', 'Avvolgibili, persiane e zanzariere'], ['verifica_09', 'Motorizzazioni / automatismi'],
+      ['verifica_10', 'Finiture: coprifili, davanzali, raccordi'], ['verifica_11', "Prodotti conformi all'ordine"], ['verifica_12', 'Funzionamento generale']] }] }] },
+    { titolo: '4. Conclusione cantiere', campi: [{ n: 'cant_pulito', t: 'check', l: 'Cantiere pulito e in ordine' }, { n: 'cant_imballi', t: 'check', l: 'Imballi e materiale di risulta rimossi' }, { n: 'cant_smaltiti', t: 'check', l: 'Vecchi serramenti smaltiti' }, { n: 'cant_doc', t: 'check', l: 'Documentazione e garanzie consegnate' }] },
+    { titolo: '5. Lavori da completare e note', campi: [{ n: 'note', t: 'testolungo', l: 'Lavori da completare e note', full: 1 }] },
+    { titolo: '6. Esito', campi: [{ n: 'esito', t: 'radio', l: 'Esito', opz: [['CONCLUSI', 'Lavori conclusi'], ['RISERVE', 'Conclusi con riserve (vedi sez. 5)'], ['DA_COMPLETARE', 'Da completare (vedi sez. 5)']], full: 1 },
+      { t: 'nota', l: "L'installatore dichiara che la posa in opera è stata eseguita a regola d'arte, secondo le indicazioni del produttore e la norma UNI 11673-1. Con la firma il cliente dichiara di aver verificato i lavori, di riceverli in consegna e che il cantiere è concluso, fatte salve le riserve annotate." }] },
+    { titolo: '7. Firme', campi: [{ n: 'firma_tecnico', t: 'firma', l: 'Firma tecnico / posatore' }, { n: 'firma_cliente', t: 'firma', l: 'Firma cliente' }] },
+  ] },
+  // vecchio modulo: non si crea più, ma quelli già compilati si riaprono
+  { id: 'verbale-collaudo', ufficiale: true, nascosto: true, nome: 'Verbale di collaudo finale', descr: 'Posa serramenti e complementi · posa qualificata UNI 11673-2', sezioni: [
     { titolo: '', campi: [{ n: 'data_fine_posa', t: 'data', l: 'Data fine posa', auto: 'dataLavoro' }, { n: 'data_collaudo', t: 'data', l: 'Data collaudo', auto: 'oggi' }] },
     { titolo: '1. Dati cliente e cantiere', campi: [
       { n: 'cliente', t: 'testo', l: 'Cliente / ragione sociale', auto: 'cliente', full: 1 },
