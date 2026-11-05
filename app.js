@@ -1105,7 +1105,7 @@ function intCard(i) {
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
     ${dettaglioPrev(i)}
-    ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
+    ${i.stato === 'da_spostare' ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Nuova data</button></div>` : i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -1154,8 +1154,8 @@ function rCal() {
 
 function rInt() {
   const F = [['daprog', 'Da programmare'], ['aperti', 'Da fare'], ['urgenti', 'Urgenti'], ['completati', 'Completati'], ['tutti', 'Tutti']];
-  const open = i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto');
-  const senzaData = i => open(i) && !i.dataProg;
+  const open = i => ['aperto', 'programmato', 'da_spostare', 'in_corso'].includes(i.stato || 'aperto');
+  const senzaData = i => open(i) && (!i.dataProg || i.stato === 'da_spostare');
   const f = UI.intFilter;
   const L = S.interventi.filter(i => f === 'tutti' || (f === 'aperti' && open(i)) || (f === 'daprog' && senzaData(i)) || (f === 'urgenti' && open(i) && i.urgenza && i.urgenza !== 'normale') || (f === 'completati' && i.stato === 'completato'));
   const ur = { critica: 0, alta: 1, normale: 2 };
@@ -1166,11 +1166,11 @@ function rInt() {
   const conData = sel ? L.filter(i => sel.has(i.id) && i.dataProg && open(i)).length : 0;
   const barra = sel ? `<div class="selbar intsel"><div><b>${sel.size}</b> ${sel.size === 1 ? 'selezionato' : 'selezionati'}</div>
     <div class="row"><input type="date" id="intSelData" class="btn sm" aria-label="Data da fissare"><button class="btn sm primary" data-act="intSelFissa" type="button" ${sel.size ? '' : 'disabled'}>Fissa la data</button>
-    <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Metti in «Da programmare»</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
+    <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Togli la data</button><button class="btn sm" data-act="intSelSposta" type="button" ${conData ? '' : 'disabled'}>Segna da spostare</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
   return `<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
   <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
-  ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
+  ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data e quelli da spostare: restano qui finché non fissi il giorno. Tocca «Fissa data» o «Nuova data» quando sai quando andare.</div>` : ''}
   ${barra}
   <div class="stack">${L.map(i => sel ? `<label class="selcard"><input type="checkbox" class="intChk" data-id="${esc(i.id)}" ${sel.has(i.id) ? 'checked' : ''} ${open(i) ? '' : 'disabled'}>${intCard(i)}</label>` : intCard(i)).join('') || `<div class="empty">${f === 'daprog' ? 'Nessun intervento da programmare.<br><span class="small">Quando crei un intervento senza data intervento, finisce qui.</span>' : 'Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span>'}</div>`}</div>`;
 }
@@ -2237,6 +2237,8 @@ function sheetInt(i, day) {
     const mats = readMats(fd);
     const d = { cantiereId: fd.get('cantiereId') || '', riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
+    if (d.stato === 'da_spostare' && i.stato === 'da_spostare' && d.dataProg && d.dataProg !== i.dataProg) d.stato = 'programmato'; // nuova data scelta: è di nuovo programmato
+    if (!d.dataProg && ['programmato', 'da_spostare'].includes(d.stato)) d.stato = 'aperto';
     if (i.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
@@ -3233,21 +3235,21 @@ document.addEventListener('click', async e => {
     case 'intF': UI.intFilter = arg; render(); break;
     case 'intSelOn': UI.intSel = new Set(); render(); break;
     case 'intSelEsci': UI.intSel = null; render(); break;
-    case 'intSelFissa': case 'intSelLista': {
+    case 'intSelFissa': case 'intSelLista': case 'intSelSposta': {
       const sel = UI.intSel; if (!sel?.size) break;
       const data = $('#intSelData')?.value || '';
       if (a === 'intSelFissa' && !data) { toast('Scegli prima la data'); $('#intSelData')?.focus(); break; }
       let n = 0;
       for (const id of sel) {
-        const x = S.interventi.find(r => r.id === id); if (!x || !['aperto', 'programmato', 'in_corso'].includes(x.stato || 'aperto')) continue;
-        if (a === 'intSelLista' && !x.dataProg) continue;
-        const d = a === 'intSelFissa' ? { dataProg: data, stato: x.stato === 'in_corso' ? 'in_corso' : 'programmato' } : { dataProg: '', stato: 'aperto' };
+        const x = S.interventi.find(r => r.id === id); if (!x || !['aperto', 'programmato', 'da_spostare', 'in_corso'].includes(x.stato || 'aperto')) continue;
+        if (a !== 'intSelFissa' && !x.dataProg) continue;
+        const d = a === 'intSelFissa' ? { dataProg: data, stato: x.stato === 'in_corso' ? 'in_corso' : 'programmato' } : a === 'intSelSposta' ? { stato: 'da_spostare' } : { dataProg: '', stato: 'aperto' };
         store.put('interventi', id, { ...stripId(x), ...d });
         if (a === 'intSelFissa') spostaPrenotazioniDi(id, data, data);
         n++;
       }
       UI.intSel = null;
-      toast(a === 'intSelFissa' ? `${n} ${n === 1 ? 'intervento fissato' : 'interventi fissati'} il ${fmtD(data, { day: 'numeric', month: 'long' })}` : `${n} ${n === 1 ? 'intervento spostato' : 'interventi spostati'} in «Da programmare»`);
+      toast(a === 'intSelFissa' ? `${n} ${n === 1 ? 'intervento fissato' : 'interventi fissati'} il ${fmtD(data, { day: 'numeric', month: 'long' })}` : a === 'intSelSposta' ? `${n} da spostare: li trovi in «Da programmare»` : `${n} ${n === 1 ? 'intervento spostato' : 'interventi spostati'} in «Da programmare»`);
       render(); break;
     }
     case 'intFissa': {
