@@ -3,7 +3,7 @@
 
 export const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
 export const AMM = [['da_cons','Consuntivo da fare','bad'],['inv','Da inviare','warn'],['cons','Da fatturare','warn'],['fatt','Da incassare','in'],['pag','Incassato','ok']];
-export const STATI = [['aperto','Da programmare','bad'],['programmato','Programmato','in'],['da_spostare','Da spostare','warn'],['in_corso','In corso','warn'],['completato','Completato','ok'],['annullato','Annullato','']];
+export const STATI = [['aperto','Da programmare','bad'],['programmato','Programmato','in'],['in_corso','In corso','warn'],['completato','Completato','ok'],['annullato','Annullato','']];
 export const URG = [['normale','Normale',''],['alta','Urgente','warn'],['critica','Molto urgente','bad']];
 export const CAT = [['materiale','Materiale da posa'],['furgone','Furgone (assic., bollo, tagliandi)'],['carburante','Carburante'],['attrezzatura','Attrezzatura'],['telefono','Telefono e ufficio'],['altro','Altro']];
 export const SCAD = [['assicurazione','Assicurazione',1],['bollo','Bollo',1],['revisione','Revisione',2],['tagliando','Tagliando',1]];
@@ -89,7 +89,7 @@ export function promemoria(S, today = oggi(), momento = 'app') {
     if (N.incassi && di.length) out.push({ lvl: 'in', txt: `${di.length} ${di.length === 1 ? 'fattura da incassare' : 'fatture da incassare'}`, sub: eur(sum(di, x => x.importo)), act: 'fatt' });
 
 
-    const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'da_spostare', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
+    const urg = (S.interventi || []).filter(i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto') && i.urgenza === 'critica');
     if (N.urgenti && urg.length) out.push({ lvl: 'bad', txt: `${urg.length} ${urg.length === 1 ? 'intervento molto urgente' : 'interventi molto urgenti'} aperti`, sub: urg.map(i => i.cliente).slice(0, 2).join(', '), act: 'tab', arg: 'int' });
 
     const gg = n2(N.preventiviGiorni) || 7;
