@@ -494,3 +494,10 @@ canvas.pad{cursor:pointer}
 .cantlist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
 .cantpick{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font:inherit;color:var(--fg);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer}
 .cantpick[aria-pressed="true"]{border-color:var(--tape);box-shadow:0 0 0 2px color-mix(in srgb,var(--tape) 35%,transparent)}
+
+.selcard{display:flex;gap:10px;align-items:flex-start}
+.selcard > input{margin-top:18px;width:22px;height:22px;flex:none;accent-color:var(--tape)}
+.selcard > .card{flex:1;min-width:0}
+.intsel{position:sticky;top:8px;z-index:5;flex-wrap:wrap;gap:8px}
+.segscroll{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+.segscroll button{white-space:nowrap}

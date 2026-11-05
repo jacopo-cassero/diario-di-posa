@@ -1105,7 +1105,7 @@ function intCard(i) {
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
     ${dettaglioPrev(i)}
-    ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ''}
+    ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -1153,16 +1153,26 @@ function rCal() {
 }
 
 function rInt() {
-  const F = [['aperti', 'Aperti'], ['urgenti', 'Urgenti'], ['completati', 'Completati'], ['tutti', 'Tutti']];
+  const F = [['daprog', 'Da programmare'], ['aperti', 'Da fare'], ['urgenti', 'Urgenti'], ['completati', 'Completati'], ['tutti', 'Tutti']];
   const open = i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto');
-  const L = S.interventi.filter(i => UI.intFilter === 'tutti' || (UI.intFilter === 'aperti' && open(i)) || (UI.intFilter === 'urgenti' && open(i) && i.urgenza && i.urgenza !== 'normale') || (UI.intFilter === 'completati' && i.stato === 'completato'));
+  const senzaData = i => open(i) && !i.dataProg;
+  const f = UI.intFilter;
+  const L = S.interventi.filter(i => f === 'tutti' || (f === 'aperti' && open(i)) || (f === 'daprog' && senzaData(i)) || (f === 'urgenti' && open(i) && i.urgenza && i.urgenza !== 'normale') || (f === 'completati' && i.stato === 'completato'));
   const ur = { critica: 0, alta: 1, normale: 2 };
-  L.sort((a, b) => open(a) && open(b) ? (ur[a.urgenza || 'normale'] - ur[b.urgenza || 'normale']) || String(a.data).localeCompare(b.data) : String(b.dataProg || b.data).localeCompare(a.dataProg || a.data));
-  const ap = S.interventi.filter(open);
-  return `<div class="row between"><h2>Interventi</h2><button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div>
-  <div class="kpis"><div class="kpi"><div class="l">Aperti</div><div class="v">${ap.length}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div><div class="kpi"><div class="l">Valore aperti</div><div class="v">${eur(sum(ap, i => i.costo))}</div></div></div>
-  <div class="seg" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${UI.intFilter === k}" type="button">${l}</button>`).join('')}</div>
-  <div class="stack">${L.map(intCard).join('') || `<div class="empty">Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span></div>`}</div>`;
+  L.sort((a, b) => open(a) && open(b) ? (ur[a.urgenza || 'normale'] - ur[b.urgenza || 'normale']) || String(a.dataProg || '9').localeCompare(b.dataProg || '9') || String(a.data).localeCompare(b.data) : String(b.dataProg || b.data).localeCompare(a.dataProg || a.data));
+  const ap = S.interventi.filter(open), nDp = ap.filter(senzaData).length;
+  const sel = UI.intSel; // null = selezione spenta, altrimenti Set di id
+  if (sel) for (const id of [...sel]) if (!L.some(i => i.id === id)) sel.delete(id);
+  const conData = sel ? L.filter(i => sel.has(i.id) && i.dataProg && open(i)).length : 0;
+  const barra = sel ? `<div class="selbar intsel"><div><b>${sel.size}</b> ${sel.size === 1 ? 'selezionato' : 'selezionati'}</div>
+    <div class="row"><input type="date" id="intSelData" class="btn sm" aria-label="Data da fissare"><button class="btn sm primary" data-act="intSelFissa" type="button" ${sel.size ? '' : 'disabled'}>Fissa la data</button>
+    <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Metti in «Da programmare»</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
+  return `<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
+  <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
+  <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
+  ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
+  ${barra}
+  <div class="stack">${L.map(i => sel ? `<label class="selcard"><input type="checkbox" class="intChk" data-id="${esc(i.id)}" ${sel.has(i.id) ? 'checked' : ''} ${open(i) ? '' : 'disabled'}>${intCard(i)}</label>` : intCard(i)).join('') || `<div class="empty">${f === 'daprog' ? 'Nessun intervento da programmare.<br><span class="small">Quando crei un intervento senza data intervento, finisce qui.</span>' : 'Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span>'}</div>`}</div>`;
 }
 
 const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', cons: 'Segna fatturato', fatt: 'Segna incassato' };
@@ -3196,6 +3206,11 @@ function unseed() {
 let toastT;
 function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2800); }
 document.addEventListener('click', async e => {
+  // selezione degli interventi: il tocco sulla scheda spunta la casella invece di aprirla
+  if (UI.intSel && UI.tab === 'int' && e.target.closest('.selcard')) {
+    if (!e.target.classList.contains('intChk')) { e.preventDefault(); const c = e.target.closest('.selcard').querySelector('.intChk'); if (!c.disabled) { c.checked = !c.checked; c.dispatchEvent(new Event('change', { bubbles: true })); } }
+    return;
+  }
   const b = e.target.closest('[data-act]'); if (!b) return;
   if (b.tagName === 'A') return;
   const a = b.dataset.act, arg = b.dataset.arg, id = b.dataset.id;
@@ -3216,6 +3231,35 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'intSelOn': UI.intSel = new Set(); render(); break;
+    case 'intSelEsci': UI.intSel = null; render(); break;
+    case 'intSelFissa': case 'intSelLista': {
+      const sel = UI.intSel; if (!sel?.size) break;
+      const data = $('#intSelData')?.value || '';
+      if (a === 'intSelFissa' && !data) { toast('Scegli prima la data'); $('#intSelData')?.focus(); break; }
+      let n = 0;
+      for (const id of sel) {
+        const x = S.interventi.find(r => r.id === id); if (!x || !['aperto', 'programmato', 'in_corso'].includes(x.stato || 'aperto')) continue;
+        if (a === 'intSelLista' && !x.dataProg) continue;
+        const d = a === 'intSelFissa' ? { dataProg: data, stato: x.stato === 'in_corso' ? 'in_corso' : 'programmato' } : { dataProg: '', stato: 'aperto' };
+        store.put('interventi', id, { ...stripId(x), ...d });
+        if (a === 'intSelFissa') spostaPrenotazioniDi(id, data, data);
+        n++;
+      }
+      UI.intSel = null;
+      toast(a === 'intSelFissa' ? `${n} ${n === 1 ? 'intervento fissato' : 'interventi fissati'} il ${fmtD(data, { day: 'numeric', month: 'long' })}` : `${n} ${n === 1 ? 'intervento spostato' : 'interventi spostati'} in «Da programmare»`);
+      render(); break;
+    }
+    case 'intFissa': {
+      const x = S.interventi.find(r => r.id === id); if (!x) break;
+      openSheet('Fissa la data', `<div class="small">${esc(x.cliente || '')}${x.descrizione ? ' · ' + esc(x.descrizione) : ''}</div>${F('Data intervento', inp('fdata', UI.day > TODAY ? UI.day : TODAY, 'date', 'required'))}${campoOrario(x, 'int')}`, async fd => {
+        const d = { ...stripId(x), dataProg: fd.get('fdata'), stato: x.stato === 'in_corso' ? 'in_corso' : 'programmato', ...leggiOrario(fd) };
+        store.put('interventi', x.id, d); spostaPrenotazioniDi(x.id, d.dataProg, d.dataProg);
+        const sov = sovrapposti('interventi', x.id, [d.dataProg], d);
+        toast(sov ? `Fissato. Attenzione: si sovrappone a ${sov}` : `Fissato il ${fmtD(d.dataProg, { weekday: 'long', day: 'numeric', month: 'long' })}`);
+      }, { saveLabel: 'Fissa' });
+      break;
+    }
     case 'seg': UI.seg = arg; render(); break;
     case 'authView': UI.authView = arg; UI.authErr = ''; UI.authMsg = ''; render(); break;
     case 'newLav': sheetLav(null); break;
@@ -3384,6 +3428,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.classList?.contains('intChk') && UI.intSel) { const d = $('#intSelData')?.value; UI.intSel[t.checked ? 'add' : 'delete'](t.dataset.id); render(); if (d && $('#intSelData')) $('#intSelData').value = d; return; }
   if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f, t.id === 'fatturaIn2'); return; }
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
