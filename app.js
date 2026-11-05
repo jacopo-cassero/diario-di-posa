@@ -1343,7 +1343,7 @@ function initFirme() {
     const pulisci = () => { ctx.fillStyle = cv.dataset.fondo || '#ffffff'; ctx.fillRect(0, 0, w, h); };
     const mostra = () => {
       pulisci();
-      if (hidden.value) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, w, h); im.src = hidden.value; }
+      if (hidden.value) { const im = new Image(); im.onload = () => { const k = Math.min(w / im.naturalWidth, h / im.naturalHeight); const iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.drawImage(im, (w - iw) / 2, (h - ih) / 2, iw, ih); }; im.src = hidden.value; }
       else { ctx.fillStyle = '#9a9a8c'; ctx.font = 'italic 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Tocca per firmare', w / 2, h / 2); }
     };
     mostra();
@@ -1363,7 +1363,7 @@ function apriFirmaGrande(piccolo, hidden, R) {
   const box = ov.querySelector('.ff-box'), area = ov.querySelector('.ff-area'), cv = ov.querySelector('canvas'), ctx = cv.getContext('2d');
   let tratti = [], base = null, girato = false, W = 0, H = 0;
   if (hidden.value) { base = new Image(); base.onload = () => disegna(); base.src = hidden.value; }
-  const spessore = () => Math.max(2.5, H * 0.018);
+  const spessore = () => Math.max(3, H * 0.024);
   function disegna() {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = fondo; ctx.fillRect(0, 0, cv.width, cv.height);
     const r = cv.width / W; ctx.setTransform(r, 0, 0, r, 0, 0);
@@ -1404,9 +1404,19 @@ function apriFirmaGrande(piccolo, hidden, R) {
     if (a === 'ok') {
       if (!tratti.length && !base) hidden.value = '';
       else {
-        const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 / R);
+        // ritaglio la firma attorno al tratto, così nel PDF riempie il riquadro e si legge bene
+        let sx = 0, sy = 0, sw = W, sh = H;
+        if (!base && tratti.length) {
+          const xs = tratti.flat().map(p => p[0] * W), ys = tratti.flat().map(p => p[1] * H), m = spessore() * 2;
+          sx = Math.max(0, Math.min(...xs) - m); sy = Math.max(0, Math.min(...ys) - m);
+          sw = Math.min(W, Math.max(...xs) + m) - sx; sh = Math.min(H, Math.max(...ys) + m) - sy;
+          // non più stretta del riquadro del PDF (circa 5,7 : 1) né più alta che larga di troppo
+          const minW = sh * 1.2; if (sw < minW) { sx = Math.max(0, sx - (minW - sw) / 2); sw = Math.min(W - sx, minW); }
+        }
+        const d = cv.width / W, kk = Math.min(900 / sw, 400 / sh);
+        const out = document.createElement('canvas'); out.width = Math.round(sw * kk); out.height = Math.round(sh * kk);
         const o = out.getContext('2d'); o.fillStyle = fondo; o.fillRect(0, 0, out.width, out.height);
-        o.drawImage(cv, 0, 0, out.width, out.height);
+        o.drawImage(cv, sx * d, sy * d, sw * d, sh * d, 0, 0, out.width, out.height);
         hidden.value = out.toDataURL('image/jpeg', 0.8);
       }
       piccolo._mostra?.(); chiudi();
