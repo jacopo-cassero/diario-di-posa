@@ -1289,7 +1289,7 @@ function campoModulo(c, val) {
       const righe = Array.isArray(val) && val.length ? val : [cols.map(() => '')];
       return `<div class="fieldset"><span class="fs-t">${esc(c.label)}</span><div class="mtab" id="tab_${c.id}" style="--cols:${cols.length}"><div class="mtr mth">${cols.map(h => `<span>${esc(h)}</span>`).join('')}<span></span></div>${righe.map(r => rigaTab(cols, r)).join('')}</div><button type="button" class="btn sm" data-act="tabRiga" data-arg="${c.id}">+ Riga</button></div>`;
     }
-    case 'firma': return `<div class="firma"><div class="row between"><span class="fs-t">${esc(c.label)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val || '')}"><div class="small muted">Firma qui con il dito</div></div>`;
+    case 'firma': return `<div class="firma"><div class="row between"><span class="fs-t">${esc(c.label)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val || '')}"><div class="small muted">Tocca il riquadro: si apre in grande, in orizzontale</div></div>`;
     default: return F(esc(c.label), inp(n, val));
   }
 }
@@ -1339,25 +1339,84 @@ function initFirme() {
     const ratio = Math.min(window.devicePixelRatio || 1, 2), w = cv.clientWidth || 300, h = 150;
     cv.width = w * ratio; cv.height = h * ratio;
     const ctx = cv.getContext('2d'); ctx.scale(ratio, ratio);
-    const pulisci = () => { ctx.fillStyle = cv.dataset.fondo || '#ffffff'; ctx.fillRect(0, 0, w, h); };
-    pulisci();
-    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#14181b';
     const hidden = $('#f_' + cv.dataset.for);
-    if (hidden.value) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, w, h); im.src = hidden.value; }
-    cv._pulisci = pulisci;
-    let disegna = false, ultimo = null;
-    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-    cv.addEventListener('pointerdown', e => { disegna = true; ultimo = pos(e); cv.setPointerCapture?.(e.pointerId); e.preventDefault(); });
-    cv.addEventListener('pointermove', e => { if (!disegna) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(...ultimo); ctx.lineTo(...p); ctx.stroke(); ultimo = p; e.preventDefault(); });
-    const fine = () => {
-      if (!disegna) return; disegna = false;
-      const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 * h / w);
-      out.getContext('2d').drawImage(cv, 0, 0, out.width, out.height);
-      hidden.value = out.toDataURL('image/jpeg', 0.78);
+    const pulisci = () => { ctx.fillStyle = cv.dataset.fondo || '#ffffff'; ctx.fillRect(0, 0, w, h); };
+    const mostra = () => {
+      pulisci();
+      if (hidden.value) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, w, h); im.src = hidden.value; }
+      else { ctx.fillStyle = '#9a9a8c'; ctx.font = 'italic 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Tocca per firmare', w / 2, h / 2); }
     };
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => cv.addEventListener(ev, fine));
+    mostra();
+    cv._pulisci = () => { hidden.value = ''; mostra(); };
+    cv._mostra = mostra;
+    cv.addEventListener('click', () => apriFirmaGrande(cv, hidden, w / h));
+    cv.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apriFirmaGrande(cv, hidden, w / h); } });
+    cv.tabIndex = 0;
   });
 }
+/** Firma a tutto schermo, in orizzontale: se il telefono è in verticale il riquadro si gira di lato. */
+function apriFirmaGrande(piccolo, hidden, R) {
+  const fondo = piccolo.dataset.fondo || '#ffffff';
+  const ov = document.createElement('div'); ov.className = 'firmafull';
+  ov.innerHTML = `<div class="ff-box"><div class="ff-bar"><b>${esc(piccolo.closest('.firma')?.querySelector('.fs-t')?.textContent || 'Firma')}</b><span class="sp"></span><button type="button" class="btn sm" data-ff="pulisci">Cancella</button><button type="button" class="btn sm" data-ff="annulla">Annulla</button><button type="button" class="btn sm primary" data-ff="ok">Fatto</button></div><div class="ff-area"><canvas></canvas></div></div>`;
+  document.body.appendChild(ov);
+  const box = ov.querySelector('.ff-box'), area = ov.querySelector('.ff-area'), cv = ov.querySelector('canvas'), ctx = cv.getContext('2d');
+  let tratti = [], base = null, girato = false, W = 0, H = 0;
+  if (hidden.value) { base = new Image(); base.onload = () => disegna(); base.src = hidden.value; }
+  const spessore = () => Math.max(2.5, H * 0.018);
+  function disegna() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = fondo; ctx.fillRect(0, 0, cv.width, cv.height);
+    const r = cv.width / W; ctx.setTransform(r, 0, 0, r, 0, 0);
+    if (base?.complete && base.naturalWidth) ctx.drawImage(base, 0, 0, W, H);
+    ctx.lineWidth = spessore(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#14181b';
+    for (const t of tratti) { ctx.beginPath(); t.forEach(([x, y], i) => i ? ctx.lineTo(x * W, y * H) : ctx.moveTo(x * W, y * H)); if (t.length === 1) ctx.lineTo(t[0][0] * W + .1, t[0][1] * H); ctx.stroke(); }
+  }
+  function impagina() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    girato = vh > vw; // in verticale giro il riquadro di lato
+    const bw = girato ? vh : vw, bh = girato ? vw : vh;
+    box.style.width = bw + 'px'; box.style.height = bh + 'px';
+    box.style.transform = girato ? `translate(${vw}px, 0) rotate(90deg)` : 'none';
+    const bar = ov.querySelector('.ff-bar').offsetHeight;
+    const aw = bw - 24, ah = bh - bar - 24;
+    W = Math.floor(Math.min(aw, ah * R)); H = Math.floor(W / R);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = W * dpr; cv.height = H * dpr;
+    area.style.height = ah + 'px';
+    disegna();
+  }
+  // coordinate del dito dentro il riquadro (anche quando è girato)
+  const punto = e => {
+    const r = cv.getBoundingClientRect();
+    const x = girato ? (e.clientY - r.top) : (e.clientX - r.left), y = girato ? (r.right - e.clientX) : (e.clientY - r.top);
+    return [Math.max(0, Math.min(1, x / W)), Math.max(0, Math.min(1, y / H))];
+  };
+  let attivo = null;
+  cv.addEventListener('pointerdown', e => { attivo = [punto(e)]; tratti.push(attivo); cv.setPointerCapture?.(e.pointerId); disegna(); e.preventDefault(); });
+  cv.addEventListener('pointermove', e => { if (!attivo) return; const ev = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; for (const x of ev.length ? ev : [e]) attivo.push(punto(x)); disegna(); e.preventDefault(); });
+  ['pointerup', 'pointercancel'].forEach(t => cv.addEventListener(t, () => { attivo = null; }));
+  ov.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  const chiudi = () => { window.removeEventListener('resize', impagina); ov.remove(); try { screen.orientation?.unlock?.(); } catch {} };
+  ov.addEventListener('click', e => {
+    const a = e.target.closest('[data-ff]')?.dataset.ff; if (!a) return;
+    if (a === 'pulisci') { tratti = []; base = null; disegna(); }
+    if (a === 'annulla') chiudi();
+    if (a === 'ok') {
+      if (!tratti.length && !base) hidden.value = '';
+      else {
+        const out = document.createElement('canvas'); out.width = 600; out.height = Math.round(600 / R);
+        const o = out.getContext('2d'); o.fillStyle = fondo; o.fillRect(0, 0, out.width, out.height);
+        o.drawImage(cv, 0, 0, out.width, out.height);
+        hidden.value = out.toDataURL('image/jpeg', 0.8);
+      }
+      piccolo._mostra?.(); chiudi();
+    }
+  });
+  window.addEventListener('resize', impagina);
+  try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch {}
+  impagina();
+}
+
 function mostraPdf(bytes, nome, titolo, indietro) {
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
@@ -1442,7 +1501,7 @@ function campoU(c, v) {
     case 'euro': return F(esc(c.l), inp(n, val, 'text', `inputmode="decimal" placeholder="0,00" ${c.calc ? 'class="tot"' : ''}`), c.full ? 'full' : '');
     case 'check': return tog(n, esc(c.l), !!v[c.n]);
     case 'radio': return `<div class="f full"><span>${esc(c.l)}</span><div class="seg opzu" role="group">${c.opz.map(([k, l]) => `<button type="button" data-act="siNo" data-arg="${k}" data-for="${n}" aria-pressed="${val === k}">${esc(l)}</button>`).join('')}</div><input type="hidden" id="f_${n}" name="${n}" value="${esc(val)}"></div>`;
-    case 'firma': return `<div class="firma full"><div class="row between"><span class="fs-t">${esc(c.l)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" data-fondo="${esc(POSIZIONI[modEdit?.uff?.id]?.campi[c.n]?.fondo || '#FFF8E6')}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val)}"><div class="small muted">Firma qui con il dito</div></div>`;
+    case 'firma': return `<div class="firma full"><div class="row between"><span class="fs-t">${esc(c.l)}</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="${n}">Cancella</button></div><canvas class="pad" data-for="${n}" data-fondo="${esc(POSIZIONI[modEdit?.uff?.id]?.campi[c.n]?.fondo || '#FFF8E6')}" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_${n}" name="${n}" value="${esc(val)}"><div class="small muted">Tocca il riquadro: si apre in grande, in orizzontale</div></div>`;
     case 'griglia': return c.righe.map((r, i) => `<div class="urig full"><span class="fs-t">Riga ${i + 1}</span><div class="g2">${r.map((nn, j) => { const col = c.col[j], vv = v[nn] ?? '';
       return col.t === 'scelta' ? F(esc(col.l), sel(nomeU(nn), [['', '—'], ...col.opz.map(o => [o, o])], vv)) : F(esc(col.l), inp(nomeU(nn), vv, col.t === 'numero' ? 'number' : 'text')); }).join('')}</div></div>`).join('');
     case 'controlli': return `<div class="full row"><button type="button" class="btn sm" data-act="tuttiOk">Segna tutto ${esc(c.opz[0][1])}</button></div>` + c.gruppi.map(g => `${g.l ? `<div class="ugrp full">${esc(g.l)}</div>` : ''}${g.righe.map(([nn, l]) => `<div class="uctl full"><span>${esc(l)}</span><div class="seg" role="group">${c.opz.map(([k, ll]) => `<button type="button" data-act="siNo" data-arg="${k}" data-for="${nomeU(nn)}" aria-pressed="${v[nn] === k}">${esc(ll)}</button>`).join('')}</div><input type="hidden" id="f_${nomeU(nn)}" name="${nomeU(nn)}" value="${esc(v[nn] || '')}"></div>`).join('')}`).join('');

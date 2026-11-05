@@ -259,8 +259,8 @@ export const MODELLI_UFFICIALI = [
     { titolo: '4. Conclusione cantiere', campi: [{ n: 'cant_pulito', t: 'check', l: 'Cantiere pulito e in ordine' }, { n: 'cant_smaltiti', t: 'check', l: 'Vecchi serramenti smaltiti' }, { n: 'cant_doc', t: 'check', l: 'Documentazione e garanzie consegnate' }] },
     { titolo: '5. Lavori da completare e note', campi: [{ n: 'note', t: 'testolungo', l: 'Lavori da completare e note', full: 1 }] },
     { titolo: '6. Esito', campi: [{ n: 'esito', t: 'radio', l: 'Esito', opz: [['CONCLUSI', 'Lavori conclusi'], ['RISERVE', 'Conclusi con riserve (vedi sez. 5)'], ['DA_COMPLETARE', 'Da completare (vedi sez. 5)']], full: 1 },
-      { t: 'nota', l: "L'installatore dichiara che la posa in opera è stata eseguita a regola d'arte, secondo le indicazioni del produttore e la norma UNI 11673-1. Con la firma il cliente dichiara di aver verificato i lavori, di riceverli in consegna e che il cantiere è concluso, fatte salve le riserve annotate." }] },
-    { titolo: '7. Firme', campi: [{ n: 'firma_tecnico', t: 'firma', l: 'Firma tecnico / posatore' }, { n: 'firma_cliente', t: 'firma', l: 'Firma cliente' }] },
+      { t: 'nota', l: "L'installatore dichiara che la posa in opera è stata eseguita a regola d'arte, secondo le indicazioni del produttore e la norma UNI 11673-1. Con la firma l'installatore attesta inoltre la conclusione del cantiere secondo l'esito indicato, fatte salve le riserve annotate." }] },
+    { titolo: '7. Firma', campi: [{ n: 'firma_tecnico', t: 'firma', l: 'Firma tecnico / posatore' }] },
   ] },
   // vecchio modulo: non si crea più, ma quelli già compilati si riaprono
   { id: 'verbale-collaudo', ufficiale: true, nascosto: true, nome: 'Verbale di collaudo finale', descr: 'Posa serramenti e complementi · posa qualificata UNI 11673-2', sezioni: [
