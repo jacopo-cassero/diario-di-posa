@@ -2225,6 +2225,7 @@ function sheetInt(i, day) {
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
+    <div class="row" id="togliDataRow" ${i.dataProg ? '' : 'hidden'}><button type="button" class="btn sm" data-act="togliData">${svg('cal', 'i')} Togli la data: rimetti «Da programmare»</button></div>
     ${campoOrario(i, 'int')}
     <div class="g2">${F('Costo al cliente €', inp('costo', i.costo, 'number'))}${F('Ore', inp('ore', i.ore, 'number'))}</div>
     ${impHint()}
@@ -2237,6 +2238,7 @@ function sheetInt(i, day) {
     const mats = readMats(fd);
     const d = { cantiereId: fd.get('cantiereId') || '', riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
+    if (!d.dataProg && d.stato === 'programmato') d.stato = 'aperto';
     if (i.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
@@ -3231,6 +3233,7 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'togliData': { const dp = $('#f_dataProg'); if (dp) dp.value = ''; const st = $('#f_stato'); if (st && ['programmato', 'in_corso'].includes(st.value)) st.value = 'aperto'; $('#togliDataRow').hidden = true; toast('Data tolta: salva e lo trovi in «Da programmare»'); break; }
     case 'intSelOn': UI.intSel = new Set(); render(); break;
     case 'intSelEsci': UI.intSel = null; render(); break;
     case 'intSelFissa': case 'intSelLista': {
@@ -3428,6 +3431,8 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'f_stato' && $('#f_dataProg') && t.value === 'aperto' && $('#f_dataProg').value) { $('#f_dataProg').value = ''; const r = $('#togliDataRow'); if (r) r.hidden = true; toast('Data tolta: resta in «Da programmare»'); }
+  if (t.id === 'f_dataProg' && $('#f_stato')) { const r = $('#togliDataRow'); if (r) r.hidden = !t.value; if (t.value && $('#f_stato').value === 'aperto') $('#f_stato').value = 'programmato'; if (!t.value && $('#f_stato').value === 'programmato') $('#f_stato').value = 'aperto'; }
   if (t.classList?.contains('intChk') && UI.intSel) { const d = $('#intSelData')?.value; UI.intSel[t.checked ? 'add' : 'delete'](t.dataset.id); render(); if (d && $('#intSelData')) $('#intSelData').value = d; return; }
   if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f, t.id === 'fatturaIn2'); return; }
   if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
