@@ -2207,6 +2207,7 @@ function sheetInt(i, day) {
     ${campoCliente('cliente', 'Cliente', i.cliente)}
     ${F('Riferimento', inp('riferimento', i.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>
+    <div id="cantBox" class="stack" data-scelto="${esc(i.cantiereId || '')}"></div><input type="hidden" id="f_cantiereId" name="cantiereId" value="${esc(i.cantiereId || '')}">
     ${F('Telefono', inp('telefono', i.telefono, 'tel'))}
     ${F('Indirizzo', inp('indirizzo', i.indirizzo))}
     ${campoSquadra(i)}
@@ -2224,7 +2225,7 @@ function sheetInt(i, day) {
     ${filesBox()}
   `, async fd => {
     const mats = readMats(fd);
-    const d = { riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
+    const d = { cantiereId: fd.get('cantiereId') || '', riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (i.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
@@ -2775,6 +2776,27 @@ function aggiornaCliInfo() {
     ? `${svg('cli', 'i')} In rubrica · ${tipoCliente(c.tipo)}${c.telefono ? ' · ' + esc(c.telefono) : ''}${c.referente ? ' · ' + esc(c.referente) : ''}`
     : `${svg('cli', 'i')} Cliente nuovo: lo aggiungo alla rubrica quando salvi`;
   box.classList.toggle('nuovo', !c);
+  aggiornaCantieri();
+}
+/** Intervento: le pose già fatte per questo cliente, da scegliere per riprendere indirizzo, telefono e riferimento. */
+function aggiornaCantieri(tutti) {
+  const box = $('#cantBox'), el = $('#f_cliente'); if (!box || !el) return;
+  const nome = el.value.trim(), c = trovaCliente(nome);
+  if (!nome) { box.innerHTML = ''; box._html = ''; return; }
+  const suoi = S.lavori.filter(l => l.data && l.data <= TODAY && ((c && l.clienteId === c.id) || normNome(l.cliente) === normNome(nome)))
+    .sort((a, b) => String(b.data).localeCompare(a.data));
+  // una riga per cantiere: stesso indirizzo e riferimento contano una volta, con la posa più recente
+  const visti = new Set(), unici = suoi.filter(l => { const k = normNome(l.indirizzo) + '|' + normNome(rifDi(l)); if (visti.has(k)) return false; visti.add(k); return true; });
+  const anno = piuGiorni(TODAY, -365), recenti = unici.filter(l => l.data >= anno);
+  const L = tutti || box.dataset.tutti ? unici : recenti;
+  if (tutti) box.dataset.tutti = '1';
+  if (!unici.length) { box.innerHTML = ''; box._html = ''; return; }
+  const scelto = $('#f_cantiereId')?.value || '';
+  const html = `<div class="small muted">${L.length ? 'Cantieri già fatti per questo cliente: tocca quello giusto per riprendere i dati.' : 'Nessun cantiere nell\'ultimo anno.'}</div>
+    <div class="cantlist">${L.slice(0, 12).map(l => `<button type="button" class="cantpick" data-act="usaCantiere" data-id="${esc(l.id)}" aria-pressed="${l.id === scelto}"><b>${esc(l.indirizzo || 'Indirizzo non segnato')}</b><span class="small muted">${fmtD(l.data, { day: 'numeric', month: 'short', year: 'numeric' })}${rifDi(l) ? ' · Rif. ' + esc(rifDi(l)) : ''}${l.installato ? ' · ' + esc(l.installato) : ''}</span></button>`).join('')}</div>
+    ${!tutti && !box.dataset.tutti && unici.length > recenti.length ? `<button type="button" class="linkbtn small" data-act="cantTutti">Mostra anche i cantieri più vecchi (${unici.length - recenti.length})</button>` : ''}`;
+  // non ridisegno se non cambia nulla: altrimenti il tocco su un cantiere andrebbe perso
+  if (box._html !== html) { box.innerHTML = html; box._html = html; }
 }
 /** Quando scrivi il nome di un cliente in rubrica, completa i campi vuoti del modulo. */
 function compilaDaRubrica(nome) {
@@ -3223,6 +3245,17 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'prezziMat': sheetPrezziMat(); break;
+    case 'usaCantiere': {
+      const l = S.lavori.find(x => x.id === id); if (!l) break;
+      const metti = (k, v) => { const e = $('#' + k); if (e && v) e.value = v; };
+      metti('f_indirizzo', l.indirizzo); metti('f_telefono', l.telefono); metti('f_riferimento', rifDi(l));
+      $('#f_cantiereId').value = l.id;
+      document.querySelectorAll('#cantBox .cantpick').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.id === l.id)));
+      toast('Dati del cantiere inseriti: scrivi cosa c\'è da fare');
+      $('#f_descrizione')?.focus({ preventScroll: true });
+      break;
+    }
+    case 'cantTutti': aggiornaCantieri(true); break;
     case 'matProd': UI.matProd = arg; render(); break;
     case 'addrow': $('#matrows').insertAdjacentHTML('beforeend', matRow({}, arg === 'buy')); break;
     case 'rmrow': { const rows = $('#matrows'); if (rows.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = ''); break; }
@@ -3290,7 +3323,7 @@ document.addEventListener('click', async e => {
     case 'cliOrd': UI.cliOrd = UI.cliOrd === 'nome' ? 'recenti' : 'nome'; render(); break;
     case 'cliPrev': { const c = cliCtx; if (!c) break; sheetPrev(null); $('#f_cnome').value = c.nome; compilaDaRubrica(c.nome); break; }
     case 'cliLav': { const c = cliCtx; if (!c) break; sheetLav(null, { cliente: c.nome }); break; }
-    case 'cliInt': { const c = cliCtx; if (!c) break; sheetInt(null); $('#f_cliente').value = c.nome; compilaDaRubrica(c.nome); break; }
+    case 'cliInt': { const c = cliCtx; if (!c) break; sheetInt(null); $('#f_cliente').value = c.nome; compilaDaRubrica(c.nome); aggiornaCliInfo(); break; }
     case 'newPrev': sheetPrev(null); break;
     case 'editPrev': sheetPrev(S.preventivi.find(x => x.id === id)); break;
     case 'prevF': UI.prevFilter = arg; render(); break;
