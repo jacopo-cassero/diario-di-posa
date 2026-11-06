@@ -15,16 +15,16 @@ export function createStore(cfg, onChange) {
   let sb = null, uid = null, owner = null, channel = null;
   const recs = new Map();          // "kind/id" -> {kind, id, data}
   let outbox = [];                 // modifiche non ancora inviate
-  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], modelli: [], moduli: [], furgone: {}, listino: null, azienda: null, impostazioni: null, prezziMat: null };
+  const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], cartelle: [], preventivi: [], clienti: [], eventi: [], modelli: [], moduli: [], furgone: {}, listino: null, azienda: null, impostazioni: null, prezziMat: null, documentiRiv: null };
   const st = { ruolo: cloud ? '' : 'proprietario', accesso: {}, mode: cloud ? 'cloud' : 'demo', auth: cloud ? 'checking' : 'demo', email: '', online: navigator.onLine, syncing: false, lastSync: null, error: '' };
   const urlCache = new Map();
 
   const key = n => `ddp:${n}:${uid || 'demo'}`;
   function rebuild() {
     for (const k of KINDS) S[k] = [];
-    S.furgone = {}; S.listino = null; S.azienda = null; S.impostazioni = null; S.prezziMat = null;
+    S.furgone = {}; S.listino = null; S.azienda = null; S.impostazioni = null; S.prezziMat = null; S.documentiRiv = null;
     for (const r of recs.values()) {
-      if (r.kind === 'cfg') { if (['furgone', 'listino', 'azienda', 'impostazioni', 'prezziMat'].includes(r.id)) S[r.id] = { ...r.data }; continue; }
+      if (r.kind === 'cfg') { if (['furgone', 'listino', 'azienda', 'impostazioni', 'prezziMat', 'documentiRiv'].includes(r.id)) S[r.id] = { ...r.data }; continue; }
       if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
     }
   }

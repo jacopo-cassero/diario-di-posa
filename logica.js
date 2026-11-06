@@ -63,6 +63,11 @@ export function promemoria(S, today = oggi(), momento = 'app') {
   const sera = momento === 'sera';
   // il riepilogo del mattino e il riquadro Da fare contengono le scadenze; la sera solo la giornata
   if (!sera) {
+    // documenti per i rivenditori in scadenza (30 giorni prima)
+    if (N.documenti !== false) for (const x of (S.documentiRiv?.lista || [])) {
+      if (!x.scadenza) continue; const n = daysBetween(today, x.scadenza);
+      if (n <= 30) out.push({ lvl: n < 0 ? 'bad' : n <= 7 ? 'warn' : 'in', txt: `${x.titolo || 'Documento'} ${n < 0 ? `scaduto da ${-n} giorni` : n === 0 ? 'scade oggi' : `scade tra ${n} giorni`}`, sub: 'documento per i rivenditori: caricane uno aggiornato', act: 'tab', arg: 'documenti' });
+    }
     if (N.furgone) {
       for (const [k, lab] of SCAD) {
         const d = f[k]; if (!d) continue;

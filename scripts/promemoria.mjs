@@ -163,7 +163,7 @@ for (const uid of users) {
   const S = { lavori: [], interventi: [], movimenti: [], magazzino: [], preventivi: [], eventi: [], furgone: {}, impostazioni: null };
   let log = {};
   for (const r of rows) {
-    if (r.kind === 'cfg') { if (r.id === 'furgone') S.furgone = r.data; if (r.id === 'impostazioni') S.impostazioni = r.data; if (r.id === 'notifiche-log') log = r.data || {}; }
+    if (r.kind === 'cfg') { if (r.id === 'furgone') S.furgone = r.data; if (r.id === 'impostazioni') S.impostazioni = r.data; if (r.id === 'documentiRiv') S.documentiRiv = r.data; if (r.id === 'notifiche-log') log = r.data || {}; }
     else if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
   }
   const N = impostazioni(S).notifiche;

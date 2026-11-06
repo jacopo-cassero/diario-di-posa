@@ -1,4 +1,4 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm, consumoMedio, leggiCarburante, categoriaDa } from './logica.js';
+import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm, consumoMedio, leggiCarburante, categoriaDa } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
@@ -57,7 +57,7 @@ const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'apert
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste', 'documenti'].includes(h)) UI.tab = h;
   if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
@@ -520,9 +520,91 @@ async function caricaListinoRiv() {
   try { const { data, error } = await store.tabella('richieste_preventivo').select('*').order('creato', { ascending: false }).limit(40); if (!error) RIV.prev = data; } catch {}
   RIV.listinoCarico = true; render();
 }
+/* ---------- documenti per i rivenditori ---------- */
+const DOC_LISTA = () => S.documentiRiv?.lista || [];
+const docScad = x => x.scadenza ? daysBetween(TODAY, x.scadenza) : null;
+const docInScadenza = () => DOC_LISTA().filter(x => { const n = docScad(x); return n != null && n <= 30; }).length;
+function chipScad(x, perRiv) {
+  const n = docScad(x);
+  if (n == null) return '';
+  if (n < 0) return `<span class="chip bad">${perRiv ? 'Scaduto · in aggiornamento' : `Scaduto da ${-n} ${-n === 1 ? 'giorno' : 'giorni'}`}</span>`;
+  if (n <= 30 && !perRiv) return `<span class="chip warn">Scade tra ${n} ${n === 1 ? 'giorno' : 'giorni'}</span>`;
+  return `<span class="chip ok">Valido fino al ${fmtD(x.scadenza, { day: 'numeric', month: 'short', year: 'numeric' })}</span>`;
+}
+const pesoFile = b => b > 1e6 ? `${num(b / 1e6, 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
+function rDocumenti() {
+  const L = [...DOC_LISTA()].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
+  return `<div class="row between"><h2>Documenti rivenditori</h2><button class="btn primary" data-act="docNuovo" type="button">${svg('plus')} Aggiungi</button></div>
+  <div class="small muted">Quello che carichi qui lo vedono e lo scaricano tutti i rivenditori, nella pagina «Documenti» del loro accesso. Quando un documento scade, tocca «Aggiorna» e carica quello nuovo: il rivenditore trova subito la versione giusta. Ti avviso 30 giorni prima della scadenza.</div>
+  <div class="stack">${L.map(x => `<div class="card"><div class="row between"><span class="t">${esc(x.titolo)}</span>${chipScad(x)}</div>
+    <div class="small muted">${esc(x.nomeFile || '')}${x.peso ? ' · ' + pesoFile(x.peso) : ''} · caricato il ${fmtD(x.caricato, { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+    ${x.note ? `<div class="small">${esc(x.note)}</div>` : ''}
+    <div class="row"><button class="btn sm" data-act="docApri" data-id="${esc(x.id)}" type="button">${svg('doc', 'i')} Apri</button><button class="btn sm" data-act="docModifica" data-id="${esc(x.id)}" type="button">Aggiorna</button></div></div>`).join('')
+    || `<div class="empty">Nessun documento.<br><span class="small">Aggiungi per esempio visura camerale, DURC, polizza RC, certificazione di posa, schede tecniche.</span></div>`}</div>`;
+}
+function sheetDocRiv(x) {
+  const isNew = !x; x = x || {};
+  openSheet(isNew ? 'Nuovo documento' : 'Aggiorna documento', `
+    ${F('Nome del documento', inp('titolo', x.titolo, 'text', 'required placeholder="Es. DURC, Polizza RC, Visura camerale" list="doctitoli"'))}
+    <datalist id="doctitoli">${['DURC', 'Visura camerale', 'Polizza RC', 'Certificazione posatore UNI 11673-2', 'Attestato di formazione sicurezza', 'Documento di identità', 'Dati aziendali e IBAN', 'Schede tecniche'].map(t => `<option value="${t}">`).join('')}</datalist>
+    ${F('Scadenza', inp('scadenza', x.scadenza, 'date'))}
+    <div class="small muted">Lascia vuoto se non scade.</div>
+    ${F(isNew ? 'File' : 'File nuovo (lascia vuoto per tenere quello attuale)', `<input type="file" id="f_docfile" name="docfile" ${isNew ? 'required' : ''} accept=".pdf,.jpg,.jpeg,.png,.heic,.doc,.docx,.xls,.xlsx,.zip,image/*,application/pdf">`)}
+    ${x.nomeFile ? `<div class="small muted">Ora: ${esc(x.nomeFile)}</div>` : ''}
+    ${F('Note per il rivenditore', inp('note', x.note, 'text', 'placeholder="facoltative"'))}`,
+  async fd => {
+    const f = $('#f_docfile')?.files?.[0];
+    if (isNew && !f) { toast('Scegli il file'); return false; }
+    const id = x.id || (crypto.randomUUID ? crypto.randomUUID() : 'd' + Date.now().toString(36));
+    let path = x.path, nomeFile = x.nomeFile, peso = x.peso, tipo = x.tipo;
+    if (f) {
+      const pulito = (f.name || 'documento').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.\-]+/g, '_').slice(-80);
+      try { toast('Carico il documento…'); path = await store.caricaFisso(`documenti-rivenditori/${id}-${Date.now().toString(36)}-${pulito}`, f.type ? f : new Blob([f], { type: 'application/octet-stream' })); }
+      catch (e) { toast(e.userMsg || 'Caricamento non riuscito'); return false; }
+      if (x.path && x.path !== path) store.removeFile(x.path).catch(() => {});
+      nomeFile = f.name; peso = f.size; tipo = f.type || '';
+    }
+    const voce = { id, titolo: fd.get('titolo').trim(), scadenza: fd.get('scadenza') || '', note: String(fd.get('note') || '').trim(), path, nomeFile, peso, tipo, caricato: f ? TODAY : (x.caricato || TODAY) };
+    const lista = DOC_LISTA().filter(d => d.id !== id).concat(voce);
+    store.put('cfg', 'documentiRiv', { lista });
+    toast(isNew ? 'Documento aggiunto: i rivenditori lo vedono già' : 'Documento aggiornato');
+  }, { del: isNew ? null : async () => {
+    store.put('cfg', 'documentiRiv', { lista: DOC_LISTA().filter(d => d.id !== x.id) });
+    if (x.path) store.removeFile(x.path).catch(() => {});
+    toast('Documento tolto');
+  } });
+}
+/** Scarica un file della cartella online con il suo nome. */
+async function scaricaFile(path, nome) {
+  try {
+    toast('Scarico…');
+    const u = await store.fileUrl(path); if (!u) throw new Error('url');
+    const r = await fetch(u); if (!r.ok) throw new Error('http');
+    const blob = await r.blob();
+    if (/pdf$/i.test(blob.type) || /\.pdf$/i.test(nome || '')) { mostraPdf(new Uint8Array(await blob.arrayBuffer()), nome || 'documento.pdf', 'Documento', null); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome || 'documento'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  } catch { toast('Documento non disponibile, riprova'); }
+}
+async function caricaDocRiv() {
+  RIV.docCarico = true;
+  try { RIV.docs = await store.rpc('documenti_rivenditore') || []; RIV.docErr = ''; }
+  catch (e) { RIV.docs = []; RIV.docErr = /function|schema cache/i.test(e.message || '') ? 'I documenti non sono ancora attivi: avvisa l\'installatore.' : 'Non riesco a caricare i documenti, riprova.'; }
+  render();
+}
+function rRivDocumenti() {
+  if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
+  if (RIV.docErr) return `<div class="notice small">${esc(RIV.docErr)}</div>`;
+  const L = [...(RIV.docs || [])].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
+  return `<div class="row between"><h2>Documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
+  <div class="small muted">Documenti dell'azienda da scaricare. Sono sempre le versioni più recenti.</div>
+  <div class="stack">${L.map(x => `<button type="button" class="card docriv" data-act="rivDocApri" data-id="${esc(x.id)}"><div class="row between"><span class="t">${esc(x.titolo)}</span>${svg('doc', 'i')}</div>
+    <div class="meta">${chipScad(x, true)}<span class="small muted">${esc(x.nomeFile || '')}${x.peso ? ' · ' + pesoFile(x.peso) : ''}</span></div>${x.note ? `<div class="small">${esc(x.note)}</div>` : ''}</button>`).join('')
+    || `<div class="empty small">Nessun documento disponibile per ora.</div>`}</div>`;
+}
 function rRivTabs() {
   const t = UI.rivTab || 'cal';
-  return `<div class="seg rivtabs" role="tablist">${[['cal', 'Calendario'], ['prev', 'Preventivo'], ['listino', 'Listino']].map(([k, l]) => `<button type="button" data-act="rivTab" data-arg="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
+  return `<div class="seg rivtabs" role="tablist">${[['cal', 'Calendario'], ['prev', 'Preventivo'], ['listino', 'Listino'], ['doc', 'Documenti']].map(([k, l]) => `<button type="button" data-act="rivTab" data-arg="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
 }
 function rRivListino() {
   if (!RIV.listinoCarico) { caricaListinoRiv(); return `<div class="empty">Caricamento del listino…</div>`; }
@@ -656,6 +738,8 @@ document.addEventListener('click', async e => {
     case 'richFiltro': UI.richFiltro = b.dataset.arg; render(); break;
     case 'richAggiorna': await caricaAccessi(true); toast('Aggiornato'); break;
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
+    case 'rivDocAgg': RIV.docCarico = false; render(); break;
+    case 'rivDocApri': { const x = (RIV.docs || []).find(d => d.id === b.dataset.id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
@@ -908,14 +992,14 @@ function render() {
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
 
   if (st.accesso?.cambio_password) { $('#main').innerHTML = rCambioPw(); return; }
-  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
+  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : t === 'doc' ? rRivDocumenti() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
   if (st.ruolo === 'dipendente') { $('#main').innerHTML = rDipendente(); hydrateFiles($('#main')); return; }
   if (st.ruolo === 'nessuno' || st.ruolo === 'sospeso') { $('#main').innerHTML = rSenzaAccesso(); return; }
   if (!GESTORE()) { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -1724,6 +1808,7 @@ function menuHtml() {
   ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'richieste', 'cal', `Richieste${nRichieste() ? ` <span class="badge">${nRichieste()}</span>` : ''}`, 'prenotazioni e preventivi dei rivenditori', UI.tab === 'richieste')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'documenti', 'doc', `Documenti rivenditori${docInScadenza() ? ` <span class="badge">${docInScadenza()}</span>` : ''}`, 'certificati, DURC, assicurazioni da scaricare', UI.tab === 'documenti')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${ACC.richieste.length ? ` <span class="badge">${ACC.richieste.length}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
@@ -3233,6 +3318,9 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'docNuovo': sheetDocRiv(null); break;
+    case 'docModifica': sheetDocRiv(DOC_LISTA().find(d => d.id === id)); break;
+    case 'docApri': { const x = DOC_LISTA().find(d => d.id === id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'togliData': { const dp = $('#f_dataProg'); if (dp) dp.value = ''; const st = $('#f_stato'); if (st && ['programmato', 'in_corso'].includes(st.value)) st.value = 'aperto'; $('#togliDataRow').hidden = true; toast('Data tolta: salva e lo trovi in «Da programmare»'); break; }
     case 'intSelOn': UI.intSel = new Set(); render(); break;
     case 'intSelEsci': UI.intSel = null; render(); break;
