@@ -1157,7 +1157,7 @@ function rInt() {
   const open = i => ['aperto', 'programmato', 'in_corso'].includes(i.stato || 'aperto');
   const senzaData = i => open(i) && !i.dataProg;
   const f = UI.intFilter;
-  const L = S.interventi.filter(i => f === 'tutti' || (f === 'aperti' && open(i)) || (f === 'daprog' && senzaData(i)) || (f === 'urgenti' && open(i) && i.urgenza && i.urgenza !== 'normale') || (f === 'completati' && i.stato === 'completato'));
+  const L = S.interventi.filter(i => f === 'tutti' || (f === 'aperti' && open(i) && i.dataProg) || (f === 'daprog' && senzaData(i)) || (f === 'urgenti' && open(i) && i.urgenza && i.urgenza !== 'normale') || (f === 'completati' && i.stato === 'completato'));
   const ur = { critica: 0, alta: 1, normale: 2 };
   L.sort((a, b) => open(a) && open(b) ? (ur[a.urgenza || 'normale'] - ur[b.urgenza || 'normale']) || String(a.dataProg || '9').localeCompare(b.dataProg || '9') || String(a.data).localeCompare(b.data) : String(b.dataProg || b.data).localeCompare(a.dataProg || a.data));
   const ap = S.interventi.filter(open), nDp = ap.filter(senzaData).length;
@@ -1168,7 +1168,7 @@ function rInt() {
     <div class="row"><input type="date" id="intSelData" class="btn sm" aria-label="Data da fissare"><button class="btn sm primary" data-act="intSelFissa" type="button" ${sel.size ? '' : 'disabled'}>Fissa la data</button>
     <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Metti in «Da programmare»</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
   return `<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
-  <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
+  <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length - nDp}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
   ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
   ${barra}
