@@ -1098,6 +1098,7 @@ function lavoroCard(l) {
     ${badgeOrario(l)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
+    ${rigaNoteSospesi(l, 'lavori')}
     <div class="meta">${n2(l.pezzi) ? `<span><b class="num">${num(l.pezzi, 0)}</b> pezzi</span>` : ''}${n2(l.ore) ? `<span><b class="num">${num(l.ore)}</b> ore</span>` : ''}${l.urgenzaApplicata ? '<span class="chip warn">Urgente</span>' : ''}<span class="chip ${a[2]}">${a[1]}</span>${l.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${mats.length ? `<div class="mats">${mats.map(m => `<span class="chip">${esc(m.nome)} · ${num(m.qta)}</span>`).join('')}</div>` : ''}
     ${l.indirizzo || cart || isUrl(l.cartellaUrl) || nAll || cliDi(l) ? `<div class="links">
@@ -1178,6 +1179,25 @@ const bottoneFatto = (kind, x) => {
   if (x.stato === 'annullato') return '';
   return `<button type="button" class="btn sm ${x.stato === 'completato' ? '' : 'ok'}" data-act="${x.stato === 'completato' ? 'intRiapri' : 'intFatto'}" data-id="${x.id}">${x.stato === 'completato' ? 'Riapri' : '✓ Segna completato'}</button>`;
 };
+/* ---------- note e cose da completare (pose e interventi) ---------- */
+const sospesiAperti = x => (x.sospesi || []).filter(r => r.t && !r.fatto);
+const rigaSospeso = (r = {}) => `<div class="sosprow"><input type="checkbox" class="sospF" aria-label="Fatto" ${r.fatto ? 'checked' : ''}><input type="text" class="sospT" value="${esc(r.t || '')}" placeholder="Es. manca la maniglia della portafinestra"><button type="button" class="iconbtn" data-act="sospDel" aria-label="Togli">✕</button></div>`;
+function boxNoteSospesi(x) {
+  const L = x.sospesi || [];
+  return `<div class="fieldset stack"><span class="fs-t">Note e cose da completare</span>
+    ${F('Note', `<textarea id="f_note" name="note" rows="3" placeholder="Annotazioni sul lavoro, accordi con il cliente, cose da ricordare">${esc(x.note || '')}</textarea>`)}
+    <div class="small"><b>Da completare</b> <span class="muted">· spunta quando l'hai fatto</span></div>
+    <div id="sospRows" class="stack">${L.map(rigaSospeso).join('')}</div>
+    <button type="button" class="btn sm" data-act="sospAdd">${svg('plus', 'i')} Aggiungi cosa da completare</button>
+  </div>`;
+}
+const leggiSospesi = () => [...document.querySelectorAll('#sospRows .sosprow')].map(r => ({ t: r.querySelector('.sospT').value.trim(), fatto: r.querySelector('.sospF').checked })).filter(r => r.t);
+/** Riga sulle schede: note e cose ancora da completare. */
+function rigaNoteSospesi(x, kind) {
+  const ap = sospesiAperti(x);
+  const intAperto = x.sospInt && S.interventi.some(i => i.id === x.sospInt && !['completato', 'annullato'].includes(i.stato));
+  return `${x.note ? `<div class="small muted prewrap">${esc(x.note)}</div>` : ''}${ap.length ? `<div class="sospcard"><b>Da completare (${ap.length})</b><ul>${ap.map(r => `<li>${esc(r.t)}</li>`).join('')}</ul>${intAperto ? `<span class="small muted">Intervento per completare già creato</span>` : kind ? `<button type="button" class="btn sm" data-act="intDaSospesi" data-arg="${kind}" data-id="${esc(x.id)}">${svg('plus', 'i')} Crea intervento per completare</button>` : ''}</div>` : ''}`;
+}
 function intCard(i) {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
@@ -1185,7 +1205,8 @@ function intCard(i) {
     <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
     ${i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
-    ${i.descrizione ? `<div>${esc(i.descrizione)}</div>` : ''}
+    ${i.descrizione ? `<div class="prewrap">${esc(i.descrizione)}</div>` : ''}
+    ${rigaNoteSospesi(i, 'interventi')}
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
     ${dettaglioPrev(i)}
@@ -2229,7 +2250,8 @@ function sheetLav(l, prefill) {
     <div class="notice small" id="modoOre" ${calcolo === 'ore' ? '' : 'hidden'}>Importo = ore impiegate × tariffa oraria (+ urgenza) + trasferta.</div>
     <div id="stimaMat" class="panel stack" hidden></div>
     ${matBox(l.materiali)}
-    <div class="g2">${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}${F('Note', inp('note', l.note || notaVecchia))}</div>
+    ${F('Situazione', sel('amm', AMM.map(a => [a[0], a[1]]), l.amm || 'da_cons'))}
+    ${boxNoteSospesi({ ...l, note: l.note || notaVecchia })}
     <div class="fieldset"><span class="fs-t">Cartella</span>
       <div class="g2">${F('Cartella di lavoro', sel('cartellaId', [['', 'Nessuna'], ...S.cartelle.map(c => [c.id, c.nome])], l.cartellaId || ''))}${F('Link cartella del cantiere', inp('cartellaUrl', l.cartellaUrl, 'url', 'placeholder="https://www.icloud.com/…"'))}</div>
     </div>
@@ -2256,7 +2278,7 @@ function sheetLav(l, prefill) {
     if (kmG > 0) righe = [...righe, { ...rigaKm(kmG * gg, n2(fd.get('euroKm'))), descr: gg > 1 ? `Trasferta (${gg} giorni × ${num(kmG, 1)} km)` : 'Trasferta', kmGiorno: kmG, giorni: gg }];
     if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
     if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
-    const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: fd.get('note').trim(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: String(fd.get('note') || '').trim(), sospesi: leggiSospesi(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     { const cur = !isNew && S.lavori.find(x => x.id === l.id); const pv = cur ? cur.preventivoId : l.preventivoId; if (pv) d.preventivoId = pv; }
     if (l.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente);
@@ -2295,8 +2317,8 @@ function cambiaCalcolo(modo) {
 }
 
 /* intervento */
-function sheetInt(i, day) {
-  const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons' };
+function sheetInt(i, day, prefill) {
+  const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
     ${campoCliente('cliente', 'Cliente', i.cliente)}
@@ -2308,6 +2330,7 @@ function sheetInt(i, day) {
     ${campoSquadra(i)}
     ${boxPrevLavoro(i, 'interventi')}
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
+    ${boxNoteSospesi(i)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
     <div class="row" id="togliDataRow" ${i.dataProg ? '' : 'hidden'}><button type="button" class="btn sm" data-act="togliData">${svg('cal', 'i')} Togli la data: rimetti «Da programmare»</button></div>
@@ -2324,11 +2347,20 @@ function sheetInt(i, day) {
     const d = { cantiereId: fd.get('cantiereId') || '', riferimento: String(fd.get('riferimento') || '').trim(), cliente: fd.get('cliente').trim(), telefono: fd.get('telefono').trim(), indirizzo: fd.get('indirizzo').trim(), descrizione: fd.get('descrizione').trim(), urgenza: fd.get('urgenza'), stato: fd.get('stato'), data: fd.get('data') || TODAY, dataProg: fd.get('dataProg'), costo: n2(fd.get('costo')), ore: n2(fd.get('ore')), righe: conKm(leggiRighe(), fd), urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, materiali: mats, amm: fd.get('amm'), allegati: sheetFiles };
     if (d.dataProg && d.stato === 'aperto') d.stato = 'programmato';
     if (!d.dataProg && d.stato === 'programmato') d.stato = 'aperto';
+    d.note = String(fd.get('note') || '').trim(); d.sospesi = leggiSospesi();
+    if (i.daSospesiDi) d.daSospesiDi = i.daSospesiDi;
     if (i.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
     Object.assign(d, leggiOrario(fd));
     const idInt = store.put('interventi', isNew ? null : i.id, d);
+    // intervento nato dalle cose da completare: lo collego all'origine e, quando è fatto, le spunto
+    const o = d.daSospesiDi, src = o && S[o.kind]?.find(x => x.id === o.id);
+    if (src && src.id !== idInt) {
+      const agg = { ...stripId(src), sospInt: idInt };
+      if (d.stato === 'completato') agg.sospesi = (src.sospesi || []).map(r => (o.voci || []).includes(r.t) ? { ...r, fatto: true } : r);
+      store.put(o.kind, src.id, agg);
+    }
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'interventi', idInt);
     if (!isNew && d.dataProg && d.dataProg !== i.dataProg) spostaPrenotazioniDi(idInt, d.dataProg, d.dataProg);
     if (!isNew && d.stato === 'annullato' && i.stato !== 'annullato') annullaPrenotazioniDi(idInt);
@@ -3318,6 +3350,16 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'sospAdd': { const box = $('#sospRows'); box.insertAdjacentHTML('beforeend', rigaSospeso()); box.lastElementChild.querySelector('.sospT').focus(); break; }
+    case 'sospDel': b.closest('.sosprow')?.remove(); break;
+    case 'intDaSospesi': {
+      const src = S[arg]?.find(x => x.id === id); if (!src) break;
+      const ap = sospesiAperti(src);
+      sheetInt(null, '', { cliente: src.cliente || '', clienteId: src.clienteId, telefono: src.telefono || '', indirizzo: src.indirizzo || '', riferimento: rifDi(src),
+        cantiereId: arg === 'lavori' ? src.id : (src.cantiereId || ''), descrizione: `Da completare${arg === 'lavori' ? ` (posa del ${fmtD(src.data, { day: 'numeric', month: 'short' })})` : ''}:\n${ap.map(r => '- ' + r.t).join('\n')}`,
+        daSospesiDi: { kind: arg, id: src.id, voci: ap.map(r => r.t) } });
+      break;
+    }
     case 'docNuovo': sheetDocRiv(null); break;
     case 'docModifica': sheetDocRiv(DOC_LISTA().find(d => d.id === id)); break;
     case 'docApri': { const x = DOC_LISTA().find(d => d.id === id); if (x) scaricaFile(x.path, x.nomeFile); break; }
