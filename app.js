@@ -1142,7 +1142,7 @@ const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
 /* ---------- preventivo collegato, visibile dal calendario ---------- */
 function vociPrevHtml(p) {
   const L = LIST(), t = totali(p, L), um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
-  return `<div class="pvoci">${t.righe.map(r => `<div class="pv"><span>${r.voce === 'sconto' || r.voce === 'arrot' || !um(r) ? '' : `<b class="num">${num(r.qta, 2)}</b> ${um(r)} · `}${esc(r.descr || '')}${r.blindato ? ' (blindato)' : ''}${r.luce ? ' (in luce)' : ''}</span><span class="num">${r.prezzo === '' ? 'da concordare' : eur(totaleRiga(r, L))}</span></div>`).join('') || '<div class="small muted">Nessuna voce.</div>'}
+  return `<div class="pvoci">${t.righe.map(r => `<div class="pv"><span>${r.voce === 'sconto' || r.voce === 'arrot' || !um(r) ? '' : `<b class="num">${num(r.qta, 2)}</b> ${um(r)} · `}${esc(r.descr || '')}${r.blindato ? ' (blindato)' : ''}${r.luce ? ' (in luce)' : ''}${r.nota ? `<div class="small muted prewrap">${esc(r.nota)}</div>` : ''}</span><span class="num">${r.prezzo === '' ? 'da concordare' : eur(totaleRiga(r, L))}</span></div>`).join('') || '<div class="small muted">Nessuna voce.</div>'}
     ${t.urgenzaPct ? `<div class="pv"><span>Urgenza ${num(t.urgenzaPct)}%</span><span class="num">${eur(t.urgenza)}</span></div>` : ''}
     <div class="pv tot"><span>${t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale'}</span><span class="num">${eur(t.ivaPct > 0 ? t.totale : t.imponibile)}</span></div></div>`;
 }
@@ -2422,7 +2422,7 @@ function testoConsSingolo(x, kind, iva, adj = leggiAgg()) {
   const t = totali(doc, lis);
   const mats = (x.materiali || []).filter(m => m.nome);
   const um = r => r.unita === 'ora' ? 'ore' : r.unita === 'corpo' ? '' : r.unita === 'km' ? 'km' : 'pz';
-  const riga = r => r.prezzo === '' ? `- ${r.descr}: da concordare` : (r.voce === 'sconto' || r.voce === 'arrot') ? `- ${r.descr}: ${eur(totaleRiga(r, lis))}` : `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`.replace(/  +/g, ' ');
+  const riga = r => (r.prezzo === '' ? `- ${r.descr}: da concordare` : (r.voce === 'sconto' || r.voce === 'arrot') ? `- ${r.descr}: ${eur(totaleRiga(r, lis))}` : `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, lis))} = ${eur(totaleRiga(r, lis))}`.replace(/  +/g, ' ')) + (r.nota ? `\n   ${r.nota.replace(/\n/g, '\n   ')}` : '');
   if ($('#csInfo')) infoAgg(totali(doc0, lis), doc, t);
   return `CONSUNTIVO ${L ? 'POSA IN OPERA' : 'INTERVENTO'}
 Cliente: ${x.cliente || ''}${rifDi(x) ? `\nRiferimento: ${rifDi(x)}` : ''}
@@ -2541,6 +2541,8 @@ function rigaHtml(r) {
     </div>
     ${r.magg === 'blindato' ? `<label class="check small"><input type="checkbox" name="rb" ${r.blindato ? 'checked' : ''}> Prodotto blindato (+${eur(L.maggBlindato)}/pz)</label>` : ''}
     ${r.magg === 'luce' ? `<label class="check small"><input type="checkbox" name="rl" ${r.luce ? 'checked' : ''}> Posa in luce (+${eur(L.maggLuce)}/pz)</label>` : ''}
+    <div class="riga-nota" ${r.nota ? '' : 'hidden'}><textarea name="rn" rows="2" placeholder="Nota su questa voce: cosa hai fatto in più, uscita del…, dettagli">${esc(r.nota || '')}</textarea></div>
+    ${r.nota ? '' : `<button type="button" class="linkbtn small" data-act="rigaNota">+ Aggiungi una nota a questa voce</button>`}
   </div>`;
 }
 function righeBox(righe, kind, { urgenza = false, iva = null } = {}) {
@@ -2561,6 +2563,7 @@ function leggiRighe() {
     const q = n => el.querySelector(`[name="${n}"]`);
     const p = q('rp').value.trim();
     const r = { voce: el.dataset.voce || '', descr: q('rd').value.trim(), unita: q('ru').value, qta: n2(q('rq').value), prezzo: p === '' ? '' : n2(p), magg: el.dataset.magg || '', blindato: !!q('rb')?.checked, luce: !!q('rl')?.checked };
+    const nota = (q('rn')?.value || '').trim(); if (nota) r.nota = nota;
     if (r.voce === 'sconto') { if (r.prezzo === '' || !n2(r.prezzo)) return { descr: '' }; r.qta = 1; r.prezzo = r.unita === 'pct' ? Math.abs(n2(r.prezzo)) : -Math.abs(n2(r.prezzo)); r.descr = r.descr || 'Sconto'; return r; }
     if (r.blindato) r.maggBlindato = L.maggBlindato;
     if (r.luce) r.maggLuce = L.maggLuce;
@@ -3022,11 +3025,12 @@ function aggiornaCM() {
   const dd = s => fmtD(s, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const bs = baseSconto(doc.righe, L);
   const riga = r0 => { const r = r0.voce === 'sconto' ? rigaSconto(r0, bs) : r0; return r.prezzo === '' ? `- ${r.descr}: da concordare` : r.voce === 'sconto' || r.voce === 'arrot' ? `- ${r.descr}: ${eur(totaleRiga(r, L))}` : um(r) ? `- ${r.descr}: ${num(r.qta, 2)} ${um(r)} × ${eur(prezzoUnitario(r, L))} = ${eur(totaleRiga(r, L))}` : `- ${r.descr}: ${eur(totaleRiga(r, L))}`; };
+  const rigaBase = riga; const rigaN = r0 => rigaBase(r0) + (r0.nota ? `\n   ${r0.nota.replace(/\n/g, '\n   ')}` : '');
   pre.textContent = `CONSUNTIVO LAVORI
 Cliente: ${doc.cliente.nome}
 Periodo: ${dd(doc.data)}${doc.dataFine !== doc.data ? ' – ' + dd(doc.dataFine) : ''}
 ${doc.cantiere ? 'Cantiere: ' + doc.cantiere + '\n' : ''}
-${doc.gruppi.map(g => `${g.titolo.toUpperCase()}\n${g.righe.map(riga).join('\n') || '- nessuna voce'}`).join('\n\n')}
+${doc.gruppi.map(g => `${g.titolo.toUpperCase()}\n${g.righe.map(rigaN).join('\n') || '- nessuna voce'}`).join('\n\n')}
 
 ${righeTotale(t)}`;
   infoAgg(totali(docMulti(sc, iva), L), doc, t);
@@ -3350,6 +3354,7 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'rigaNota': { const w = b.closest('.riga')?.querySelector('.riga-nota'); if (w) { w.hidden = false; w.querySelector('textarea').focus(); } b.remove(); break; }
     case 'sospAdd': { const box = $('#sospRows'); box.insertAdjacentHTML('beforeend', rigaSospeso()); box.lastElementChild.querySelector('.sospT').focus(); break; }
     case 'sospDel': b.closest('.sosprow')?.remove(); break;
     case 'intDaSospesi': {

@@ -511,3 +511,6 @@ canvas.pad{cursor:pointer}
 .sospcard{border-left:3px solid var(--warn, #e0a100);background:color-mix(in srgb, var(--warn, #e0a100) 10%, transparent);border-radius:8px;padding:8px 10px;font-size:.9rem}
 .sospcard ul{margin:4px 0 6px 18px;padding:0}
 .prewrap{white-space:pre-wrap}
+
+.riga-nota textarea{width:100%;min-height:52px;font-size:.92rem}
+.riga .linkbtn.small{align-self:flex-start;margin-top:2px}
