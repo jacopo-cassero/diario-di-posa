@@ -2663,7 +2663,7 @@ function prevCard(p) {
   return `<div class="card" role="button" tabindex="0" data-act="editPrev" data-id="${p.id}">
     <div class="row between"><span class="t">${esc(p.cliente?.nome || 'Cliente')}</span><span class="price">${eur(t.totale)}</span></div>
     ${p.oggetto ? `<div>${esc(p.oggetto)}</div>` : ''}
-    <div class="meta"><span class="num">N. ${esc(p.numero || '')}</span><span>${fmtD(p.data, { day: 'numeric', month: 'short' })}</span><span class="chip ${st[2]}">${st[1]}</span>${p.firmato ? '<span class="chip ok">firmato</span>' : p.stato === 'accettato' ? '<span class="chip warn">manca la firma</span>' : ''}${attesa >= 7 ? `<span class="chip warn">senza risposta da ${attesa} gg</span>` : ''}${p.lavoroId ? '<span class="chip in">in calendario</span>' : ''}</div>
+    <div class="meta"><span class="num">N. ${esc(p.numero || '')}</span><span>${fmtD(p.data, { day: 'numeric', month: 'short' })}</span><span class="chip ${st[2]}">${st[1]}</span>${p.firmato ? '<span class="chip ok">firmato</span>' : p.stato === 'accettato' ? '<span class="chip warn">manca la firma</span>' : ''}${attesa >= 7 ? `<span class="chip warn">senza risposta da ${attesa} gg</span>` : ''}${lavoroDiPrev(p) ? '<span class="chip in">in calendario</span>' : ''}</div>
   </div>`;
 }
 function rPrev() {
@@ -2713,7 +2713,8 @@ function sheetPrev(p) {
   aggiornaTotali();
 }
 /* ---------- collegare preventivi e lavori del calendario ---------- */
-const lavoroDiPrev = p => p?.lavoroId ? (S[p.lavoroKind || 'lavori'] || []).find(x => x.id === p.lavoroId) || S.lavori.find(x => x.id === p.lavoroId) || S.interventi.find(x => x.id === p.lavoroId) : null;
+// il collegamento vale da entrambe le parti: dal preventivo (lavoroId) o dal lavoro (preventivoId)
+const lavoroDiPrev = p => !p ? null : (p.lavoroId ? (S[p.lavoroKind || 'lavori'] || []).find(x => x.id === p.lavoroId) || S.lavori.find(x => x.id === p.lavoroId) || S.interventi.find(x => x.id === p.lavoroId) : null) || S.lavori.find(x => x.preventivoId === p.id) || S.interventi.find(x => x.preventivoId === p.id) || null;
 const kindDi = x => S.lavori.includes(x) ? 'lavori' : 'interventi';
 const descrLavoro = (x, k) => `${k === 'lavori' ? 'Posa' : 'Intervento'} · ${fmtD(k === 'lavori' ? x.data : (x.dataProg || x.data), { weekday: 'short', day: 'numeric', month: 'short' })}${k === 'lavori' && x.dataFine && x.dataFine > x.data ? ' – ' + fmtD(x.dataFine, { day: 'numeric', month: 'short' }) : ''} · ${x.cliente || ''}${x.indirizzo ? ' · ' + x.indirizzo : ''}`;
 function boxCollegaPrev(p, isNew) {
@@ -2760,7 +2761,7 @@ function boxPrevLavoro(x, kind) {
     ${p.oggetto ? `<div class="small prewrap">${esc(p.oggetto)}</div>` : ''}${vociPrevHtml(p)}
     <div class="row"><button type="button" class="btn sm dark" data-act="prevPdfDir" data-id="${p.id}">PDF</button>${p.firmato ? `<button type="button" class="btn sm" data-act="openPath" data-arg="${esc(p.firmato.path)}">Firmato</button>` : ''}<button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri</button>${kind === 'lavori' && (p.righe || []).length ? '<button type="button" class="btn sm" data-act="vociDaPrev">Usa le voci del preventivo</button>' : ''}<button type="button" class="btn sm ghost" data-act="scollegaLavPrev" data-id="${p.id}">Scollega</button></div></div>`; }
   const nome = normNome(x.cliente);
-  const opz = [...S.preventivi].filter(q => !q.lavoroId || q.lavoroId === x.id).sort((a, b) => ((normNome(a.cliente?.nome) === nome ? 0 : 1) - (normNome(b.cliente?.nome) === nome ? 0 : 1)) || String(b.data).localeCompare(a.data)).slice(0, 40);
+  const opz = [...S.preventivi].filter(q => { const j = lavoroDiPrev(q); return !j || j.id === x.id; }).sort((a, b) => ((normNome(a.cliente?.nome) === nome ? 0 : 1) - (normNome(b.cliente?.nome) === nome ? 0 : 1)) || String(b.data).localeCompare(a.data)).slice(0, 40);
   if (!opz.length) return '';
   return `<div class="fieldset collega"><span class="fs-t">Preventivo</span>${F('Collega un preventivo', `<select name="prevColl" id="f_prevColl"><option value="">Nessuno</option>${opz.map(q => `<option value="${q.id}">N. ${esc(q.numero || '')} · ${esc(q.cliente?.nome || '')} · ${eur(totPrev(q).imponibile)}</option>`).join('')}</select>`)}</div>`;
 }
