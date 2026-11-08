@@ -1,6 +1,6 @@
 import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm, consumoMedio, leggiCarburante, categoriaDa } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
-import { creaDocumento, docDaLavoro, creaListino } from './documento.js';
+import { creaDocumento, docDaLavoro, creaListino, creaRapporto } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
 import { xmlDaFile, leggiFatturaXml, leggiFatturaTesto } from './fatture-fornitori.js';
@@ -2297,7 +2297,7 @@ function sheetLav(l, prefill) {
     toast(inFerie ? 'Posa salvata. Attenzione: in quei giorni hai segnato ferie' : sov ? `Posa salvata. Attenzione: si sovrappone a ${sov}` : 'Posa salvata');
   }, {
     del: isNew ? null : async () => { for (const f of l.allegati || []) if (!S.preventivi.some(p => p.firmato?.path === f.path)) store.removeFile(f.path).catch(() => {}); store.drop('lavori', l.id); annullaPrenotazioniDi(l.id); toast('Posa eliminata'); },
-    extra: isNew ? '' : `<button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
+    extra: isNew ? '' : `<button type="button" class="btn" data-act="rapporto" data-arg="lavori" data-id="${l.id}">Rapporto</button><button type="button" class="btn" data-act="cons" data-arg="lavori" data-id="${l.id}">Consuntivo</button><button type="button" class="btn" data-act="modDa" data-arg="lavori" data-id="${l.id}">Modulo</button>`,
   });
   if (isNew && IMP().giornata.precompila && !n2(l.ore)) { const fo = $('#f_ore'); fo.dataset.auto = '1'; fo.value = oreGiornata(IMP().giornata); }
   aggiornaGiorni();
@@ -2368,7 +2368,7 @@ function sheetInt(i, day, prefill) {
     toast(sov ? `Intervento salvato. Attenzione: si sovrappone a ${sov}` : 'Intervento salvato');
   }, {
     del: isNew ? null : async () => { for (const f of i.allegati || []) store.removeFile(f.path).catch(() => {}); store.drop('interventi', i.id); annullaPrenotazioniDi(i.id); toast('Intervento eliminato'); },
-    extra: isNew ? '' : `${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
+    extra: isNew ? '' : `<button type="button" class="btn" data-act="rapporto" data-arg="interventi" data-id="${i.id}">Rapporto</button>${i.stato === 'completato' ? `<button type="button" class="btn" data-act="cons" data-arg="interventi" data-id="${i.id}">Consuntivo</button>` : ''}<button type="button" class="btn" data-act="modDa" data-arg="interventi" data-id="${i.id}">Modulo</button>`,
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
   initImporto('#f_costo', i.righe, i.costo, i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale'));
@@ -3036,6 +3036,52 @@ ${righeTotale(t)}`;
   infoAgg(totali(docMulti(sc, iva), L), doc, t);
 }
 
+/* ---------- rapporto di cantiere per il rivenditore ---------- */
+const eImmagine = f => /^image\//.test(f.tipo || '') || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.nome || '');
+function sheetRapporto(kind, id) {
+  const x = S[kind]?.find(r => r.id === id); if (!x) return;
+  const foto = (x.allegati || []).filter(eImmagine), altri = (x.allegati || []).filter(f => !eImmagine(f));
+  openSheet('Rapporto di cantiere', `<div class="small">Un PDF con tutto quello che hai segnato su questo ${kind === 'lavori' ? 'cantiere' : 'intervento'}: richiesta, lavori eseguiti con le note delle voci, materiale, note, cose da completare, moduli${foto.length ? ' e foto' : ''}. Da mandare al rivenditore.</div>
+    <label class="check"><input type="checkbox" name="prezzi"> Includi i prezzi delle voci</label>
+    ${foto.length ? `<label class="check"><input type="checkbox" name="foto" checked> Includi le foto (${foto.length})</label>` : ''}
+    ${altri.length ? `<div class="small muted">Gli altri allegati (${altri.map(f => esc(f.nome)).join(', ')}) sono elencati nel rapporto: mandali insieme al PDF se servono.</div>` : ''}`,
+  async fd => { const o = { prezzi: !!fd.get('prezzi'), foto: !!fd.get('foto') }; setTimeout(() => creaRapportoPdf(kind, id, o), 80); }, { saveLabel: 'Crea il rapporto' });
+}
+async function fotoJpeg(f) {
+  const u = await store.fileUrl(f.path); if (!u) return null;
+  const blob = await (await fetch(u)).blob();
+  const bmp = await createImageBitmap(blob);
+  const k = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+  const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+  return { bytes: new Uint8Array(await out.arrayBuffer()), nome: f.nome };
+}
+async function creaRapportoPdf(kind, id, { prezzi = false, foto = true } = {}) {
+  const x = S[kind]?.find(r => r.id === id); if (!x) return;
+  const L = kind === 'lavori';
+  toast('Preparo il rapporto…');
+  let fotoB = [];
+  if (foto) for (const f of (x.allegati || []).filter(eImmagine)) { try { const j = await fotoJpeg(f); if (j) fotoB.push(j); } catch {} }
+  const posa = !L && x.cantiereId ? S.lavori.find(l => l.id === x.cantiereId) : null;
+  const st = L ? ((x.giorniFatti || []).length ? 'Eseguita' : x.data > TODAY ? 'Programmata' : 'In corso') : (STATI.find(s => s[0] === (x.stato || 'aperto')) || STATI[0])[1];
+  const urg = !L && x.urgenza && x.urgenza !== 'normale' ? (URG.find(u => u[0] === x.urgenza) || [])[1] : '';
+  const r = {
+    tipo: L ? 'posa' : 'intervento', data: L ? x.data : x.dataProg, dataFine: L ? x.dataFine : '', stato: st,
+    cliente: { nome: x.cliente || '', telefono: x.telefono || '' }, riferimento: rifDi(x), cantiere: x.indirizzo || '',
+    posaDel: posa ? `Cantiere della posa del ${fmtD(posa.data, { day: 'numeric', month: 'long', year: 'numeric' })}${posa.installato ? ': ' + posa.installato : ''}` : '',
+    richiesta: L ? (x.installato || '') : (x.descrizione || ''), dataRichiesta: L ? '' : x.data, urgenza: urg,
+    righe: x.righe || [], materiali: (x.materiali || []).map(m => ({ ...m, unita: unitaMat(m.nome) })), note: x.note || '', sospesi: x.sospesi || [],
+    moduli: S.moduli.filter(m => m.ref?.id === x.id).map(m => ({ titolo: m.titolo, data: m.data, stato: m.stato === 'firmato' ? 'firmato' : 'da firmare' })),
+    allegati: (x.allegati || []).filter(f => !(foto && eImmagine(f))).map(f => f.nome),
+  };
+  let bytes;
+  try { bytes = creaRapporto({ r, azienda: AZ(), listino: LIST(), immagini: IMG, foto: fotoB, prezzi }); }
+  catch (e) { console.warn(e); toast('Non sono riuscito a creare il rapporto'); return; }
+  const dIt = s => String(s || '').split('-').reverse().join('-');
+  const nome = `Rapporto ${r.data ? dIt(r.data) + ' ' : ''}${x.cliente || ''}${r.riferimento ? ' ' + r.riferimento : ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+  mostraPdf(bytes, nome, 'Rapporto di cantiere', null);
+}
 /* ---------- PDF ---------- */
 let pdfCorrente = null;
 function apriPdf(tipo, doc, indietro) {
@@ -3354,6 +3400,14 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'rapporto': {
+      // prima salvo quello che hai appena scritto, poi preparo il rapporto
+      const form = $('#sheetForm');
+      if (form && !form.reportValidity()) break;
+      if (form) $('#saveBtn')?.click();
+      setTimeout(() => sheetRapporto(arg, id), 450);
+      break;
+    }
     case 'rigaNota': { const w = b.closest('.riga')?.querySelector('.riga-nota'); if (w) { w.hidden = false; w.querySelector('textarea').focus(); } b.remove(); break; }
     case 'sospAdd': { const box = $('#sospRows'); box.insertAdjacentHTML('beforeend', rigaSospeso()); box.lastElementChild.querySelector('.sospT').focus(); break; }
     case 'sospDel': b.closest('.sosprow')?.remove(); break;

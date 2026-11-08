@@ -309,3 +309,157 @@ export function creaListino({ listino = LISTINO_BASE, azienda = AZIENDA_BASE, im
   }
   return pdf.output({ title: `Listino prezzi posa ${L.anno || ''}`.trim(), author: az.ragioneSociale });
 }
+
+/**
+ * Rapporto di cantiere da mandare al rivenditore: cosa c'era da fare, cosa è stato fatto,
+ * materiale, note, cose da completare, foto e allegati.
+ * r: { tipo:'intervento'|'posa', data, dataFine, stato, cliente:{nome,telefono}, riferimento, cantiere, posaDel, richiesta, dataRichiesta,
+ *      urgenza, righe, materiali:[{nome,qta,unita}], note, sospesi:[{t,fatto}], allegati:[nome], moduli:[{titolo,stato,data}] }
+ * foto: [{ bytes (JPEG), nome }]
+ */
+export function creaRapporto({ r, azienda = AZIENDA_BASE, listino = LISTINO_BASE, immagini = {}, foto = [], prezzi = false }) {
+  const az = { ...AZIENDA_BASE, ...(azienda || {}) };
+  const L = listino || LISTINO_BASE;
+  const pdf = new PDF();
+  const img = {};
+  for (const k of ['logo', 'posaclima', 'dekra']) if (immagini[k]) { try { img[k] = pdf.addJpeg(immagini[k]); } catch {} }
+  const testata = () => {
+    if (img.posaclima) pdf.image(img.posaclima, X0, 9, 17);
+    if (img.logo) pdf.image(img.logo, 105 - 26, 10, 52);
+    else pdf.text(105, 21, 'CASSERO INSTALLAZIONI', { size: 18, font: 'bold', align: 'center' });
+    if (img.dekra) pdf.image(img.dekra, X1 - 14.5, 7, 14.5);
+  };
+  const nuovaPagina = () => { pdf.addPage(); testata(); return TOP; };
+  testata();
+  let y = TOP;
+  const spazio = h => { if (y + h > BOTTOM) y = nuovaPagina(); };
+
+  // Titolo
+  pdf.text(X0, y + 4, 'RAPPORTO DI CANTIERE', { size: 17, font: 'bold' });
+  pdf.rect(X0, y + 7, 22, 1.1, { fill: C.arancio });
+  const destra = [[r.tipo === 'posa' ? 'Posa in opera' : 'Intervento', 'bold', 11]];
+  destra.push([r.dataFine && r.dataFine !== r.data ? `Dal ${dataIt(r.data)} al ${dataIt(r.dataFine)}` : r.data ? `Data: ${dataIt(r.data)}` : 'Data da programmare', 'normal', 9.5]);
+  if (r.stato) destra.push([`Stato: ${r.stato}`, 'normal', 9.5]);
+  destra.forEach(([t, font, size], i) => pdf.text(X1, y + 1 + i * 5.2, t, { size, font, align: 'right', color: i ? C.grigio : C.testo }));
+  y += 18;
+
+  // Cliente e cantiere
+  const cli = r.cliente || {}, colW = 82, xr = 110, wr = X1 - xr;
+  let yl = y, yr = y;
+  pdf.text(X0, yl, 'CLIENTE', { size: 7, font: 'bold', color: C.grigio }); yl += 4.5;
+  yl = pdf.paragraph(X0, yl, cli.nome || '—', colW, { size: 10.5, font: 'bold', lead: 1.25 });
+  if (r.riferimento) yl = pdf.paragraph(X0, yl, `Rif.: ${r.riferimento}`, colW, { size: 9, font: 'bold', lead: 1.25, color: C.grigio });
+  if (cli.telefono) yl = pdf.paragraph(X0, yl, `Tel. ${cli.telefono}`, colW, { size: 8.5, lead: 1.25, color: C.grigio });
+  pdf.text(xr, yr, 'CANTIERE', { size: 7, font: 'bold', color: C.grigio });
+  yr = pdf.paragraph(xr, yr + 4.5, r.cantiere || '—', wr, { size: 9, lead: 1.25 }) + 1;
+  if (r.posaDel) yr = pdf.paragraph(xr, yr, r.posaDel, wr, { size: 8.5, lead: 1.25, color: C.grigio }) + 1;
+  y = Math.max(yl, yr) + 4;
+
+  const sezione = titolo => {
+    spazio(16);
+    pdf.rect(X0, y, LARG, 6.2, { fill: C.fondo, stroke: C.bordo });
+    pdf.rect(X0, y, 1.6, 6.2, { fill: C.arancio });
+    pdf.text(X0 + 4, y + 4.3, titolo, { size: 8.2, font: 'bold' });
+    y += 9;
+  };
+  const testo = (t, o = {}) => {
+    for (const par of String(t).split('\n')) {
+      const righe = pdf.wrap(par || ' ', LARG - 4, o.size || 9, o.font || 'normal');
+      for (const l of righe) { spazio(5); pdf.text(X0 + 2, y + 1, l, { size: 9, ...o }); y += (o.size || 9) * 1.35 / (72 / 25.4); }
+    }
+    y += 2;
+  };
+
+  // Richiesta
+  if (r.richiesta) {
+    sezione(r.tipo === 'posa' ? 'LAVORO' : 'RICHIESTA / LAVORO DA FARE');
+    const info = [r.dataRichiesta && `Richiesto il ${dataIt(r.dataRichiesta)}`, r.urgenza && `Urgenza: ${r.urgenza}`].filter(Boolean).join(' · ');
+    if (info) testo(info, { size: 8, color: C.grigio });
+    testo(r.richiesta);
+  }
+
+  // Lavori eseguiti (voci con note)
+  const T = totali({ righe: r.righe || [] }, L);
+  const voci = T.righe.filter(x => prezzi || !['sconto', 'arrot'].includes(x.voce));
+  if (voci.length) {
+    sezione('LAVORI ESEGUITI');
+    const col = { descr: X0 + 2, qta: prezzi ? X0 + 130 : X1 - 22, um: prezzi ? X0 + 142 : X1 - 10, importo: X1 - 2 };
+    const wD = prezzi ? 118 : 140;
+    voci.forEach((v, i) => {
+      const descr = pdf.wrap(v.descr || 'Voce', wD, 8.8);
+      const extra = [];
+      if (v.blindato) extra.push('prodotto blindato');
+      if (v.luce) extra.push('posa in luce');
+      if (v.nota) extra.push(v.nota);
+      const extraL = extra.flatMap(e => String(e).split('\n')).flatMap(e => pdf.wrap(e, wD, 7.6, 'italic'));
+      const h = Math.max(6, 2.4 + descr.length * 3.8 + extraL.length * 3.3 + 0.9);
+      spazio(h);
+      if (i % 2) pdf.rect(X0, y, LARG, h, { fill: C.riga });
+      pdf.line(X0, y + h, X1, y + h, { color: C.bordo });
+      const by = y + 4.2; let ty = by;
+      descr.forEach(l => { pdf.text(col.descr, ty, l, { size: 8.8 }); ty += 3.8; });
+      extraL.forEach(l => { pdf.text(col.descr + 2, ty - 0.6, l, { size: 7.6, font: 'italic', color: '#444444' }); ty += 3.3; });
+      if (!['sconto', 'arrot'].includes(v.voce)) {
+        pdf.text(col.qta, by, qtaFmt(v.qta), { size: 8.8, align: 'right' });
+        pdf.text(col.um, by, v.unita === 'corpo' ? 'corpo' : (UNITA[v.unita] || v.unita || ''), { size: 8.2, align: 'center', color: C.grigio });
+      }
+      if (prezzi) pdf.text(col.importo, by, v.prezzo === '' || v.prezzo == null ? '—' : eur(totaleRiga(v, L)), { size: 8.8, align: 'right', font: 'bold' });
+      y += h;
+    });
+    if (prezzi) { y += 2; spazio(7); pdf.text(X1 - 2, y + 3.5, `Totale lavori ${eur(T.imponibile)}${T.ivaPct > 0 ? ' + IVA' : ''}`, { size: 9.5, font: 'bold', align: 'right' }); y += 6; }
+    y += 3;
+  }
+
+  const mats = (r.materiali || []).filter(m => m.nome);
+  if (mats.length) { sezione('MATERIALE USATO'); testo(mats.map(m => `${m.nome}${+m.qta ? ': ' + qtaFmt(m.qta) + (m.unita ? ' ' + m.unita : '') : ''}`).join(' · ')); }
+
+  if (r.note) { sezione('NOTE'); testo(r.note); }
+
+  const sosp = (r.sospesi || []).filter(s => s.t);
+  if (sosp.length) {
+    sezione('DA COMPLETARE');
+    for (const s of sosp) {
+      const righe = pdf.wrap(s.t, LARG - 12, 9);
+      spazio(righe.length * 4.2 + 2);
+      pdf.rect(X0 + 2, y - 2.2, 3.4, 3.4, { stroke: C.testo, width: 0.3 });
+      if (s.fatto) { pdf.line(X0 + 2.5, y - 1.7, X0 + 4.9, y + 0.7, { width: 0.4 }); pdf.line(X0 + 4.9, y - 1.7, X0 + 2.5, y + 0.7, { width: 0.4 }); }
+      righe.forEach((l, i) => pdf.text(X0 + 8, y + 0.8 + i * 4.2, l, { size: 9, color: s.fatto ? C.grigio : C.testo }));
+      if (s.fatto) pdf.text(X1 - 2, y + 0.8, 'fatto', { size: 8, font: 'italic', color: C.grigio, align: 'right' });
+      y += righe.length * 4.2 + 2;
+    }
+    y += 2;
+  }
+
+  if ((r.moduli || []).length) { sezione('MODULI COMPILATI'); testo(r.moduli.map(m => `${m.titolo}${m.data ? ' del ' + dataIt(m.data) : ''}${m.stato ? ' (' + m.stato + ')' : ''}`).join('\n')); }
+
+  // Foto, due per riga
+  const fotoOk = foto.map(f => { try { return { ...f, im: pdf.addJpeg(f.bytes) }; } catch { return null; } }).filter(Boolean);
+  if (fotoOk.length) {
+    const GAP = 6, W = (LARG - GAP) / 2, HMAX = 72;
+    const misura = f => { const info = pdf.images.find(x => x.name === f.im); let w = W, h = W * info.h / info.w; if (h > HMAX) { h = HMAX; w = h * info.w / info.h; } return { ...f, w, h }; };
+    spazio(9 + Math.max(...fotoOk.slice(0, 2).map(f => misura(f).h)) + 6); // il titolo non resta da solo in fondo alla pagina
+    sezione(`FOTO (${fotoOk.length})`);
+    for (let i = 0; i < fotoOk.length; i += 2) {
+      const coppia = fotoOk.slice(i, i + 2).map(misura);
+      const hRiga = Math.max(...coppia.map(c => c.h)) + 6;
+      spazio(hRiga);
+      coppia.forEach((c, j) => { const x = X0 + j * (W + GAP) + (W - c.w) / 2; pdf.image(c.im, x, y, c.w, c.h); pdf.text(X0 + j * (W + GAP) + W / 2, y + c.h + 3.6, (c.nome || '').slice(0, 60), { size: 7, color: C.grigio, align: 'center' }); });
+      y += hRiga + 2;
+    }
+  }
+
+  const altri = (r.allegati || []).filter(Boolean);
+  if (altri.length) { sezione('ALTRI ALLEGATI'); testo(altri.map(a => '- ' + a).join('\n'), { size: 8.5 }); }
+
+  // Piè di pagina
+  const n = pdf.pageNo;
+  for (let p = 1; p <= n; p++) {
+    pdf.setPage(p);
+    pdf.text(X0, 281, az.ragioneSociale, { size: 7.8 });
+    pdf.text(X0, 284.6, [az.piva && `P. Iva ${az.piva}`, az.indirizzo].filter(Boolean).join(' · '), { size: 7.8 });
+    pdf.text(X1, 281, az.email || '', { size: 7.8, align: 'right' });
+    pdf.text(X1, 284.6, az.telefono || '', { size: 7.8, align: 'right' });
+    if (n > 1) pdf.text(105, 290, `Pagina ${p} di ${n}`, { size: 7, color: C.grigio, align: 'center' });
+  }
+  return pdf.output({ title: `Rapporto di cantiere ${cli.nome || ''}`.trim(), author: az.ragioneSociale });
+}
