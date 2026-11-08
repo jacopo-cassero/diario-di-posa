@@ -435,16 +435,17 @@ export function creaRapporto({ r, azienda = AZIENDA_BASE, listino = LISTINO_BASE
   // Foto, due per riga
   const fotoOk = foto.map(f => { try { return { ...f, im: pdf.addJpeg(f.bytes) }; } catch { return null; } }).filter(Boolean);
   if (fotoOk.length) {
-    const GAP = 6, W = (LARG - GAP) / 2, HMAX = 72;
+    // miniature: 4 per riga (5 se sono tante), così anche molte foto stanno in poco spazio
+    const COLS = fotoOk.length > 12 ? 5 : 4, GAP = 3, W = (LARG - GAP * (COLS - 1)) / COLS, HMAX = W * 0.85;
     const misura = f => { const info = pdf.images.find(x => x.name === f.im); let w = W, h = W * info.h / info.w; if (h > HMAX) { h = HMAX; w = h * info.w / info.h; } return { ...f, w, h }; };
-    spazio(9 + Math.max(...fotoOk.slice(0, 2).map(f => misura(f).h)) + 6); // il titolo non resta da solo in fondo alla pagina
+    spazio(9 + HMAX + 4); // il titolo non resta da solo in fondo alla pagina
     sezione(`FOTO (${fotoOk.length})`);
-    for (let i = 0; i < fotoOk.length; i += 2) {
-      const coppia = fotoOk.slice(i, i + 2).map(misura);
-      const hRiga = Math.max(...coppia.map(c => c.h)) + 6;
-      spazio(hRiga);
-      coppia.forEach((c, j) => { const x = X0 + j * (W + GAP) + (W - c.w) / 2; pdf.image(c.im, x, y, c.w, c.h); pdf.text(X0 + j * (W + GAP) + W / 2, y + c.h + 3.6, (c.nome || '').slice(0, 60), { size: 7, color: C.grigio, align: 'center' }); });
-      y += hRiga + 2;
+    for (let i = 0; i < fotoOk.length; i += COLS) {
+      const riga = fotoOk.slice(i, i + COLS).map(misura);
+      const hRiga = Math.max(...riga.map(c => c.h));
+      spazio(hRiga + 2);
+      riga.forEach((c, j) => { const x = X0 + j * (W + GAP) + (W - c.w) / 2; pdf.image(c.im, x, y + (hRiga - c.h) / 2, c.w, c.h); pdf.rect(x, y + (hRiga - c.h) / 2, c.w, c.h, { stroke: C.bordo, width: 0.15 }); });
+      y += hRiga + GAP;
     }
   }
 

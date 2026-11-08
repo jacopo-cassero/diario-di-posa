@@ -3051,10 +3051,10 @@ async function fotoJpeg(f) {
   const u = await store.fileUrl(f.path); if (!u) return null;
   const blob = await (await fetch(u)).blob();
   const bmp = await createImageBitmap(blob);
-  const k = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, 700 / Math.max(bmp.width, bmp.height)); // miniature: bastano 700 px
   const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
-  const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+  const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
   return { bytes: new Uint8Array(await out.arrayBuffer()), nome: f.nome };
 }
 async function creaRapportoPdf(kind, id, { prezzi = false, foto = true } = {}) {
