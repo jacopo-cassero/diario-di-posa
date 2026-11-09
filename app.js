@@ -390,10 +390,11 @@ function listaLavoriRiv() {
   const fine = l => l.dataFine && l.dataFine > l.data ? l.dataFine : l.data;
   const prossimi = L.filter(l => fine(l) >= TODAY).sort((a, b) => a.data.localeCompare(b.data));
   const passati = L.filter(l => fine(l) < TODAY).sort((a, b) => b.data.localeCompare(a.data));
-  return `<section class="stack"><h3>I tuoi lavori</h3>
-    <div class="small muted">Le pose e gli interventi segnati a tuo nome nel mio calendario.</div>
+  void passati;
+  return `<section class="stack"><h3>I tuoi lavori in programma</h3>
+    <div class="small muted">Le pose e gli interventi in programma a tuo nome nel mio calendario.</div>
     ${prossimi.map(cardLavRiv).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}
-    ${passati.length ? `<details><summary class="small muted">Lavori passati (${passati.length})</summary><div class="stack">${passati.map(cardLavRiv).join('')}</div></details>` : ''}
+    ${passati.length ? `<div class="small muted">I lavori conclusi li trovi in «I tuoi documenti», con il rapporto in PDF.</div>` : ''}
   </section>`;
 }
 function giorniLavorativi(da, a) {
@@ -575,11 +576,11 @@ function rRapportiRiv() {
   if (RAPP.lista === null) { caricaRapportiRiv(); return `<div class="empty">Caricamento…</div>`; }
   const per = new Map(); for (const d of RAPP.lista) { if (!per.has(d.rivenditore)) per.set(d.rivenditore, []); per.get(d.rivenditore).push(d); }
   const nome = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.azienda || m.nome || m.email) : 'Rivenditore'; };
-  return `<div class="row between"><h2>Rapporti ai rivenditori</h2><button class="btn sm" data-act="rappAgg" type="button">Aggiorna</button></div>
-  <div class="small muted">I rapporti di cantiere che hai messo nell'area riservata di ogni rivenditore: li trova in «I tuoi documenti». Per aggiungerne uno, apri la posa o l'intervento e tocca «Rapporto».</div>
+  return `<div class="row between"><h2>Documenti dei rivenditori</h2><button class="btn sm" data-act="rappAgg" type="button">Aggiorna</button></div>
+  <div class="small muted">I PDF che hai messo nell'area riservata di ogni rivenditore (rapporti di cantiere, verbali, moduli): li trova in «I tuoi documenti» e non può modificarli. Per aggiungerne uno: dalla posa o dall'intervento tocca «Rapporto», da un modulo tocca «PDF», poi «Metti nell'area di…».</div>
   ${RAPP.err ? `<div class="notice small">${esc(RAPP.err)}</div>` : ''}
   ${[...per.entries()].map(([rid, L]) => `<section class="stack"><h3>${esc(nome(rid))} <span class="small muted">· ${L.length}</span></h3>${L.map(d => `<div class="card"><div class="row between"><span class="t">${esc(d.titolo)}</span></div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</div>
-    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">Vai al lavoro</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun rapporto pubblicato.</div>')}`;
+    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">Vai al lavoro</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun documento pubblicato.</div>')}`;
 }
 function rDocumenti() {
   const L = [...DOC_LISTA()].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
@@ -648,8 +649,8 @@ function rRivMieiDoc() {
   const anni = [...new Set(M.map(d => String(d.data || '').slice(0, 4)).filter(Boolean))];
   const card = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
   return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
-  <div class="small muted">I rapporti di cantiere dei tuoi lavori, con tutto quello che è stato fatto, le foto e le cose da completare.</div>
-  ${M.length ? anni.map(y => `<section class="stack"><h3>${y}</h3>${M.filter(d => String(d.data || '').startsWith(y)).map(card).join('')}</section>`).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto di cantiere compare qui.</div>'}`;
+  <div class="small muted">I documenti dei tuoi lavori in PDF: rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
+  ${M.length ? anni.map(y => `<section class="stack"><h3>${y}</h3>${M.filter(d => String(d.data || '').startsWith(y)).map(card).join('')}</section>`).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
 }
 function rRivDocumenti() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
@@ -1602,10 +1603,11 @@ function apriFirmaGrande(piccolo, hidden, R) {
   impagina();
 }
 
-function mostraPdf(bytes, nome, titolo, indietro) {
+function mostraPdf(bytes, nome, titolo, indietro, pub) {
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
-  pdfCorrente = { file, url: URL.createObjectURL(file), indietro };
+  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, bytes, pub };
+  if (pub && GESTORE() && store.st.mode !== 'demo') setTimeout(() => boxPubblica(), 0);
   let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
   openSheet(titolo, `
     <div class="pdfready">${svg('doc')}<div><b>${esc(nome)}</b><div class="small muted">${num(bytes.length / 1024, 0)} KB</div></div></div>
@@ -1613,7 +1615,28 @@ function mostraPdf(bytes, nome, titolo, indietro) {
       ${share ? `<button type="button" class="btn primary" data-act="pdfShare">Invia o salva (WhatsApp, Mail, File…)</button>` : ''}
       <a class="btn ${share ? '' : 'primary'}" href="${pdfCorrente.url}" target="_blank" rel="noopener">Apri il PDF</a>
       <button type="button" class="btn" data-act="pdfDown">Scarica sul dispositivo</button>
-    </div>`, null, { extra: indietro ? '<button type="button" class="btn" data-act="pdfBack">‹ Torna indietro</button>' : '' });
+    </div>
+    <div id="pubBox" class="stack"></div>`, null, { extra: indietro ? '<button type="button" class="btn" data-act="pdfBack">‹ Torna indietro</button>' : '' });
+}
+/** Nel foglio del PDF: «Metti nell'area di …» per i rivenditori a cui appartiene il documento. */
+function pubModulo(mod, nomeModello) {
+  const lav = mod.ref?.id ? (S.lavori.find(x => x.id === mod.ref.id) || S.interventi.find(x => x.id === mod.ref.id)) : null;
+  const rif = lav ? rifDi(lav) : '';
+  return { x: lav || { cliente: mod.cliente, clienteId: mod.clienteId }, chiave: `mod-${mod.id}`, cartella: 'moduli',
+    titolo: `${mod.titolo || nomeModello || 'Modulo'}${mod.data ? ' · ' + fmtD(mod.data, { day: 'numeric', month: 'short', year: 'numeric' }) : ''}${rif ? ' · Rif. ' + rif : ''}`,
+    data: mod.data || TODAY, lavoro_id: lav?.id || null, kind: lav ? (S.lavori.includes(lav) ? 'lavori' : 'interventi') : null };
+}
+async function boxPubblica() {
+  const pub = pdfCorrente?.pub, box = $('#pubBox'); if (!pub || !box) return;
+  if (navigator.onLine) await caricaAccessi(true).catch(() => {});
+  const rivs = rivDiLavoro(pub.x || {});
+  const tutti = ACC.membri.filter(m => m.ruolo === 'rivenditore' && m.stato === 'attivo');
+  if (!$('#pubBox') || !tutti.length) return;
+  const voce = m => `<button type="button" class="btn" data-act="pdfPubblica" data-id="${esc(m.user_id)}">${svg('doc', 'i')} Metti nell'area di ${esc(m.azienda || m.nome || 'rivenditore')}</button>`;
+  $('#pubBox').innerHTML = `<div class="fs-t">Area riservata del rivenditore</div>
+    ${rivs.map(voce).join('')}
+    ${tutti.length > rivs.length ? `<details><summary class="small muted">${rivs.length ? 'Altri rivenditori' : 'Scegli il rivenditore'}</summary><div class="stack">${tutti.filter(m => !rivs.includes(m)).map(voce).join('')}</div></details>` : ''}
+    <div class="small muted">Lo trova in «I tuoi documenti», in PDF non modificabile.</div>`;
 }
 function rModuli() {
   const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data)));
@@ -1889,7 +1912,7 @@ function menuHtml() {
   ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'richieste', 'cal', `Richieste${nRichieste() ? ` <span class="badge">${nRichieste()}</span>` : ''}`, 'prenotazioni e preventivi dei rivenditori', UI.tab === 'richieste')}
-  ${st.mode === 'demo' ? '' : item('menuGo', 'rapportiriv', 'doc', 'Rapporti ai rivenditori', 'i rapporti di cantiere nelle loro aree', UI.tab === 'rapportiriv')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'rapportiriv', 'doc', 'Documenti dei rivenditori', 'rapporti, verbali e moduli nelle loro aree', UI.tab === 'rapportiriv')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'documenti', 'doc', `Documenti azienda per i rivenditori${docInScadenza() ? ` <span class="badge">${docInScadenza()}</span>` : ''}`, 'certificati, DURC, assicurazioni da scaricare', UI.tab === 'documenti')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${ACC.richieste.length ? ` <span class="badge">${ACC.richieste.length}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
@@ -3175,19 +3198,26 @@ async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il rapporto'); return; }
   const dIt = s => String(s || '').split('-').reverse().join('-');
   const nome = `Rapporto ${r.data ? dIt(r.data) + ' ' : ''}${x.cliente || ''}${r.riferimento ? ' ' + r.riferimento : ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
-  mostraPdf(bytes, nome, 'Rapporto di cantiere', null);
+  mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`, data: r.data, lavoro_id: x.id, kind });
   if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r);
 }
-/** Mette il PDF nell'area riservata dei rivenditori scelti (sostituisce quello di prima dello stesso lavoro). */
+/**
+ * Mette un PDF (non modificabile) nell'area riservata dei rivenditori: «I tuoi documenti».
+ * Se lo stesso documento era già stato pubblicato, viene sostituito.
+ */
+async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = null, kind = null }, rivIds) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  for (const rid of rivIds) {
+    const path = await store.caricaFisso(`rivenditori/${rid}/${cartella}/${chiave}.pdf`, blob);
+    const { error } = await store.tabella('documenti_cliente').upsert({ id: `${chiave}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id, kind, data: data || TODAY, creato: new Date().toISOString() });
+    if (error) throw Object.assign(error, { userMsg: /relation|does not exist|schema cache/i.test(error.message || '') ? 'Per pubblicare i documenti lancia prima lo script area_rivenditore.sql' : 'Non sono riuscito a pubblicare il documento' });
+  }
+  if (RAPP.lista) RAPP.lista = null;
+}
 async function pubblicaRapporto(kind, x, bytes, rivIds, r) {
   try {
-    const blob = new Blob([bytes], { type: 'application/pdf' });
     const titolo = `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`;
-    for (const rid of rivIds) {
-      const path = await store.caricaFisso(`rivenditori/${rid}/rapporti/${kind}-${x.id}.pdf`, blob);
-      const { error } = await store.tabella('documenti_cliente').upsert({ id: `rap-${x.id}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id: x.id, kind, data: r.data || TODAY, creato: new Date().toISOString() });
-      if (error) throw Object.assign(error, { userMsg: /relation|does not exist|schema cache/i.test(error.message || '') ? 'Per pubblicare i rapporti lancia prima lo script area_rivenditore.sql' : 'Non sono riuscito a pubblicare il rapporto' });
-    }
+    await pubblicaPdf({ bytes, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo, data: r.data, lavoro_id: x.id, kind }, rivIds);
     const cur = S[kind].find(y => y.id === x.id); if (cur) store.put(kind, x.id, { ...stripId(cur), rapportoPubblicato: TODAY });
     toast(rivIds.length === 1 ? 'Rapporto messo nell\'area del rivenditore' : `Rapporto messo nell'area di ${rivIds.length} rivenditori`);
   } catch (e) { console.warn(e); toast(e.userMsg || 'Pubblicazione non riuscita: controlla la rete e riprova'); }
@@ -3534,13 +3564,20 @@ document.addEventListener('click', async e => {
     }
     case 'docNuovo': sheetDocRiv(null); break;
     case 'rappAgg': RAPP.lista = null; render(); break;
+    case 'pdfPubblica': {
+      const pub = pdfCorrente?.pub; if (!pub) break;
+      b.disabled = true;
+      try { await pubblicaPdf({ ...pub, bytes: pdfCorrente.bytes }, [id]); b.textContent = '✓ Messo nella sua area'; toast('Documento messo nell\'area del rivenditore'); }
+      catch (e) { b.disabled = false; toast(e.userMsg || 'Pubblicazione non riuscita: controlla la rete e riprova'); }
+      break;
+    }
     case 'rappApri': { const d = (RAPP.lista || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rappTogli': {
       const d = (RAPP.lista || []).find(x => x.id === id); if (!d) break;
-      if (!confirm('Togliere questo rapporto dall\'area del rivenditore?')) break;
+      if (!confirm('Togliere questo documento dall\'area del rivenditore?')) break;
       const { error } = await store.tabella('documenti_cliente').delete().eq('id', d.id);
       if (error) { toast('Non sono riuscito a toglierlo'); break; }
-      store.removeFile(d.path).catch(() => {}); RAPP.lista = RAPP.lista.filter(x => x.id !== d.id); toast('Rapporto tolto dall\'area del rivenditore'); render(); break;
+      store.removeFile(d.path).catch(() => {}); RAPP.lista = RAPP.lista.filter(x => x.id !== d.id); toast('Documento tolto dall\'area del rivenditore'); render(); break;
     }
     case 'docModifica': sheetDocRiv(DOC_LISTA().find(d => d.id === id)); break;
     case 'docApri': { const x = DOC_LISTA().find(d => d.id === id); if (x) scaricaFile(x.path, x.nomeFile); break; }
@@ -3643,12 +3680,12 @@ document.addEventListener('click', async e => {
         const saved = salvaModuloU(new FormData(form)); const m = modEdit.uff;
         let bytes; try { bytes = creaModuloUfficiale({ mod: saved, modello: m, sfondo: await sfondoModulo(m.id) }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
         const nome = `${m.nome} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
-        mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || DIP.moduli.find(x => x.id === saved.id) || saved, false)); break;
+        mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || DIP.moduli.find(x => x.id === saved.id) || saved, false), pubModulo(saved, m.nome)); break;
       }
       const saved = salvaModulo(new FormData($('#sheetForm')));
       let bytes; try { bytes = creaModulo({ mod: { ...saved, clienteDati: trovaCliente(saved.cliente) || {} }, azienda: AZ(), immagini: IMG }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
       const nome = `${saved.titolo} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
-      mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModulo(S.moduli.find(x => x.id === saved.id) || saved, false)); break;
+      mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModulo(S.moduli.find(x => x.id === saved.id) || saved, false), pubModulo(saved, saved.titolo)); break;
     }
     case 'siNo': { const h = $('#f_' + b.dataset.for); const v = h.value === arg ? '' : arg; h.value = v; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.arg === v))); break; }
     case 'tabRiga': { const c = (modEdit?.mod.campi || []).find(x => x.id === arg); $('#tab_' + arg).insertAdjacentHTML('beforeend', rigaTab(c?.colonne || ['Voce'])); break; }
