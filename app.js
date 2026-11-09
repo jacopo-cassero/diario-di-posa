@@ -2730,12 +2730,12 @@ function sheetScegliLavoro(p) {
   const punteggio = ([, x, d]) => (nome && (normNome(x.cliente) === nome || (x.clienteId && x.clienteId === p.clienteId)) ? 0 : 1) * 1e6 + Math.abs(daysTo(d)) + (d < TODAY ? 0.5 : 0);
   const L = tutti.sort((a, b) => punteggio(a) - punteggio(b)).slice(0, 60);
   const riga = ([k, x]) => `<button type="button" class="modchoice" data-act="collegaPrev" data-arg="${k}" data-id="${x.id}">${svg(k === 'lavori' ? 'cal' : 'int')}<span><b>${esc(x.cliente || 'Cliente')}</b><small>${esc(descrLavoro(x, k))}${x.preventivoId && x.preventivoId !== p.id ? ' · ha già un preventivo' : ''}</small></span><span class="go">›</span></button>`;
-  const stesso = L.filter(([, x]) => nome && normNome(x.cliente) === nome), altri = L.filter(r => !stesso.includes(r));
+  const stesso = L.filter(([, x]) => nome && stessoCliente(p.cliente?.nome, p.clienteId, x.cliente, x.clienteId)), altri = L.filter(r => !stesso.includes(r));
   openSheet('Collega a un lavoro', `
     ${F('Cerca', '<input id="cercaLavPrev" type="search" placeholder="Cliente o indirizzo…" autocomplete="off">')}
     <div id="listaLavPrev" class="stack">
       ${stesso.length ? `<div class="fs-t">Di ${esc(p.cliente?.nome || '')}</div>${stesso.map(riga).join('')}` : ''}
-      ${altri.length ? `<div class="fs-t">${stesso.length ? 'Altri lavori' : 'Lavori in calendario'}</div>${altri.map(riga).join('')}` : ''}
+      ${altri.length ? (stesso.length ? `<button type="button" class="linkbtn small" data-act="mostraAltriLav">Mostra anche i lavori degli altri clienti (${altri.length})</button><div id="altriLav" hidden class="stack"><div class="fs-t">Altri lavori</div>${altri.map(riga).join('')}</div>` : `<div class="fs-t">${nome ? `Nessun lavoro in calendario per ${esc(p.cliente?.nome || '')} · tutti i lavori` : 'Lavori in calendario'}</div>${altri.map(riga).join('')}`) : ''}
       ${!L.length ? '<div class="empty small">Nessuna posa o intervento in calendario.</div>' : ''}
     </div>`, null, { extra: '<button type="button" class="btn" data-act="collegaIndietro">‹ Torna al preventivo</button>' });
 }
@@ -2760,10 +2760,35 @@ function boxPrevLavoro(x, kind) {
   if (p) { const t = totPrev(p); return `<div class="fieldset collega"><span class="fs-t">Preventivo collegato</span><div class="small"><b>N. ${esc(p.numero || '')}</b> del ${fmtD(p.data)} · ${eur(t.imponibile)}${p.firmato ? ' · <span class="chip ok">firmato</span>' : ''}</div>
     ${p.oggetto ? `<div class="small prewrap">${esc(p.oggetto)}</div>` : ''}${vociPrevHtml(p)}
     <div class="row"><button type="button" class="btn sm dark" data-act="prevPdfDir" data-id="${p.id}">PDF</button>${p.firmato ? `<button type="button" class="btn sm" data-act="openPath" data-arg="${esc(p.firmato.path)}">Firmato</button>` : ''}<button type="button" class="btn sm" data-act="apriPrevLav" data-id="${p.id}">Apri</button>${kind === 'lavori' && (p.righe || []).length ? '<button type="button" class="btn sm" data-act="vociDaPrev">Usa le voci del preventivo</button>' : ''}<button type="button" class="btn sm ghost" data-act="scollegaLavPrev" data-id="${p.id}">Scollega</button></div></div>`; }
-  const nome = normNome(x.cliente);
-  const opz = [...S.preventivi].filter(q => { const j = lavoroDiPrev(q); return !j || j.id === x.id; }).sort((a, b) => ((normNome(a.cliente?.nome) === nome ? 0 : 1) - (normNome(b.cliente?.nome) === nome ? 0 : 1)) || String(b.data).localeCompare(a.data)).slice(0, 40);
+  const opz = [...S.preventivi].filter(q => { const j = lavoroDiPrev(q); return !j || j.id === x.id; }).sort((a, b) => String(b.data).localeCompare(a.data)).slice(0, 80);
   if (!opz.length) return '';
-  return `<div class="fieldset collega"><span class="fs-t">Preventivo</span>${F('Collega un preventivo', `<select name="prevColl" id="f_prevColl"><option value="">Nessuno</option>${opz.map(q => `<option value="${q.id}">N. ${esc(q.numero || '')} · ${esc(q.cliente?.nome || '')} · ${eur(totPrev(q).imponibile)}</option>`).join('')}</select>`)}</div>`;
+  return `<div class="fieldset collega" id="prevCollBox"><span class="fs-t">Preventivo</span>${F('Collega un preventivo', `<select name="prevColl" id="f_prevColl"><option value="">Nessuno</option>${opz.map(q => `<option value="${q.id}" data-cli="${esc(q.cliente?.nome || '')}" data-cid="${esc(q.clienteId || '')}">N. ${esc(q.numero || '')} · ${esc(q.cliente?.nome || '')} · ${fmtD(q.data, { day: 'numeric', month: 'short' })} · ${eur(totPrev(q).imponibile)}</option>`).join('')}</select>`)}
+    <div class="small muted" id="prevCollInfo"></div></div>`;
+}
+/** Nome del cliente senza forma societaria e punteggiatura, per riconoscere «Edilchieri» e «EDILCHIERI S.R.L.». */
+const nomeBase = s => normNome(s).replace(/[.,'"&()-]/g, ' ').replace(/\b(s\s?r\s?l\s?s?|s\s?p\s?a|s\s?n\s?c|s\s?a\s?s|srls|di|e figli|ditta|impresa)\b/g, ' ').replace(/\s+/g, ' ').trim();
+function stessoCliente(nomeA, idA, nomeB, idB) {
+  if (idA && idB) return idA === idB;
+  const a = nomeBase(nomeA), b = nomeBase(nomeB); if (!a || !b) return false;
+  return a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b));
+}
+/** Nella posa o nell'intervento: mostro solo i preventivi del cliente scelto. */
+function filtraPrevColl(tutti) {
+  const sel = $('#f_prevColl'), info = $('#prevCollInfo'); if (!sel) return;
+  const nome = ($('#f_cliente')?.value || '').trim(), c = nome ? trovaCliente(nome) : null;
+  const box = $('#prevCollBox'); if (tutti) box.dataset.tutti = '1';
+  const mostraTutti = !nome || box.dataset.tutti;
+  let n = 0;
+  for (const o of sel.options) {
+    if (!o.value) continue;
+    const ok = mostraTutti || o.selected || stessoCliente(nome, c?.id, o.dataset.cli, o.dataset.cid);
+    o.hidden = !ok; o.disabled = !ok; if (ok) n++;
+  }
+  const altri = sel.options.length - 1 - n;
+  const html = !nome ? 'Scegli il cliente: vedrai solo i suoi preventivi.'
+    : box.dataset.tutti ? `Tutti i preventivi. <button type="button" class="linkbtn small" data-act="prevCollSolo">Solo quelli di ${esc(nome)}</button>`
+    : `${n ? `${n} ${n === 1 ? 'preventivo' : 'preventivi'} di ${esc(nome)}` : `Nessun preventivo da collegare per ${esc(nome)}`}${altri ? ` · <button type="button" class="linkbtn small" data-act="prevCollTutti">mostra anche gli altri (${altri})</button>` : ''}`;
+  if (info._html !== html) { info.innerHTML = html; info._html = html; } // non ridisegno se uguale: il tocco sul link non va perso
 }
 function salvaPrev(fd) {
   const { p, isNew } = prevCtx;
@@ -2910,6 +2935,7 @@ function aggiornaCliInfo() {
     : `${svg('cli', 'i')} Cliente nuovo: lo aggiungo alla rubrica quando salvi`;
   box.classList.toggle('nuovo', !c);
   aggiornaCantieri();
+  filtraPrevColl();
 }
 /** Intervento: le pose già fatte per questo cliente, da scegliere per riprendere indirizzo, telefono e riferimento. */
 function aggiornaCantieri(tutti) {
@@ -3401,6 +3427,9 @@ document.addEventListener('click', async e => {
     case 'selCons': sheetConsMulti(); break;
     case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
+    case 'prevCollTutti': filtraPrevColl(true); break;
+    case 'mostraAltriLav': { const a = $('#altriLav'); if (a) a.hidden = false; b.remove(); break; }
+    case 'prevCollSolo': { const bx = $('#prevCollBox'); if (bx) delete bx.dataset.tutti; filtraPrevColl(); break; }
     case 'rapporto': {
       // prima salvo quello che hai appena scritto, poi preparo il rapporto
       const form = $('#sheetForm');
@@ -3659,7 +3688,7 @@ document.addEventListener('change', e => {
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
 document.addEventListener('input', e => {
-  if (e.target.id === 'cercaLavPrev') { const q = normNome(e.target.value); document.querySelectorAll('#listaLavPrev .modchoice').forEach(b => { b.hidden = q && !normNome(b.textContent).includes(q); }); return; }
+  if (e.target.id === 'cercaLavPrev') { const q = normNome(e.target.value); const al = $('#altriLav'); if (al && q) al.hidden = false; document.querySelectorAll('#listaLavPrev .modchoice').forEach(b => { b.hidden = q && !normNome(b.textContent).includes(q); }); return; }
   const t = e.target;
   if (t.id === 'f_cliente' || t.id === 'f_cnome') aggiornaCliInfo();
   if (t.id === 'f_mcliente') { aggiornaCliInfoModulo(); return; }
