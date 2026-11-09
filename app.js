@@ -266,9 +266,12 @@ function sheetMembro(m) {
     <div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div>
     <div class="fieldset"><span class="fs-t">Accesso</span>${RUOLI.map(([k, l, d]) => `<label class="radiorow"><input type="radio" name="mruolo" value="${k}" ${k === m.ruolo ? 'checked' : ''}><span><b>${l}</b><small>${d}</small></span></label>`).join('')}</div>
     ${tog('mattivo', 'Accesso attivo', m.stato === 'attivo', 'spento: non vede più niente finché non lo riattivi')}
-    <div class="g2">${F('Nome', inp('mnome2', m.nome))}${F('Telefono', inp('mtel2', m.telefono, 'tel'))}</div>`,
+    <div class="g2">${F('Nome', inp('mnome2', m.nome))}${F('Telefono', inp('mtel2', m.telefono, 'tel'))}</div>
+    ${m.ruolo === 'rivenditore' ? `${F('Cliente della rubrica', `<select name="mcli" id="f_mcli"><option value="">Riconosci dal nome (${esc(m.azienda || m.nome || '')})</option>${[...S.clienti].sort((a, b) => a.nome.localeCompare(b.nome)).map(c => `<option value="${esc(c.id)}" ${m.cliente_id === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select>`)}<div class="small muted">Il rivenditore vede nel suo calendario tutte le pose e gli interventi di questo cliente, anche quelli segnati prima del suo accesso, e i rapporti di cantiere che pubblichi per lui.</div>` : ''}`,
   async fd => {
-    const { error } = await store.tabella('membri').update({ ruolo: fd.get('mruolo'), stato: fd.get('mattivo') ? 'attivo' : 'sospeso', nome: String(fd.get('mnome2')).trim(), telefono: String(fd.get('mtel2')).trim() }).eq('user_id', m.user_id);
+    const agg = { ruolo: fd.get('mruolo'), stato: fd.get('mattivo') ? 'attivo' : 'sospeso', nome: String(fd.get('mnome2')).trim(), telefono: String(fd.get('mtel2')).trim() };
+    if (fd.has('mcli')) { const c = S.clienti.find(x => x.id === fd.get('mcli')); const r1 = await store.tabella('membri').update({ cliente_id: c?.id || null, cliente_nome: c?.nome || null }).eq('user_id', m.user_id); if (r1.error) toast('Per collegare il cliente lancia prima lo script area_rivenditore.sql'); }
+    const { error } = await store.tabella('membri').update(agg).eq('user_id', m.user_id);
     if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a salvare' });
     toast('Accesso aggiornato'); caricaAccessi(true);
   }, { del: async () => { const { error } = await store.tabella('membri').delete().eq('user_id', m.user_id); if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a togliere l\'accesso' }); toast('Accesso tolto'); caricaAccessi(true); } });
@@ -320,11 +323,18 @@ async function caricaRiv(forza) {
     const { data, error } = await store.tabella('prenotazioni').select('*').order('data', { ascending: false }).limit(60);
     if (error) throw error;
     RIV.mie = data; RIV.err = '';
+    // i lavori già segnati a suo nome nel calendario (anche quelli di prima del suo accesso)
+    if (forza || !RIV.lavori) {
+      try { RIV.lavori = await store.rpc('lavori_rivenditore', { da: piuGiorni(TODAY, -400), a: piuGiorni(TODAY, 400) }) || []; }
+      catch { RIV.lavori = RIV.lavori || []; }
+    }
   } catch (e) { console.warn(e); RIV.err = e.userMsg || 'Non riesco a leggere il calendario: controlla la rete.'; }
   RIV.carico = true; RIV.t = Date.now(); render(); void A;
 }
 function statoGiorno(k) {
   const A = store.st.accesso, dow = pd(k).getDay();
+  const lav = (RIV.lavori || []).find(l => l.data && k >= l.data && k <= (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data));
+  if (lav) return ['lav', `Tuo lavoro · ${lav.kind === 'lavori' ? 'posa' : 'intervento'}`];
   const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
   if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
   if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
@@ -353,17 +363,38 @@ function rRivenditore() {
   <div class="small muted">Ciao ${esc(A.azienda || A.nome || '')}: le giornate <b>libere</b> si possono prenotare. Tocca il primo giorno e, se ti servono più giorni, l'ultimo. Ogni prenotazione la confermo io.</div>
   ${RIV.err ? `<div class="notice small">${esc(RIV.err)}</div>` : ''}
   <section class="stack">
-    <div class="cal-head"><button class="iconbtn" data-act="rivMese" data-arg="-1" aria-label="Mese precedente" type="button" ${RIV.mese <= TODAY.slice(0, 7) ? 'disabled' : ''}>${svg('l')}</button><h2>${monthName(RIV.mese)}</h2><button class="iconbtn" data-act="rivMese" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
+    <div class="cal-head"><button class="iconbtn" data-act="rivMese" data-arg="-1" aria-label="Mese precedente" type="button" ${RIV.mese <= piuGiorni(TODAY, -365).slice(0, 7) ? 'disabled' : ''}>${svg('l')}</button><h2>${monthName(RIV.mese)}</h2><button class="iconbtn" data-act="rivMese" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="cal rivcal">${cells}</div>
-    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
+    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-lav"></i> tuoi lavori</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
     ${RIV.da ? `<div class="selbar"><div><b>${RIV.a && RIV.a !== RIV.da ? `Dal ${fmtD(RIV.da, { day: 'numeric', month: 'short' })} al ${fmtD(RIV.a, { day: 'numeric', month: 'short' })}` : fmtD(RIV.da, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div class="small">${lavorative} ${lavorative === 1 ? 'giornata' : 'giornate'} di lavoro${RIV.a ? '' : ' · tocca un altro giorno per prenderne di più'}</div></div><div class="row"><button class="btn sm" data-act="rivAnnullaSel" type="button">Annulla</button><button class="btn sm primary" data-act="rivPrenota" type="button">Prenota</button></div></div>` : ''}
   </section>
   ${['granted', 'unsupported', 'notready'].includes(pushState()) ? '' : `<section class="panel stack"><div><b>Avvisi sul telefono</b><div class="small muted">Ti arriva una notifica quando confermo, sposto o annullo una prenotazione e quando il tuo preventivo è pronto.</div></div>${statoDispositivo()}</section>`}
+  ${listaLavoriRiv()}
   <section class="stack"><h3>Le tue prenotazioni</h3>
     ${attive.map(cardMiaPren).join('') || `<div class="empty small">Nessuna prenotazione in corso.</div>`}
     ${vecchie.length ? `<details><summary class="small muted">Precedenti e annullate</summary><div class="stack">${vecchie.map(cardMiaPren).join('')}</div></details>` : ''}
   </section>
   <div class="row between small muted"><span>${esc(store.st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`;
+}
+function cardLavRiv(l) {
+  const quando = l.dataFine && l.dataFine > l.data ? `Dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short', year: 'numeric' })}` : fmtD(l.data, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const ora = testoOrario(l);
+  const st = l.fatto ? ['ok', l.kind === 'lavori' ? 'Eseguita' : 'Completato'] : l.data < TODAY ? ['warn', 'In corso'] : ['in', 'In programma'];
+  return `<div class="card"><div class="row between"><span class="t">${l.kind === 'lavori' ? 'Posa' : 'Intervento'}${l.riferimento ? ` <small class="rif">Rif. ${esc(l.riferimento)}</small>` : ''}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+    <div class="meta"><span>${svg('cal', 'i')} ${quando}${ora ? ' · ' + esc(ora) : ''}</span>${l.indirizzo ? `<span>${svg('pin', 'i')} ${esc(l.indirizzo)}</span>` : ''}</div>
+    ${l.cosa ? `<div class="small prewrap">${esc(l.cosa)}</div>` : ''}
+    ${(l.sospesi || []).length ? `<div class="sospcard"><b>Da completare</b><ul>${l.sospesi.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}</div>`;
+}
+function listaLavoriRiv() {
+  const L = RIV.lavori || []; if (!L.length) return '';
+  const fine = l => l.dataFine && l.dataFine > l.data ? l.dataFine : l.data;
+  const prossimi = L.filter(l => fine(l) >= TODAY).sort((a, b) => a.data.localeCompare(b.data));
+  const passati = L.filter(l => fine(l) < TODAY).sort((a, b) => b.data.localeCompare(a.data));
+  return `<section class="stack"><h3>I tuoi lavori</h3>
+    <div class="small muted">Le pose e gli interventi segnati a tuo nome nel mio calendario.</div>
+    ${prossimi.map(cardLavRiv).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}
+    ${passati.length ? `<details><summary class="small muted">Lavori passati (${passati.length})</summary><div class="stack">${passati.map(cardLavRiv).join('')}</div></details>` : ''}
+  </section>`;
 }
 function giorniLavorativi(da, a) {
   const g = store.st.accesso.giorni || [1, 2, 3, 4, 5], out = [];
@@ -588,15 +619,21 @@ async function scaricaFile(path, nome) {
 }
 async function caricaDocRiv() {
   RIV.docCarico = true;
+  try { const { data, error } = await store.tabella('documenti_cliente').select('*').order('data', { ascending: false }).limit(200); RIV.mieiDoc = error ? [] : data || []; } catch { RIV.mieiDoc = []; }
   try { RIV.docs = await store.rpc('documenti_rivenditore') || []; RIV.docErr = ''; }
   catch (e) { RIV.docs = []; RIV.docErr = /function|schema cache/i.test(e.message || '') ? 'I documenti non sono ancora attivi: avvisa l\'installatore.' : 'Non riesco a caricare i documenti, riprova.'; }
   render();
 }
 function rRivDocumenti() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
-  if (RIV.docErr) return `<div class="notice small">${esc(RIV.docErr)}</div>`;
   const L = [...(RIV.docs || [])].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
+  const M = RIV.mieiDoc || [];
   return `<div class="row between"><h2>Documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
+  <section class="stack"><h3>I tuoi documenti</h3><div class="small muted">Rapporti di cantiere dei tuoi lavori, con tutto quello che è stato fatto.</div>
+    ${M.map(d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`).join('') || '<div class="empty small">Ancora nessun rapporto.</div>'}
+  </section>
+  <h3>Documenti dell'azienda</h3>
+  ${RIV.docErr ? `<div class="notice small">${esc(RIV.docErr)}</div>` : ''}
   <div class="small muted">Documenti dell'azienda da scaricare. Sono sempre le versioni più recenti.</div>
   <div class="stack">${L.map(x => `<button type="button" class="card docriv" data-act="rivDocApri" data-id="${esc(x.id)}"><div class="row between"><span class="t">${esc(x.titolo)}</span>${svg('doc', 'i')}</div>
     <div class="meta">${chipScad(x, true)}<span class="small muted">${esc(x.nomeFile || '')}${x.peso ? ' · ' + pesoFile(x.peso) : ''}</span></div>${x.note ? `<div class="small">${esc(x.note)}</div>` : ''}</button>`).join('')
@@ -739,6 +776,7 @@ document.addEventListener('click', async e => {
     case 'richAggiorna': await caricaAccessi(true); toast('Aggiornato'); break;
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
     case 'rivDocAgg': RIV.docCarico = false; render(); break;
+    case 'rivMioDoc': { const d = (RIV.mieiDoc || []).find(x => x.id === b.dataset.id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivDocApri': { const x = (RIV.docs || []).find(d => d.id === b.dataset.id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
@@ -3065,14 +3103,21 @@ ${righeTotale(t)}`;
 
 /* ---------- rapporto di cantiere per il rivenditore ---------- */
 const eImmagine = f => /^image\//.test(f.tipo || '') || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.nome || '');
-function sheetRapporto(kind, id) {
+/** I rivenditori con accesso a cui appartiene questo lavoro (cliente collegato o stesso nome). */
+const rivDiLavoro = x => ACC.membri.filter(m => m.ruolo === 'rivenditore' && m.stato === 'attivo' && (m.cliente_id ? (x.clienteId === m.cliente_id || (!x.clienteId && stessoCliente(m.cliente_nome, null, x.cliente, null))) : stessoCliente(m.azienda || m.nome, null, x.cliente, null)));
+async function sheetRapporto(kind, id) {
   const x = S[kind]?.find(r => r.id === id); if (!x) return;
+  if (GESTORE() && store.st.mode !== 'demo' && navigator.onLine) await caricaAccessi(true).catch(() => {});
+  const rivs = store.st.mode === 'demo' ? [] : rivDiLavoro(x);
   const foto = (x.allegati || []).filter(eImmagine), altri = (x.allegati || []).filter(f => !eImmagine(f));
   openSheet('Rapporto di cantiere', `<div class="small">Un PDF con tutto quello che hai segnato su questo ${kind === 'lavori' ? 'cantiere' : 'intervento'}: richiesta, lavori eseguiti con le note delle voci, materiale, note, cose da completare, moduli${foto.length ? ' e foto' : ''}. Da mandare al rivenditore.</div>
     <label class="check"><input type="checkbox" name="prezzi"> Includi i prezzi delle voci</label>
     ${foto.length ? `<label class="check"><input type="checkbox" name="foto" checked> Includi le foto (${foto.length})</label>` : ''}
-    ${altri.length ? `<div class="small muted">Gli altri allegati (${altri.map(f => esc(f.nome)).join(', ')}) sono elencati nel rapporto: mandali insieme al PDF se servono.</div>` : ''}`,
-  async fd => { const o = { prezzi: !!fd.get('prezzi'), foto: !!fd.get('foto') }; setTimeout(() => creaRapportoPdf(kind, id, o), 80); }, { saveLabel: 'Crea il rapporto' });
+    ${altri.length ? `<div class="small muted">Gli altri allegati (${altri.map(f => esc(f.nome)).join(', ')}) sono elencati nel rapporto: mandali insieme al PDF se servono.</div>` : ''}
+    ${rivs.map(m => `<label class="check"><input type="checkbox" name="pubblica" value="${esc(m.user_id)}" checked> Metti il rapporto nell'area riservata di <b>${esc(m.azienda || m.nome || 'rivenditore')}</b></label>`).join('')}
+    ${rivs.length ? `<div class="small muted">Lo trova in «Documenti» del suo accesso. Se lo ricrei, il rapporto vecchio viene sostituito.</div>` : x.rapportoPubblicato ? '' : ''}
+    ${x.rapportoPubblicato ? `<div class="small muted">Ultimo rapporto pubblicato il ${fmtD(x.rapportoPubblicato, { day: 'numeric', month: 'long' })}.</div>` : ''}`,
+  async fd => { const o = { prezzi: !!fd.get('prezzi'), foto: !!fd.get('foto'), pubblica: fd.getAll('pubblica') }; setTimeout(() => creaRapportoPdf(kind, id, o), 80); }, { saveLabel: 'Crea il rapporto' });
 }
 async function fotoJpeg(f) {
   const u = await store.fileUrl(f.path); if (!u) return null;
@@ -3084,7 +3129,7 @@ async function fotoJpeg(f) {
   const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
   return { bytes: new Uint8Array(await out.arrayBuffer()), nome: f.nome };
 }
-async function creaRapportoPdf(kind, id, { prezzi = false, foto = true } = {}) {
+async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica = [] } = {}) {
   const x = S[kind]?.find(r => r.id === id); if (!x) return;
   const L = kind === 'lavori';
   toast('Preparo il rapporto…');
@@ -3108,6 +3153,21 @@ async function creaRapportoPdf(kind, id, { prezzi = false, foto = true } = {}) {
   const dIt = s => String(s || '').split('-').reverse().join('-');
   const nome = `Rapporto ${r.data ? dIt(r.data) + ' ' : ''}${x.cliente || ''}${r.riferimento ? ' ' + r.riferimento : ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
   mostraPdf(bytes, nome, 'Rapporto di cantiere', null);
+  if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r);
+}
+/** Mette il PDF nell'area riservata dei rivenditori scelti (sostituisce quello di prima dello stesso lavoro). */
+async function pubblicaRapporto(kind, x, bytes, rivIds, r) {
+  try {
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const titolo = `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`;
+    for (const rid of rivIds) {
+      const path = await store.caricaFisso(`rivenditori/${rid}/rapporti/${kind}-${x.id}.pdf`, blob);
+      const { error } = await store.tabella('documenti_cliente').upsert({ id: `rap-${x.id}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id: x.id, kind, data: r.data || TODAY, creato: new Date().toISOString() });
+      if (error) throw Object.assign(error, { userMsg: /relation|does not exist|schema cache/i.test(error.message || '') ? 'Per pubblicare i rapporti lancia prima lo script area_rivenditore.sql' : 'Non sono riuscito a pubblicare il rapporto' });
+    }
+    const cur = S[kind].find(y => y.id === x.id); if (cur) store.put(kind, x.id, { ...stripId(cur), rapportoPubblicato: TODAY });
+    toast(rivIds.length === 1 ? 'Rapporto messo nell\'area del rivenditore' : `Rapporto messo nell'area di ${rivIds.length} rivenditori`);
+  } catch (e) { console.warn(e); toast(e.userMsg || 'Pubblicazione non riuscita: controlla la rete e riprova'); }
 }
 /* ---------- PDF ---------- */
 let pdfCorrente = null;

@@ -514,3 +514,8 @@ canvas.pad{cursor:pointer}
 
 .riga-nota textarea{width:100%;min-height:52px;font-size:.92rem}
 .riga .linkbtn.small{align-self:flex-start;margin-top:2px}
+
+.day.rv-lav{background:#e3edff;border-color:#7aa2e8}
+.lg.rv-lav{background:#e3edff;border-color:#7aa2e8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .day.rv-lav,:root:not([data-theme="light"]) .lg.rv-lav{background:#1b2a46;border-color:#3d5f9c}}
+:root[data-theme="dark"] .day.rv-lav,:root[data-theme="dark"] .lg.rv-lav{background:#1b2a46;border-color:#3d5f9c}
