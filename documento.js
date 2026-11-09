@@ -191,6 +191,25 @@ export function creaDocumento({ tipo = 'preventivo', doc, azienda = AZIENDA_BASE
     y += 10;
     pdf.text(X0, y, 'Luogo e data', { size: 9 }); pdf.line(X0 + 21, y + 0.6, X0 + 72, y + 0.6, { width: 0.25 });
     pdf.text(100, y, 'Firma per accettazione', { size: 9 }); pdf.line(136, y + 0.6, X1, y + 0.6, { width: 0.25 });
+  } else {
+    // Consuntivo: firma di accettazione (disegnata sullo schermo, oppure riga da firmare a mano)
+    let fim = null;
+    const m = String(doc.firma || '').match(/^data:image\/jpeg;base64,(.+)$/);
+    if (m) { try { const bin = atob(m[1]); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); fim = pdf.addJpeg(a); } catch {} }
+    const HF = fim ? 30 : 20;
+    if (y + HF > BOTTOM + 4) y = nuovaPagina();
+    y += 5;
+    pdf.paragraph(X0, y, 'Per accettazione del presente consuntivo e dei lavori eseguiti.', LARG, { size: 7.8, font: 'italic', color: C.grigio });
+    y += fim ? 20 : 10;
+    pdf.text(X0, y, fim ? 'Data' : 'Luogo e data', { size: 9 });
+    if (fim && doc.firmaData) pdf.text(X0 + 10, y, dataIt(doc.firmaData), { size: 9.5, font: 'bold' });
+    pdf.line(X0 + (fim ? 9 : 21), y + 0.6, X0 + 72, y + 0.6, { width: 0.25 });
+    pdf.text(100, y, 'Firma per accettazione', { size: 9 }); pdf.line(136, y + 0.6, X1, y + 0.6, { width: 0.25 });
+    if (fim) {
+      const info = pdf.images.find(x => x.name === fim), WM = X1 - 138, HM = 15;
+      let w = WM, h = w * info.h / info.w; if (h > HM) { h = HM; w = h * info.w / info.h; }
+      pdf.image(fim, 137 + (WM - w) / 2, y - h - 0.4, w, h);
+    }
   }
 
   // Piè di pagina su tutte le pagine

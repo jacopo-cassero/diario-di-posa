@@ -2532,6 +2532,8 @@ document.addEventListener('click', e => {
   const v = t.ivaPct > 0 ? t.totale : t.imponibile;
   tot.value = Math.floor(v / m + 1e-9) * m; aggiornaCons();
 });
+/** Riquadro per la firma di accettazione del consuntivo (si apre in grande, come nei moduli). */
+const campoFirmaCons = val => `<div class="firma"><div class="row between"><span class="fs-t">Firma per accettazione</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="consFirma">Cancella</button></div><canvas class="pad" data-for="consFirma" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_consFirma" name="consFirma" value="${esc(val || '')}"><div class="small muted">Facoltativa. Fai firmare qui il cliente: la firma compare nel PDF. Se resta vuota, nel PDF c'è la riga da firmare a mano.</div></div>`;
 function sheetCons(kind, id) {
   const x = S[kind].find(r => r.id === id); if (!x) return;
   const L = kind === 'lavori';
@@ -2545,15 +2547,16 @@ function sheetCons(kind, id) {
   openSheet('Consuntivo', `<div class="small muted">Mandalo al cliente o all'impresa come testo (WhatsApp, email) o come PDF, poi segnalo come inviato. Da qui si passa alla fattura.</div>
     <pre class="cons" id="consTxt">${esc(txt)}</pre>
     ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(x.iva ?? AZ().ivaPredefinita)))}
-    ${campoAggiustamenti(consCtx.adj)}`,
+    ${campoAggiustamenti(consCtx.adj)}
+    ${campoFirmaCons(x.consFirma)}`,
     async fd => {
-      const adj = leggiAgg(), d = { ...stripId(x), iva: fd.get('iva'), amm: (x.amm || 'da_cons') === 'da_cons' ? 'inv' : x.amm, consAgg: adj };
+      const adj = leggiAgg(), fir = fd.get('consFirma') || '', d = { ...stripId(x), iva: fd.get('iva'), amm: (x.amm || 'da_cons') === 'da_cons' ? 'inv' : x.amm, consAgg: adj, consFirma: fir, consFirmaData: fir ? (fir === x.consFirma && x.consFirmaData || TODAY) : '' };
       if (adj.sconto || adj.totale) d.importoCons = totali(conAggiustamenti({ ...docDaLavoro(x, kind, AZ()), iva: fd.get('iva') }, adj), LIST()).imponibile; else delete d.importoCons;
       delete d.gruppoCons;
       store.put(kind, id, d); toast('Consuntivo segnato come inviato');
     },
     { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consPdf" data-arg="${kind}" data-id="${id}">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
-  aggiornaCons();
+  aggiornaCons(); requestAnimationFrame(initFirme);
 }
 const stripId = o => { const { id, ...r } = o; return r; };
 
@@ -3082,12 +3085,13 @@ function sheetConsMulti(adj = {}) {
   const clienti = [...new Set(jobs.map(j => j.x.cliente || ''))];
   const conta = c => jobs.filter(j => (j.x.cliente || '') === c).length;
   const cli = [...clienti].sort((a, b) => conta(b) - conta(a))[0];
-  cmCtx = { jobs, adj }; consCtx = null;
+  cmCtx = { jobs, adj, firma: cmCtx?.firma || '' }; consCtx = null;
   openSheet('Consuntivo di più giorni', `
     ${clienti.length > 1 ? F('Cliente', sel('cmCliente', clienti.map(c => [c, c || 'Senza nome']), cli)) : `<div class="small muted">Cliente</div><b>${esc(cli || 'Senza nome')}</b>`}
     <div class="fieldset"><span class="fs-t">Lavori compresi</span><div id="cmLista" class="stack"></div></div>
     ${F('IVA nel PDF', sel('iva', IVA.map(i => [i[0], i[1]]), String(AZ().ivaPredefinita)))}
     ${campoAggiustamenti(adj)}
+    ${campoFirmaCons(cmCtx.firma)}
     <pre class="cons" id="consTxt"></pre>`,
   async () => {
     const sc = jobsScelti(); if (!sc.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scegli almeno un lavoro' });
@@ -3104,7 +3108,7 @@ function sheetConsMulti(adj = {}) {
     });
     UI.sel = null; toast(`Consuntivo unico inviato: ${sc.length} ${sc.length === 1 ? 'lavoro' : 'lavori'}, ${eur(t.imponibile)}${t.ivaPct > 0 ? ' + IVA' : ''}`);
   }, { saveLabel: 'Segna inviato', extra: `<button type="button" class="btn dark" data-act="consMultiPdf">PDF</button><button type="button" class="btn" data-act="copy">Copia</button>${navigator.share ? '<button type="button" class="btn" data-act="share">Condividi</button>' : ''}` });
-  disegnaListaCM(cli);
+  disegnaListaCM(cli); requestAnimationFrame(initFirme);
 }
 function disegnaListaCM(cli) {
   const lista = cmCtx.jobs.filter(j => (j.x.cliente || '') === cli);
@@ -3538,7 +3542,7 @@ document.addEventListener('click', async e => {
     case 'selMode': UI.sel = new Set(); render(); toast('Tocca i giorni da mettere nel consuntivo'); break;
     case 'selAnnulla': UI.sel = null; render(); break;
     case 'selCons': sheetConsMulti(); break;
-    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); apriPdf('consuntivo', conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), () => sheetConsMulti(cmCtx.adj)); break; }
+    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); cmCtx.firma = $('#f_consFirma')?.value || ''; apriPdf('consuntivo', { ...conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), firma: cmCtx.firma, firmaData: cmCtx.firma ? TODAY : '' }, () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
     case 'prevCollTutti': filtraPrevColl(true); break;
     case 'mostraAltriLav': { const a = $('#altriLav'); if (a) a.hidden = false; b.remove(); break; }
@@ -3734,7 +3738,7 @@ document.addEventListener('click', async e => {
       apriPdf('preventivo', saved, () => sheetPrev(S.preventivi.find(x => x.id === saved.id) || saved));
       break;
     }
-    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const adj = leggiAgg(); if (JSON.stringify(adj) !== JSON.stringify(x.consAgg || {})) store.put(arg, id, { ...stripId(x), consAgg: adj }); const doc0 = docDaLavoro(x, arg, AZ()); doc0.iva = $('#f_iva')?.value || doc0.iva; apriPdf('consuntivo', conAggiustamenti(doc0, adj), () => sheetCons(arg, id)); break; }
+    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const adj = leggiAgg(), fir = $('#f_consFirma')?.value || '', firData = fir ? (fir === x.consFirma && x.consFirmaData || TODAY) : ''; if (JSON.stringify(adj) !== JSON.stringify(x.consAgg || {}) || fir !== (x.consFirma || '')) store.put(arg, id, { ...stripId(x), consAgg: adj, consFirma: fir, consFirmaData: firData }); const doc0 = docDaLavoro(x, arg, AZ()); doc0.firma = fir; doc0.firmaData = firData; doc0.iva = $('#f_iva')?.value || doc0.iva; apriPdf('consuntivo', conAggiustamenti(doc0, adj), () => sheetCons(arg, id)); break; }
     case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
