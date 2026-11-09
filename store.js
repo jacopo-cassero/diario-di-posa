@@ -146,8 +146,14 @@ export function createStore(cfg, onChange) {
         else if (ev === 'PASSWORD_RECOVERY') { st.auth = 'recovery'; onChange && onChange(); }
         else if (session && session.user.id !== uid) startSession(session);
       });
-      const { data } = await sb.auth.getSession();
+      // con poco campo la verifica dell'accesso può bloccarsi: dopo 4 secondi parto con i dati salvati sul dispositivo
+      const salvata = () => { try { const k = Object.keys(localStorage).find(k => /^sb-.*-auth-token$/.test(k)); const v = k && JSON.parse(localStorage.getItem(k)); return v?.user?.id ? v : null; } catch { return null; } };
+      let data = {}, err = null;
+      try { ({ data, error: err } = await Promise.race([sb.auth.getSession(), new Promise((_, no) => setTimeout(() => no(new Error('lento')), 4000))])); }
+      catch { data = { session: null, lenta: true }; }
+      data = data || {};
       if (data.session) await startSession(data.session);
+      else if ((data.lenta || err || !navigator.onLine) && salvata()) await startSession(salvata()); // senza rete: lavoro sulla copia locale
       else if (st.auth === 'checking') { st.auth = 'out'; onChange && onChange(); }
     },
     async login(email, password) {

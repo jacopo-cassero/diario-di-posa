@@ -1,6 +1,6 @@
 // Service worker: fa funzionare l'app senza rete e riceve le notifiche.
-const VERSIONE = 'ddp-v71';
-const FILE = ['./', 'index.html', 'styles.css', 'app.js', 'store.js', 'logica.js', 'listino.js', 'pdf.js', 'pdf-metrics.js', 'documento.js', 'moduli.js', 'moduli-posizioni.js', 'calendario-ics.js', 'fatture-fornitori.js', 'config.js', 'manifest.webmanifest',
+const VERSIONE = 'ddp-v72';
+const FILE = ['./', 'index.html', 'config.js', 'manifest.webmanifest', 'styles.css', 'app.js', 'store.js', 'logica.js', 'listino.js', 'pdf.js', 'pdf-metrics.js', 'documento.js', 'moduli.js', 'moduli-posizioni.js', 'calendario-ics.js', 'fatture-fornitori.js', 'config.js', 'manifest.webmanifest',
   'icone/icona-192.png', 'icone/icona-512.png', 'icone/apple-touch-icon.png', 'icone/icona-iphone-nera.png', 'icone/favicon-64.png', 'icone/logo-scritta.png', 'icone/logo-cassero.jpg', 'icone/badge-posaclima.jpg', 'icone/badge-dekra.jpg',
   'moduli/rapporto-assistenza.jpg', 'moduli/scheda-manutenzione.jpg', 'moduli/consenso-foto-video.jpg', 'moduli/verbale-collaudo.jpg', 'moduli/verbale-installazione.jpg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js'];
@@ -14,6 +14,7 @@ self.addEventListener('activate', e => {
 
 // File dell'app: prima la rete (così gli aggiornamenti arrivano subito), poi la copia salvata.
 // Librerie e font: prima la copia salvata.
+let lentaFino = 0;
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -25,11 +26,21 @@ self.addEventListener('fetch', e => {
     e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => { const c = res.clone(); caches.open(VERSIONE).then(x => x.put(req, c)); return res; })));
     return;
   }
-  // cache: 'no-cache' chiede sempre al server se il file è cambiato, così gli aggiornamenti arrivano subito
-  e.respondWith(fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' })).then(res => {
+  // cache: 'no-cache' chiede sempre al server se il file è cambiato, così gli aggiornamenti arrivano subito.
+  // Se la rete è lenta o assente (poco campo), dopo 3 secondi uso la copia salvata: l'app si apre comunque.
+  const copia = () => caches.match(req, { ignoreSearch: true }).then(r => r || (req.mode === 'navigate' ? caches.match('index.html') : undefined));
+  const rete = fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' })).then(res => {
     if (res.ok) { const c = res.clone(); caches.open(VERSIONE).then(x => x.put(req, c)); }
     return res;
-  }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
+  });
+  e.respondWith(new Promise(resolve => {
+    let fatto = false;
+    const usaCopia = () => copia().then(r => { if (r && !fatto) { fatto = true; lentaFino = Date.now() + 30000; resolve(r); } });
+    // appena una richiesta è stata lenta, per 30 secondi uso subito le copie salvate (la rete aggiorna in sottofondo)
+    const t = setTimeout(usaCopia, Date.now() < lentaFino ? 0 : 2500);
+    rete.then(res => { clearTimeout(t); if (!fatto) { fatto = true; resolve(res); } })
+        .catch(() => { clearTimeout(t); copia().then(r => { if (!fatto) { fatto = true; resolve(r || Response.error()); } }); });
+  }));
 });
 
 self.addEventListener('push', e => {
