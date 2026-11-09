@@ -57,7 +57,7 @@ const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'apert
 const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste', 'documenti'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste', 'documenti', 'rapportiriv'].includes(h)) UI.tab = h;
   if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
@@ -563,9 +563,27 @@ function chipScad(x, perRiv) {
   return `<span class="chip ok">Valido fino al ${fmtD(x.scadenza, { day: 'numeric', month: 'short', year: 'numeric' })}</span>`;
 }
 const pesoFile = b => b > 1e6 ? `${num(b / 1e6, 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
+/** I rapporti di cantiere messi nelle aree dei rivenditori, divisi per rivenditore. */
+const RAPP = { lista: null, err: '' };
+async function caricaRapportiRiv() {
+  RAPP.lista = [];
+  try { await caricaAccessi(true); const { data, error } = await store.tabella('documenti_cliente').select('*').order('data', { ascending: false }).limit(500); if (error) throw error; RAPP.lista = data || []; RAPP.err = ''; }
+  catch (e) { RAPP.err = /relation|does not exist|schema cache/i.test(e.message || '') ? 'Lancia prima lo script area_rivenditore.sql in Supabase.' : 'Non riesco a leggere i rapporti, riprova.'; }
+  render();
+}
+function rRapportiRiv() {
+  if (RAPP.lista === null) { caricaRapportiRiv(); return `<div class="empty">Caricamento…</div>`; }
+  const per = new Map(); for (const d of RAPP.lista) { if (!per.has(d.rivenditore)) per.set(d.rivenditore, []); per.get(d.rivenditore).push(d); }
+  const nome = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.azienda || m.nome || m.email) : 'Rivenditore'; };
+  return `<div class="row between"><h2>Rapporti ai rivenditori</h2><button class="btn sm" data-act="rappAgg" type="button">Aggiorna</button></div>
+  <div class="small muted">I rapporti di cantiere che hai messo nell'area riservata di ogni rivenditore: li trova in «I tuoi documenti». Per aggiungerne uno, apri la posa o l'intervento e tocca «Rapporto».</div>
+  ${RAPP.err ? `<div class="notice small">${esc(RAPP.err)}</div>` : ''}
+  ${[...per.entries()].map(([rid, L]) => `<section class="stack"><h3>${esc(nome(rid))} <span class="small muted">· ${L.length}</span></h3>${L.map(d => `<div class="card"><div class="row between"><span class="t">${esc(d.titolo)}</span></div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</div>
+    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">Vai al lavoro</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun rapporto pubblicato.</div>')}`;
+}
 function rDocumenti() {
   const L = [...DOC_LISTA()].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
-  return `<div class="row between"><h2>Documenti rivenditori</h2><button class="btn primary" data-act="docNuovo" type="button">${svg('plus')} Aggiungi</button></div>
+  return `<div class="row between"><h2>Documenti azienda</h2><button class="btn primary" data-act="docNuovo" type="button">${svg('plus')} Aggiungi</button></div>
   <div class="small muted">Quello che carichi qui lo vedono e lo scaricano tutti i rivenditori, nella pagina «Documenti» del loro accesso. Quando un documento scade, tocca «Aggiorna» e carica quello nuovo: il rivenditore trova subito la versione giusta. Ti avviso 30 giorni prima della scadenza.</div>
   <div class="stack">${L.map(x => `<div class="card"><div class="row between"><span class="t">${esc(x.titolo)}</span>${chipScad(x)}</div>
     <div class="small muted">${esc(x.nomeFile || '')}${x.peso ? ' · ' + pesoFile(x.peso) : ''} · caricato il ${fmtD(x.caricato, { day: 'numeric', month: 'short', year: 'numeric' })}</div>
@@ -624,24 +642,28 @@ async function caricaDocRiv() {
   catch (e) { RIV.docs = []; RIV.docErr = /function|schema cache/i.test(e.message || '') ? 'I documenti non sono ancora attivi: avvisa l\'installatore.' : 'Non riesco a caricare i documenti, riprova.'; }
   render();
 }
+function rRivMieiDoc() {
+  if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
+  const M = RIV.mieiDoc || [];
+  const anni = [...new Set(M.map(d => String(d.data || '').slice(0, 4)).filter(Boolean))];
+  const card = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
+  return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
+  <div class="small muted">I rapporti di cantiere dei tuoi lavori, con tutto quello che è stato fatto, le foto e le cose da completare.</div>
+  ${M.length ? anni.map(y => `<section class="stack"><h3>${y}</h3>${M.filter(d => String(d.data || '').startsWith(y)).map(card).join('')}</section>`).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto di cantiere compare qui.</div>'}`;
+}
 function rRivDocumenti() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
   const L = [...(RIV.docs || [])].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
-  const M = RIV.mieiDoc || [];
-  return `<div class="row between"><h2>Documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
-  <section class="stack"><h3>I tuoi documenti</h3><div class="small muted">Rapporti di cantiere dei tuoi lavori, con tutto quello che è stato fatto.</div>
-    ${M.map(d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`).join('') || '<div class="empty small">Ancora nessun rapporto.</div>'}
-  </section>
-  <h3>Documenti dell'azienda</h3>
+  return `<div class="row between"><h2>Documenti azienda</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
   ${RIV.docErr ? `<div class="notice small">${esc(RIV.docErr)}</div>` : ''}
-  <div class="small muted">Documenti dell'azienda da scaricare. Sono sempre le versioni più recenti.</div>
+  <div class="small muted">Documenti dell'azienda (DURC, visura, polizze, certificazioni…) da scaricare. Sono sempre le versioni più recenti.</div>
   <div class="stack">${L.map(x => `<button type="button" class="card docriv" data-act="rivDocApri" data-id="${esc(x.id)}"><div class="row between"><span class="t">${esc(x.titolo)}</span>${svg('doc', 'i')}</div>
     <div class="meta">${chipScad(x, true)}<span class="small muted">${esc(x.nomeFile || '')}${x.peso ? ' · ' + pesoFile(x.peso) : ''}</span></div>${x.note ? `<div class="small">${esc(x.note)}</div>` : ''}</button>`).join('')
     || `<div class="empty small">Nessun documento disponibile per ora.</div>`}</div>`;
 }
 function rRivTabs() {
   const t = UI.rivTab || 'cal';
-  return `<div class="seg rivtabs" role="tablist">${[['cal', 'Calendario'], ['prev', 'Preventivo'], ['listino', 'Listino'], ['doc', 'Documenti']].map(([k, l]) => `<button type="button" data-act="rivTab" data-arg="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
+  return `<div class="seg rivtabs" role="tablist">${[['cal', 'Calendario'], ['prev', 'Preventivo'], ['listino', 'Listino'], ['miei', 'I tuoi documenti'], ['doc', 'Documenti azienda']].map(([k, l]) => `<button type="button" data-act="rivTab" data-arg="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
 }
 function rRivListino() {
   if (!RIV.listinoCarico) { caricaListinoRiv(); return `<div class="empty">Caricamento del listino…</div>`; }
@@ -1030,14 +1052,14 @@ function render() {
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
 
   if (st.accesso?.cambio_password) { $('#main').innerHTML = rCambioPw(); return; }
-  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : t === 'doc' ? rRivDocumenti() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
+  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : t === 'doc' ? rRivDocumenti() : t === 'miei' ? rRivMieiDoc() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
   if (st.ruolo === 'dipendente') { $('#main').innerHTML = rDipendente(); hydrateFiles($('#main')); return; }
   if (st.ruolo === 'nessuno' || st.ruolo === 'sospeso') { $('#main').innerHTML = rSenzaAccesso(); return; }
   if (!GESTORE()) { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main'));
 }
@@ -1867,7 +1889,8 @@ function menuHtml() {
   ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'richieste', 'cal', `Richieste${nRichieste() ? ` <span class="badge">${nRichieste()}</span>` : ''}`, 'prenotazioni e preventivi dei rivenditori', UI.tab === 'richieste')}
-  ${st.mode === 'demo' ? '' : item('menuGo', 'documenti', 'doc', `Documenti rivenditori${docInScadenza() ? ` <span class="badge">${docInScadenza()}</span>` : ''}`, 'certificati, DURC, assicurazioni da scaricare', UI.tab === 'documenti')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'rapportiriv', 'doc', 'Rapporti ai rivenditori', 'i rapporti di cantiere nelle loro aree', UI.tab === 'rapportiriv')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'documenti', 'doc', `Documenti azienda per i rivenditori${docInScadenza() ? ` <span class="badge">${docInScadenza()}</span>` : ''}`, 'certificati, DURC, assicurazioni da scaricare', UI.tab === 'documenti')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${ACC.richieste.length ? ` <span class="badge">${ACC.richieste.length}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
@@ -3510,6 +3533,15 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'docNuovo': sheetDocRiv(null); break;
+    case 'rappAgg': RAPP.lista = null; render(); break;
+    case 'rappApri': { const d = (RAPP.lista || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
+    case 'rappTogli': {
+      const d = (RAPP.lista || []).find(x => x.id === id); if (!d) break;
+      if (!confirm('Togliere questo rapporto dall\'area del rivenditore?')) break;
+      const { error } = await store.tabella('documenti_cliente').delete().eq('id', d.id);
+      if (error) { toast('Non sono riuscito a toglierlo'); break; }
+      store.removeFile(d.path).catch(() => {}); RAPP.lista = RAPP.lista.filter(x => x.id !== d.id); toast('Rapporto tolto dall\'area del rivenditore'); render(); break;
+    }
     case 'docModifica': sheetDocRiv(DOC_LISTA().find(d => d.id === id)); break;
     case 'docApri': { const x = DOC_LISTA().find(d => d.id === id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'togliData': { const dp = $('#f_dataProg'); if (dp) dp.value = ''; const st = $('#f_stato'); if (st && ['programmato', 'in_corso'].includes(st.value)) st.value = 'aperto'; $('#togliDataRow').hidden = true; toast('Data tolta: salva e lo trovi in «Da programmare»'); break; }
