@@ -37,11 +37,13 @@ for (const tit of titolari) {
   const membri = (extra.membri || []).filter(m => m.titolare === tit);
   const conTit = t => (extra[t] || []).filter(x => x.titolare === tit);
   // l'elenco dei file salvati (foto, allegati, PDF): i file restano dove sono, qui c'è dove trovarli
-  let files = [];
-  for (const cart of [tit, ...membri.map(m => m.user_id)]) {
+  const files = [];
+  async function elenca(cart, prof = 0) {
     const r = await fetch(`${URLB}/storage/v1/object/list/file`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: cart, limit: 1000, sortBy: { column: 'name', order: 'asc' } }) }).catch(() => null);
-    if (r?.ok) files.push(...(await r.json()).map(f => `${cart}/${f.name}`));
+    if (!r?.ok) return;
+    for (const f of await r.json()) { if (f.id) { if (!(prof === 1 && cart.endsWith('/backup'))) files.push(`${cart}/${f.name}`); } else if (prof < 5) await elenca(`${cart}/${f.name}`, prof + 1); }   // le cartelle si aprono una per una
   }
+  for (const cart of [tit, ...membri.map(m => m.user_id)]) await elenca(cart);
   const dati = {
     app: 'Diario di Posa', versione: 1, creato: new Date().toISOString(), titolare: tit,
     conteggio: Object.fromEntries([...new Set(suoi.map(r => r.kind))].map(k => [k, suoi.filter(r => r.kind === k && !r.deleted).length])),
