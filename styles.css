@@ -598,3 +598,4 @@ details.cartella[open]>summary{margin-bottom:10px}
 .iconbtn.sm{width:30px;height:30px;font-size:1rem;flex:none}
 .iconbtn.sm.armed{width:auto;padding:0 8px;font-size:.75rem;color:var(--bad)}
 .tl .tli svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.todo-item{padding:9px 14px}

@@ -1699,7 +1699,7 @@ function rTodo() {
   const p = promemoria(S, TODAY);
   if (!p.length) return '';
   return `<section class="todo" aria-label="Promemoria"><div class="todo-head"><span>Da fare</span><span class="num">${p.length}</span></div>
-    ${p.map(x => `<button class="todo-item" data-act="${x.act}" data-arg="${x.arg || ''}" type="button"><span class="dot ${x.lvl}"></span><span><b>${esc(x.txt)}</b><br><span class="small muted">${esc(x.sub || '')}</span></span><span class="go">›</span></button>`).join('')}</section>`;
+    ${p.map(x => `<button class="todo-item" data-act="${x.act}" data-arg="${x.arg || ''}" type="button"><span class="dot ${x.lvl}"></span><span><b>${esc(x.txt)}</b>${x.sub && /^domani/i.test(x.txt) ? `<br><span class="small muted">${esc(x.sub)}</span>` : ''}</span><span class="go">›</span></button>`).join('')}</section>`;
 }
 
 function rCal() {
