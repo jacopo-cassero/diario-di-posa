@@ -545,3 +545,4 @@ canvas.pad{cursor:pointer}
 .difflist{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 .difflist li{padding-left:10px;border-left:3px solid var(--muted);overflow-wrap:anywhere}
 .difflist li.piu{border-left-color:var(--ok)}.difflist li.meno{border-left-color:var(--bad)}
+.card.tap{cursor:pointer}

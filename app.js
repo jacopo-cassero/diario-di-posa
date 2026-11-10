@@ -354,7 +354,7 @@ function rRivenditore() {
   for (let d = 1; d <= dim; d++) {
     const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l] = statoGiorno(k);
     const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
-    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl">${s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
+    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl">${s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
   }
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
@@ -380,10 +380,58 @@ function cardLavRiv(l) {
   const quando = l.dataFine && l.dataFine > l.data ? `Dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short', year: 'numeric' })}` : fmtD(l.data, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const ora = testoOrario(l);
   const st = l.fatto ? ['ok', l.kind === 'lavori' ? 'Eseguita' : 'Completato'] : l.data < TODAY ? ['warn', 'In corso'] : ['in', 'In programma'];
-  return `<div class="card"><div class="row between"><span class="t">${l.kind === 'lavori' ? 'Posa' : 'Intervento'}${l.riferimento ? ` <small class="rif">Rif. ${esc(l.riferimento)}</small>` : ''}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+  return `<div class="card tap" data-act="rivLav" data-id="${esc(l.id)}" data-arg="${esc(l.kind)}" role="button" tabindex="0"><div class="row between"><span class="t">${l.kind === 'lavori' ? 'Posa' : 'Intervento'}${l.riferimento ? ` <small class="rif">Rif. ${esc(l.riferimento)}</small>` : ''}</span><span class="chip ${st[0]}">${st[1]}</span></div>
     <div class="meta"><span>${svg('cal', 'i')} ${quando}${ora ? ' · ' + esc(ora) : ''}</span>${l.indirizzo ? `<span>${svg('pin', 'i')} ${esc(l.indirizzo)}</span>` : ''}</div>
     ${l.cosa ? `<div class="small prewrap">${esc(l.cosa)}</div>` : ''}
     ${(l.sospesi || []).length ? `<div class="sospcard"><b>Da completare</b><ul>${l.sospesi.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}</div>`;
+}
+const lavDaFare = l => !l.fatto && (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data) >= TODAY;
+/** Il giorno toccato nel calendario: se c'è un solo lavoro si apre quello, altrimenti l'elenco. */
+function sheetGiornoRiv(k) {
+  const L = (RIV.lavori || []).filter(l => l.data && k >= l.data && k <= (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data));
+  if (L.length === 1) return sheetLavRiv(L[0]);
+  openSheet(fmtD(k, { weekday: 'long', day: 'numeric', month: 'long' }), `<div class="stack">${L.map(cardLavRiv).join('')}</div>`, null);
+}
+/** Scheda di un lavoro del rivenditore: la programmazione e, se il lavoro è ancora da fare, la correzione di cliente, indirizzo e telefono. */
+function sheetLavRiv(l, modifica = false) {
+  const nome = l.kind === 'lavori' ? 'Posa' : 'Intervento';
+  const quando = l.dataFine && l.dataFine > l.data ? `Dal ${fmtD(l.data, { weekday: 'short', day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}` : fmtD(l.data, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const ora = testoOrario(l), puo = lavDaFare(l) && RIV.lavModOk !== false;
+  const mappa = l.indirizzo ? `https://maps.google.com/?q=${encodeURIComponent(l.indirizzo)}` : '';
+  if (modifica && puo) {
+    openSheet(`Correggi ${nome.toLowerCase()}`, `
+      <div class="small muted">${esc(quando)}${ora ? ' · ' + esc(ora) : ''}. Correggi i dati del cliente: l'installatore riceve l'avviso e vede che cosa hai cambiato. Per spostare la data chiamalo.</div>
+      ${F('Cliente finale', inp('lr_rif', l.riferimento || '', 'text', 'placeholder="Es. Sig. Rossi"'))}
+      ${F('Indirizzo del cantiere', inp('lr_ind', l.indirizzo || '', 'text', 'placeholder="Comune e indirizzo"'))}
+      ${F('Telefono del cliente', inp('lr_tel', l.telefono || '', 'tel', 'placeholder="Facoltativo"'))}`,
+    async fd => {
+      const dati = { riferimento: String(fd.get('lr_rif') || '').trim(), indirizzo: String(fd.get('lr_ind') || '').trim(), telefono: String(fd.get('lr_tel') || '').trim() };
+      if (!dati.indirizzo) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi l\'indirizzo del cantiere' });
+      let esito;
+      try { esito = await store.rpc('modifica_lavoro_rivenditore', { tipo: l.kind, lavoro: l.id, dati }); }
+      catch (e) { if (/find the function|schema cache|does not exist/i.test(e.message || '')) { RIV.lavModOk = false; e.userMsg = 'La modifica dei lavori non è ancora attiva: avvisa l\'installatore.'; } throw e; }
+      if (esito === 'uguale') { toast('Non hai cambiato niente'); return; }
+      Object.assign(l, dati, { modificato: new Date().toISOString() });
+      toast('Dati aggiornati: l\'installatore è avvisato'); caricaRiv(true);
+    }, { saveLabel: 'Salva le modifiche' });
+    return;
+  }
+  openSheet(nome, `
+    <div class="stack">
+      <div class="meta"><span>${svg('cal', 'i')} ${esc(quando)}${ora ? ' · ' + esc(ora) : ''}</span></div>
+      <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
+        <div><div class="small muted">Cliente finale</div><b>${esc(l.riferimento || '—')}</b></div>
+        <div><div class="small muted">Indirizzo</div>${l.indirizzo ? `<a href="${mappa}" target="_blank" rel="noopener">${esc(l.indirizzo)}</a>` : '—'}</div>
+        <div><div class="small muted">Telefono</div>${l.telefono ? `<a href="tel:${esc(l.telefono.replace(/\s+/g, ''))}">${esc(l.telefono)}</a>` : '—'}</div>
+        ${l.modificato ? `<div class="small muted">Dati corretti da te il ${quandoMod(l.modificato)}</div>` : ''}
+      </div>
+      ${(l.voci || []).length || l.cosa ? `<div class="fieldset"><span class="fs-t">${l.kind === 'lavori' ? 'Cosa si posa' : 'Cosa si fa'}</span>
+        ${(l.voci || []).length ? `<ul class="small">${l.voci.map(v => `<li>${v.qta != null && v.qta !== '' ? esc(num(n2(v.qta))) + (v.unita && v.unita !== 'pz' ? ' ' + esc(v.unita) : '') + ' × ' : ''}${esc(v.descr || '')}</li>`).join('')}</ul>` : ''}
+        ${l.cosa ? `<div class="small prewrap">${esc(l.cosa)}</div>` : ''}</div>` : ''}
+      ${(l.sospesi || []).length ? `<div class="sospcard"><b>Da completare</b><ul>${l.sospesi.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
+      ${puo ? `<button class="btn" data-act="rivLavMod" data-id="${esc(l.id)}" data-arg="${esc(l.kind)}" type="button">Correggi cliente, indirizzo o telefono</button>`
+        : lavDaFare(l) ? '' : '<div class="small muted">Lavoro già fatto: per correzioni chiama l\'installatore.</div>'}
+    </div>`, null);
 }
 function listaLavoriRiv() {
   const L = RIV.lavori || []; if (!L.length) return '';
@@ -392,7 +440,7 @@ function listaLavoriRiv() {
   const passati = L.filter(l => fine(l) < TODAY).sort((a, b) => b.data.localeCompare(a.data));
   void passati;
   return `<section class="stack"><h3>I tuoi lavori in programma</h3>
-    <div class="small muted">Le pose e gli interventi in programma a tuo nome nel mio calendario.</div>
+    <div class="small muted">Le pose e gli interventi in programma a tuo nome nel mio calendario. Tocca un lavoro (o il giorno nel calendario) per vedere la programmazione e correggere cliente, indirizzo e telefono.</div>
     ${prossimi.map(cardLavRiv).join('') || '<div class="empty small">Nessun lavoro in programma.</div>'}
     ${passati.length ? `<div class="small muted">I lavori conclusi li trovi in «I tuoi documenti», con il rapporto in PDF.</div>` : ''}
   </section>`;
@@ -778,6 +826,17 @@ function sheetPrevRiv(r = null) {
   svuotaRvFoto(); rvMax = liberi;
   // il tiro al piano si segna da solo, ma non se in questa richiesta era stato scelto a mano
   if (r && !!r.tiro !== ((r.piano || 'Piano terra') !== 'Piano terra' && r.ascensore !== 'Sì')) $('#f_rv_tiro').dataset.toccato = '1';
+}
+/** Nella scheda di posa o intervento: che cosa ha corretto il rivenditore. */
+function modRivHtml(x, kind) {
+  const m = x?.modRiv; if (!m || !x.id) return '';
+  const p = m.prima || {}, t = v => String(v ?? '').trim();
+  const L = [['riferimento', 'Cliente finale'], ['indirizzo', 'Indirizzo'], ['telefono', 'Telefono']].filter(([k]) => t(p[k]) !== t(k === 'riferimento' ? x.riferimento ?? x.clienteFinale : x[k]))
+    .map(([k, n]) => { const ora = t(k === 'riferimento' ? x.riferimento ?? x.clienteFinale : x[k]), prima = t(p[k]); return `<li class="cambia">${esc(n)}: ${esc(ora || '(tolto)')}${prima ? ` (prima: ${esc(prima)})` : ''}</li>`; });
+  if (!L.length) return '';
+  return `<div class="modrich stack"><div class="small"><b>Modificato da ${esc(m.chi || 'il rivenditore')}</b>${m.quando ? ' · ' + quandoMod(m.quando) : ''}</div>
+    <ul class="difflist small">${L.join('')}</ul>
+    <div class="row"><button class="btn sm" data-act="modRivVisto" data-id="${esc(x.id)}" data-arg="${kind}" type="button">Ho visto</button></div></div>`;
 }
 /* ---------- che cosa è cambiato in una richiesta modificata dal rivenditore ---------- */
 const corto = (t, n = 160) => { t = String(t ?? '').trim(); return t.length > n ? t.slice(0, n).trimEnd() + '…' : t; };
@@ -1205,6 +1264,7 @@ document.addEventListener('click', async e => {
     case 'rivMese': RIV.mese = shiftMonth(RIV.mese, +arg); RIV.carico = RIV.mesiCaricati.has(RIV.mese); render(); break;
     case 'rivGiorno': {
       const [s] = statoGiorno(arg);
+      if (s === 'lav' && !(RIV.da && !RIV.a)) { sheetGiornoRiv(arg); break; }
       if (RIV.da && !RIV.a && arg === RIV.da) { RIV.da = ''; render(); break; }
       if (s !== 'lib') { if (s === 'occ') toast('Giornata già occupata'); else if (s === 'chiuso') toast('Giornata non lavorativa'); else if (s === 'mia') toast('Questa giornata è già tua'); else toast(statoGiorno(arg)[1] || 'Non prenotabile'); break; }
       if (!RIV.da || RIV.a || arg < RIV.da) { RIV.da = arg; RIV.a = ''; render(); break; }
@@ -1213,6 +1273,12 @@ document.addEventListener('click', async e => {
       RIV.a = arg; render(); break;
     }
     case 'rivAggiorna': await caricaRiv(true); toast('Calendario aggiornato'); break;
+    case 'rivLav': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l); break; }
+    case 'rivLavMod': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l, true); break; }
+    case 'modRivVisto': {
+      const L = arg === 'interventi' ? S.interventi : S.lavori, x = L.find(v => v.id === id); if (!x) break;
+      const { modRiv, ...resto } = x; void modRiv; store.put(arg, id, stripId(resto)); b.closest('.modrich')?.remove(); render(); break;
+    }
     case 'rivAnnullaSel': RIV.da = RIV.a = ''; render(); break;
     case 'rivPrenota': if (RIV.da) sheetPrenota(); break;
     case 'pmAdd': $('#pmat').insertAdjacentHTML('beforeend', rigaMat()); break;
@@ -2598,6 +2664,7 @@ function sheetLav(l, prefill) {
   const tariffa = righeOre[0] ? n2(righeOre[0].prezzo) : tariffaOraria();
   const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
+    ${modRivHtml(l, 'lavori')}
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     ${F('Riferimento', inp('riferimento', l.riferimento ?? l.clienteFinale, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
@@ -2606,6 +2673,7 @@ function sheetLav(l, prefill) {
     ${campoOrario(l, 'lav')}
     <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
+    ${F('Telefono del cliente', inp('telefono', l.telefono, 'tel', 'placeholder="Facoltativo"'))}
     ${isNew && l.preventivoId ? '' : boxPrevLavoro(l, 'lavori')}
     ${campoSquadra(l)}
     ${F('Calcolo della giornata', sel('calcolo', [['pezzo', 'A pezzo · voci del listino'], ['ore', 'A ore · tariffa oraria']], calcolo))}
@@ -2650,7 +2718,7 @@ function sheetLav(l, prefill) {
     if (kmG > 0) righe = [...righe, { ...rigaKm(kmG * gg, n2(fd.get('euroKm'))), descr: gg > 1 ? `Trasferta (${gg} giorni × ${num(kmG, 1)} km)` : 'Trasferta', kmGiorno: kmG, giorni: gg }];
     if (gg > 1) installato = [installato, `${gg} giorni`].filter(Boolean).join(', ');
     if (kmG > 0) installato = [installato, `trasferta ${num(kmG * gg, 1)} km`].filter(Boolean).join(', ');
-    const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: String(fd.get('note') || '').trim(), sospesi: leggiSospesi(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
+    const d = { riferimento: String(fd.get('riferimento') || '').trim(), data: fd.get('data'), dataFine, soloFeriali, urgenzaApplicata: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, cliente: fd.get('cliente').trim(), indirizzo: fd.get('indirizzo').trim(), telefono: String(fd.get('telefono') || '').trim(), calcolo: modo, installato, pezzi, ore, importo: n2(fd.get('importo')), righe, materiali: mats, amm: fd.get('amm'), note: String(fd.get('note') || '').trim(), sospesi: leggiSospesi(), cartellaId: fd.get('cartellaId') || '', cartellaUrl: fd.get('cartellaUrl').trim(), allegati: sheetFiles };
     { const cur = !isNew && S.lavori.find(x => x.id === l.id); const pv = cur ? cur.preventivoId : l.preventivoId; if (pv) d.preventivoId = pv; }
     if (l.esempio) d.esempio = true;
     d.clienteId = assicuraCliente(d.cliente);
@@ -2693,6 +2761,7 @@ function sheetInt(i, day, prefill) {
   const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
+    ${modRivHtml(i, 'interventi')}
     ${campoCliente('cliente', 'Cliente', i.cliente)}
     ${F('Riferimento', inp('riferimento', i.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>

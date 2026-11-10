@@ -127,6 +127,17 @@ for (const tit of new Set((modPrev || []).map(x => x.titolare))) {
   scrivi(`Preventivi: ${M.length} ${M.length === 1 ? 'richiesta modificata segnalata' : 'richieste modificate segnalate'}`);
 }
 
+// Lavori corretti dai rivenditori (cliente, indirizzo, telefono): il database prepara l'avviso, qui lo mando.
+const avvTit = await leggiSeEsiste('/avvisi_titolare?notificato=eq.false&select=id,titolare,titolo,testo&order=creato.asc');
+for (const tit of new Set((avvTit || []).map(x => x.titolare))) {
+  const A = avvTit.filter(x => x.titolare === tit);
+  const payload = JSON.stringify({ title: A.length === 1 ? A[0].titolo : `${A.length} lavori modificati dai rivenditori`, body: A.slice(0, 5).map(x => x.testo || '').join('\n'), url: './#cal', tag: `lavriv-${Date.now()}` });
+  const tit2 = (await leggiSeEsiste(`/membri?titolare=eq.${tit}&ruolo=eq.titolare&stato=eq.attivo&select=user_id`)) || [];
+  for (const uid of [tit, ...tit2.map(m => m.user_id)]) await manda(uid, payload);
+  await segnaNotificato('avvisi_titolare', A.map(x => x.id));
+  scrivi(`Lavori modificati dai rivenditori: ${A.length} ${A.length === 1 ? 'avviso' : 'avvisi'}`);
+}
+
 // Avvisi al rivenditore: prenotazione confermata, spostata, rifiutata o annullata; preventivo pronto o richiesta chiusa.
 // (avviso_riv ricorda l'ultima situazione già comunicata, così ogni cambiamento si avvisa una volta sola)
 async function segnaAvvisoRiv(tab, id, firma) {
