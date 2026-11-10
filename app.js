@@ -689,7 +689,7 @@ function rRivPreventivo() {
     ${voci ? `<div class="small">${esc(voci)}</div>` : ''}${r.note ? `<div class="small muted prewrap">${esc(corto(r.note, 200))}</div>` : ''}
     ${r.modificata ? `<div class="small muted">Modificata il ${quandoMod(r.modificata)}</div>` : ''}
     ${r.risposta ? `<div class="small">${r.stato === 'inviato' ? '' : 'Preventivo di prima: '}${esc(r.risposta)}</div>` : ''}
-    ${fotoRichHtml(store.uid(), r.id, { aggiungi: richAperta(r) })}
+    ${fotoRichHtml(store.uid(), r.id, { aggiungi: !modAttiva && richAperta(r) })}
     ${modAttiva && r.stato !== 'chiusa' ? `<div class="row"><button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button></div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
