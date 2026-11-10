@@ -1,0 +1,23 @@
+name: Backup dei dati
+
+on:
+  schedule:
+    - cron: '41 1 * * *'   # ogni notte verso le 2:41 (ora italiana d'inverno)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Copia il database nella cartella privata del titolare
+        run: node scripts/backup.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
