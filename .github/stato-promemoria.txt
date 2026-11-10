@@ -1,12 +1,12 @@
-2026-11-10T09:14:16.478Z
+2026-11-10T10:00:57.308Z
 SUPABASE_URL: presente (40 caratteri, inizia con "https://uolc…")
 SUPABASE_SERVICE_ROLE_KEY: presente (41 caratteri, inizia con "sb_…")
 VAPID_PUBLIC_KEY: presente (87 caratteri, inizia con "BHJ…")
 VAPID_PRIVATE_KEY: presente (43 caratteri, inizia con "yUG…")
 VAPID_SUBJECT: presente
-2026-11-10 ore 10: 3 dispositivi, 1 utenti
+2026-11-10 ore 11: 4 dispositivi, 2 utenti
 Notifica inviata a un dispositivo Apple
 Notifica inviata a un dispositivo Apple
 Notifica inviata a un dispositivo Apple
-Accessi: 0 richieste e 1 prenotazioni segnalate
+Accessi: 0 richieste e 0 prenotazioni segnalate
 Niente da mandare adesso per un utente
