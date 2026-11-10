@@ -238,6 +238,23 @@ export function createStore(cfg, onChange) {
       urlCache.delete(path);
       return path;
     },
+    /** Carica un file in una sottocartella della propria cartella (es. le foto di una richiesta di preventivo). */
+    async caricaInCartella(cartella, nome, blob) {
+      if (!sb || !uid) throw Object.assign(new Error('demo'), { userMsg: 'Serve il collegamento al database.' });
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { userMsg: 'Serve la connessione per caricare le foto.' });
+      const path = `${uid}/${cartella}/${nome}`;
+      const { error } = await sb.storage.from('file').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
+      if (error) throw Object.assign(error, { userMsg: /size|large/i.test(error.message) ? 'Foto troppo grande.' : 'Caricamento non riuscito, riprova.' });
+      urlCache.delete(path);
+      return path;
+    },
+    /** I file di una cartella dell'archivio: la propria, o quella di un proprio rivenditore o dipendente. */
+    async elencoFile(cartella) {
+      if (!sb || !cartella) return [];
+      const { data, error } = await sb.storage.from('file').list(cartella, { limit: 200, sortBy: { column: 'name', order: 'asc' } });
+      if (error) throw error;
+      return (data || []).filter(o => o.id).map(o => ({ path: `${cartella}/${o.name}`, nome: o.name }));
+    },
     async fileUrl(path) {
       if (!path) return '';
       if (path.startsWith('demo:')) return ls.get('ddp:files:demo', {})[path] || '';

@@ -685,7 +685,8 @@ function rRivPreventivo() {
   ${RIV.listinoErr && !RIV.prev ? `<div class="notice small">${esc(RIV.listinoErr)}</div>` : ''}
   <section class="stack">${P.map(r => { const st = ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
     <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz</div>
-    ${r.risposta ? `<div class="small">${esc(r.risposta)}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
+    ${r.risposta ? `<div class="small">${esc(r.risposta)}</div>` : ''}
+    ${fotoRichHtml(store.uid(), r.id, { aggiungi: richAperta(r) })}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
   const gruppi = [...new Set(vociPrev(L).map(v => v.gruppo))];
@@ -722,14 +723,174 @@ function sheetPrevRiv() {
       <button type="button" class="btn sm" data-act="rvAdd">+ Tipologia</button>
     </div>
     ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3"></textarea>`)}
+    <div class="fieldset"><div class="row between"><span class="fs-t">Foto del cantiere</span><span class="small muted" id="rvFotoN"></span></div>
+      <div class="thumbs" id="rvThumbs"></div>
+      <label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label>
+      <div class="small muted">Facoltative, fino a ${MAX_FOTO_RICH}: i vani, i serramenti da togliere, gli accessi, i particolari. Con le foto il preventivo è più preciso.</div>
+    </div>
     <div class="small muted">Nessun campo è obbligatorio. Il prezzo te lo manda l'installatore con il preventivo.</div>`,
   async fd => {
     const d = leggiPrevRiv(fd);
-    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
-    await store.rpc('chiedi_preventivo', { dati: d });
-    toast('Richiesta inviata: ti arriva il preventivo'); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
+    await rvPronte;   // se sta ancora preparando le foto scelte, aspetto
+    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente && !rvFoto.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
+    const id = await store.rpc('chiedi_preventivo', { dati: d });
+    // da qui la richiesta è partita: se una foto non si carica lo dico, ma non la mando due volte
+    let msg = 'Richiesta inviata: ti arriva il preventivo';
+    if (rvFoto.length) {
+      const perse = typeof id === 'string' && id ? await caricaFotoRich(id, rvFoto) : rvFoto.length;
+      msg = perse ? `Richiesta inviata, ma ${perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`} dalla richiesta` : `Richiesta inviata con ${rvFoto.length === 1 ? 'una foto' : rvFoto.length + ' foto'}`;
+    }
+    svuotaRvFoto();
+    toast(msg); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
   }, { saveLabel: 'Invia richiesta' });
+  svuotaRvFoto();
 }
+/* ---------- foto del cantiere nelle richieste di preventivo ---------- */
+// Le carica il rivenditore nella sua cartella: <rivenditore>/richieste/<id richiesta>/f-<n>.jpg (foto) e t-<n>.jpg (miniatura).
+// L'installatore le legge da lì: non serve nessun dato in più nel database.
+const MAX_FOTO_RICH = 12;
+const FOTO_RICH = new Map();      // id richiesta → { t: quando le ho lette, L: [{ k, path, mini }] }
+const FOTO_RICH_P = new Map();    // letture in corso, per non chiedere due volte la stessa cartella
+const richAperta = r => ['nuova', 'in_lavorazione'].includes(r?.stato);
+function fotoRichiesta(riv, id) {
+  if (FOTO_RICH_P.has(id)) return FOTO_RICH_P.get(id);
+  const p = (async () => {
+    const per = new Map();
+    for (const f of await store.elencoFile(`${riv}/richieste/${id}`)) {
+      const m = f.nome.match(/^([ft])-(.+)\.jpe?g$/i); if (!m) continue;
+      const o = per.get(m[2]) || { k: m[2] }; o[m[1].toLowerCase() === 'f' ? 'path' : 'mini'] = f.path; per.set(m[2], o);
+    }
+    const L = [...per.values()].filter(o => o.path).sort((a, b) => a.k.localeCompare(b.k));
+    FOTO_RICH.set(id, { t: Date.now(), L });
+    return L;
+  })().finally(() => FOTO_RICH_P.delete(id));
+  FOTO_RICH_P.set(id, p);
+  return p;
+}
+function fotoRichDentro(id, L, aggiungi) {
+  return `${L.length ? `<div class="small muted">Foto del cantiere (${L.length})</div><div class="thumbs">${L.map((f, i) => `<button type="button" class="thumbbtn" data-act="fotoRichApri" data-id="${esc(id)}" data-arg="${i}" aria-label="Apri la foto ${i + 1} di ${L.length}"><img data-file="${esc(f.mini || f.path)}" alt=""></button>`).join('')}</div>` : ''}
+    ${aggiungi && L.length < MAX_FOTO_RICH ? `<label class="btn sm">${svg('cam', 'i')} ${L.length ? 'Aggiungi altre foto' : 'Aggiungi foto del cantiere'}<input type="file" class="rvFotoPiu" data-id="${esc(id)}" accept="image/*" multiple hidden></label>` : ''}`;
+}
+/** Riquadro con le foto di una richiesta: si riempie subito se le ho già lette, altrimenti appena arrivano. */
+function fotoRichHtml(riv, id, { aggiungi = false } = {}) {
+  if (!riv || !id || store.st.mode === 'demo') return '';
+  const c = FOTO_RICH.get(id);
+  return `<div class="fotorich stack" data-rich="${esc(id)}" data-riv="${esc(riv)}" ${aggiungi ? 'data-agg="1"' : ''}>${c ? fotoRichDentro(id, c.L, aggiungi) : ''}</div>`;
+}
+async function hydrateFotoRich(root) {
+  await Promise.all([...root.querySelectorAll('.fotorich[data-rich]')].map(async box => {
+    const id = box.dataset.rich, c = FOTO_RICH.get(id);
+    if (c && Date.now() - c.t < 60000) return;
+    let L; try { L = await fotoRichiesta(box.dataset.riv, id); } catch { return; }
+    if (!box.isConnected || (c && JSON.stringify(c.L) === JSON.stringify(L))) return;
+    box.innerHTML = fotoRichDentro(id, L, !!box.dataset.agg); hydrateFiles(box);
+  }));
+}
+/** Riduce una foto: quella da guardare (1800 px) e la miniatura (320 px). */
+async function preparaFoto(file) {
+  let src, w, h;
+  try { src = await createImageBitmap(file); w = src.width; h = src.height; }
+  catch {
+    src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('foto')); im.src = URL.createObjectURL(file); });
+    w = src.naturalWidth; h = src.naturalHeight;
+  }
+  const scala = (max, q) => new Promise((res, rej) => {
+    const k = Math.min(1, max / Math.max(w, h)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0, c.width, c.height);
+    c.toBlob(b => b ? res(b) : rej(new Error('foto')), 'image/jpeg', q);
+  });
+  const blob = await scala(1800, 0.8), mini = await scala(320, 0.7);
+  return { blob, mini, url: URL.createObjectURL(mini) };
+}
+/** Carica le foto nella cartella della richiesta. Restituisce quante non sono partite. */
+async function caricaFotoRich(id, foto) {
+  let perse = 0; const base = Date.now().toString(36);
+  for (let i = 0; i < foto.length; i++) {
+    toast(`Carico le foto ${i + 1} di ${foto.length}…`);
+    const k = `${base}${String(i).padStart(2, '0')}`;
+    try {
+      await store.caricaInCartella(`richieste/${id}`, `f-${k}.jpg`, foto[i].blob);
+      await store.caricaInCartella(`richieste/${id}`, `t-${k}.jpg`, foto[i].mini).catch(() => {});
+    } catch (e) { console.warn(e); perse++; }
+  }
+  FOTO_RICH.delete(id);
+  return perse;
+}
+// foto scelte nel modulo della richiesta, prima dell'invio
+let rvFoto = [], rvPronte = Promise.resolve(), rvGiro = 0;
+const svuotaRvFoto = () => { rvFoto.forEach(f => URL.revokeObjectURL(f.url)); rvFoto = []; rvGiro++; };
+/** Prepara le foto scelte nel modulo; chi invia aspetta che siano tutte pronte. */
+function aggiungiRvFoto(files) {
+  const giro = rvGiro, n = $('#rvFotoN'); if (n) n.textContent = 'Preparo le foto…';
+  rvPronte = rvPronte.then(() => scegliFoto(files, MAX_FOTO_RICH - rvFoto.length)).then(nuove => {
+    if (giro !== rvGiro) { nuove.forEach(f => URL.revokeObjectURL(f.url)); return; }   // il modulo è stato chiuso nel frattempo
+    rvFoto.push(...nuove); disegnaRvFoto();
+  }).catch(() => {});
+}
+function disegnaRvFoto() {
+  const box = $('#rvThumbs'); if (!box) return;
+  box.innerHTML = rvFoto.map((f, i) => `<span class="thumbx"><img src="${f.url}" alt="Foto ${i + 1}"><button type="button" data-act="rvFotoRm" data-arg="${i}" aria-label="Togli la foto ${i + 1}">×</button></span>`).join('');
+  const piu = $('#rvFotoPiuBtn'); if (piu) piu.hidden = rvFoto.length >= MAX_FOTO_RICH;
+  const n = $('#rvFotoN'); if (n) n.textContent = rvFoto.length ? `${rvFoto.length} di ${MAX_FOTO_RICH}` : '';
+}
+async function scegliFoto(files, quante) {
+  const out = []; let scartate = 0;
+  for (const f of files.slice(0, Math.max(0, quante))) { try { out.push(await preparaFoto(f)); } catch { scartate++; } }
+  if (files.length > quante) toast(`Al massimo ${MAX_FOTO_RICH} foto per richiesta`);
+  else if (scartate) toast(scartate === 1 ? 'Una foto non si riesce a leggere' : `${scartate} foto non si riescono a leggere`);
+  return out;
+}
+/** Il rivenditore aggiunge foto a una richiesta già mandata. */
+async function aggiungiFotoRich(id, files) {
+  const gia = FOTO_RICH.get(id)?.L.length || 0;
+  toast('Preparo le foto…');
+  const foto = await scegliFoto(files, MAX_FOTO_RICH - gia); if (!foto.length) return;
+  const perse = await caricaFotoRich(id, foto);
+  foto.forEach(f => URL.revokeObjectURL(f.url));
+  toast(perse ? `${perse === foto.length ? 'Foto non caricate' : `${perse} foto non caricate`}: controlla la rete e riprova` : (foto.length === 1 ? 'Foto aggiunta alla richiesta' : `${foto.length} foto aggiunte alla richiesta`));
+  render();
+}
+/* visore delle foto a tutto schermo */
+let LB = null;
+function apriFoto(L, i, { togli = null } = {}) {
+  chiudiFoto();
+  const ov = document.createElement('div'); ov.className = 'lightbox'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Foto del cantiere');
+  ov.innerHTML = `<div class="lb-top"><span class="lb-n"></span><span class="sp"></span>${togli ? '<button type="button" class="btn sm" data-lb="togli">Elimina</button>' : ''}<a class="btn sm" data-lb="apri" target="_blank" rel="noopener">Apri</a><button type="button" class="btn sm" data-lb="chiudi" aria-label="Chiudi">✕</button></div>
+    <div class="lb-img"><img alt=""></div>
+    ${L.length > 1 ? '<button type="button" class="lb-nav lb-prec" data-lb="prec" aria-label="Foto precedente">‹</button><button type="button" class="lb-nav lb-succ" data-lb="succ" aria-label="Foto successiva">›</button>' : ''}`;
+  document.body.appendChild(ov);
+  LB = { ov, L, i, togli };
+  const tasti = e => { if (e.key === 'Escape') chiudiFoto(); if (e.key === 'ArrowLeft') mostraFoto(LB.i - 1); if (e.key === 'ArrowRight') mostraFoto(LB.i + 1); };
+  document.addEventListener('keydown', tasti); LB.tasti = tasti;
+  let x0 = null;
+  ov.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  ov.addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 60) mostraFoto(LB.i + (dx < 0 ? 1 : -1)); }, { passive: true });
+  ov.addEventListener('click', async e => {
+    const a = e.target.closest('[data-lb]')?.dataset.lb;
+    if (a === 'chiudi' || (!a && e.target.classList.contains('lb-img'))) chiudiFoto();
+    if (a === 'prec') mostraFoto(LB.i - 1);
+    if (a === 'succ') mostraFoto(LB.i + 1);
+    if (a === 'togli') {
+      const b = e.target.closest('[data-lb]');
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per eliminare'; return; }
+      const f = LB.L[LB.i]; chiudiFoto(); await togli(f);
+    }
+  });
+  mostraFoto(i);
+  ov.querySelector('[data-lb="chiudi"]').focus();
+}
+async function mostraFoto(i) {
+  if (!LB) return;
+  const n = LB.L.length; LB.i = i = (i + n) % n;
+  LB.ov.querySelector('.lb-n').textContent = n > 1 ? `Foto ${i + 1} di ${n}` : 'Foto';
+  const t = LB.ov.querySelector('[data-lb="togli"]'); if (t) { t.classList.remove('armed'); t.textContent = 'Elimina'; }
+  const img = LB.ov.querySelector('img'); img.removeAttribute('src'); img.alt = `Foto ${i + 1} del cantiere`;
+  const u = await store.fileUrl(LB.L[i].path);
+  if (!LB || LB.i !== i) return;
+  if (u) { img.src = u; LB.ov.querySelector('[data-lb="apri"]').href = u; }
+}
+function chiudiFoto() { if (!LB) return; document.removeEventListener('keydown', LB.tasti); LB.ov.remove(); LB = null; }
 /** Scarica un PDF dall'archivio e lo mostra con i tasti Invia / Apri / Scarica. */
 async function apriPdfRemoto(path, nome) {
   try {
@@ -761,6 +922,7 @@ function cardRichPrev(r) {
   return `<div class="card"><div class="row between"><span class="t">${esc(m.azienda || m.nome || 'Rivenditore')}</span><span class="chip ${r.stato === 'nuova' ? 'warn' : ''}">${r.stato === 'nuova' ? 'Nuova' : 'In preparazione'}</span></div>
     <div class="small"><b>${esc(r.indirizzo || '')}</b>${r.piano ? ' · ' + esc(r.piano) : ''}${r.ascensore ? ' · ascensore ' + esc(r.ascensore.toLowerCase()) : ''}${r.tiro ? ' · tiro al piano' : ''}${r.cliente ? ' · ' + esc(r.cliente) : ''}</div>
     <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}
+    ${fotoRichHtml(r.rivenditore, r.id)}
     <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
 }
 function preventivoDaRichiesta(r) {
@@ -771,7 +933,7 @@ function preventivoDaRichiesta(r) {
     cliente: { nome: m.azienda || m.nome || 'Rivenditore', tipo: 'rivenditore', telefono: m.telefono || '', email: m.email || '' },
     riferimento: r.cliente || '', cantiere: r.indirizzo || '', oggetto: [r.cliente && `Cliente finale: ${r.cliente}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
     righe: s.righe.map(x => { const v = LIST().voci.find(y => y.id === x.voce); return v ? { ...rigaDaVoce(v, x.qta), descr: x.descr } : null; }).filter(Boolean),
-    richiestaRiv: r.id };
+    richiestaRiv: r.id, richiestaDi: r.rivenditore };
 }
 /** Quando salvi il preventivo nato da una richiesta, il rivenditore vede a che punto è. */
 function aggiornaRichiestaPrev(d, id) {
@@ -788,6 +950,8 @@ document.addEventListener('change', e => {
   if (t.name === 'rv_tiro') { t.dataset.toccato = '1'; aggiornaStimaRiv(); }
   if (t.closest && t.closest('#rvRighe')) aggiornaStimaRiv();
   if (t.id === 'listinoPdfIn') { const f = t.files && t.files[0]; t.value = ''; if (f) caricaListinoPdf(f); }
+  if (t.id === 'rvFotoIn') { const fs = [...(t.files || [])]; t.value = ''; if (fs.length) aggiungiRvFoto(fs); }
+  if (t.classList?.contains('rvFotoPiu')) { const fs = [...(t.files || [])], rid = t.dataset.id; t.value = ''; if (fs.length) aggiungiFotoRich(rid, fs); }
   if (t.id === 'f_accListino') salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listino: t.checked } });
 });
 document.addEventListener('click', async e => {
@@ -796,7 +960,14 @@ document.addEventListener('click', async e => {
   switch (a) {
     case 'richSeg': UI.richSeg = b.dataset.arg; render(); break;
     case 'richFiltro': UI.richFiltro = b.dataset.arg; render(); break;
-    case 'richAggiorna': await caricaAccessi(true); toast('Aggiornato'); break;
+    case 'richAggiorna': FOTO_RICH.clear(); await caricaAccessi(true); toast('Aggiornato'); break;
+    case 'rvFotoRm': { const f = rvFoto.splice(+b.dataset.arg, 1)[0]; if (f) URL.revokeObjectURL(f.url); disegnaRvFoto(); break; }
+    case 'fotoRichApri': {
+      const L = FOTO_RICH.get(id)?.L || []; if (!L.length) break;
+      const mia = store.st.ruolo === 'rivenditore' && richAperta((RIV.prev || []).find(r => r.id === id));
+      apriFoto(L, +b.dataset.arg || 0, { togli: mia ? async f => { await Promise.all([f.path, f.mini].filter(Boolean).map(x => store.removeFile(x).catch(() => {}))); FOTO_RICH.delete(id); toast('Foto eliminata'); render(); } : null });
+      break;
+    }
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
     case 'rivDocAgg': RIV.docCarico = false; render(); break;
     case 'rivMioDoc': { const d = (RIV.mieiDoc || []).find(x => x.id === b.dataset.id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
@@ -1053,7 +1224,7 @@ function render() {
   if (st.auth === 'out' || st.auth === 'recovery') { $('#main').innerHTML = rAuth(); return; }
 
   if (st.accesso?.cambio_password) { $('#main').innerHTML = rCambioPw(); return; }
-  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : t === 'doc' ? rRivDocumenti() : t === 'miei' ? rRivMieiDoc() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); return; }
+  if (st.ruolo === 'rivenditore') { const t = UI.rivTab || 'cal'; $('#main').innerHTML = rRivTabs() + (t === 'prev' ? rRivPreventivo() : t === 'listino' ? rRivListino() : t === 'doc' ? rRivDocumenti() : t === 'miei' ? rRivMieiDoc() : rRivenditore()) + (t === 'cal' ? '' : `<div class="row between small muted"><span>${esc(st.email)}</span><button class="linkbtn" data-act="logout" type="button">Esci</button></div>`); hydrateFiles($('#main')); hydrateFotoRich($('#main')); return; }
   if (st.ruolo === 'dipendente') { $('#main').innerHTML = rDipendente(); hydrateFiles($('#main')); return; }
   if (st.ruolo === 'nessuno' || st.ruolo === 'sospeso') { $('#main').innerHTML = rSenzaAccesso(); return; }
   if (!GESTORE()) { $('#main').innerHTML = '<div class="empty" style="margin-top:20px">Caricamento…</div>'; return; }
@@ -1062,7 +1233,7 @@ function render() {
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
   h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
-  hydrateFiles($('#main'));
+  hydrateFiles($('#main')); hydrateFotoRich($('#main'));
 }
 async function hydrateFiles(root) {
   for (const img of root.querySelectorAll('img[data-file]')) {
@@ -2195,7 +2366,7 @@ function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra
   $('#sheet').hidden = false;
   aggiornaCliInfo();
   $('#sheetBody').scrollTop = 0;
-  hydrateFiles($('#sheetBody'));
+  hydrateFiles($('#sheetBody')); hydrateFotoRich($('#sheetBody'));
 }
 function closeSheet() { $('#sheet').hidden = true; onSubmit = null; sheetDel = null; }
 $('#sheetForm').addEventListener('submit', async e => {
@@ -2792,6 +2963,7 @@ function sheetPrev(p) {
     ${F('Note per il cliente', `<textarea id="f_note" name="note" placeholder="Es. Materiale di consumo compreso">${esc(p.note || '')}</textarea>`)}
     <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
     <div class="fieldset firmatobox" id="firmatoBox">${firmatoHtml()}</div>
+    ${p.richiestaRiv ? fotoRichHtml(p.richiestaDi || ACC_PREV.L.find(r => r.id === p.richiestaRiv)?.rivenditore, p.richiestaRiv) : ''}
     ${boxCollegaPrev(p, isNew)}
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
     del: isNew ? null : async () => { store.drop('preventivi', p.id); toast('Preventivo eliminato'); },
