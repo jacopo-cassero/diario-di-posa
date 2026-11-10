@@ -550,6 +550,8 @@ async function caricaListinoRiv() {
   try { RIV.listino = await store.rpc('listino_rivenditore'); RIV.listinoErr = ''; }
   catch (e) { RIV.listino = null; RIV.listinoErr = /find the function|does not exist/i.test(e.message || '') ? 'Il listino non è ancora disponibile.' : (e.userMsg || 'Non riesco a leggere il listino.'); }
   try { const { data, error } = await store.tabella('richieste_preventivo').select('*').order('creato', { ascending: false }).limit(40); if (!error) RIV.prev = data; } catch {}
+  // i preventivi in PDF che l'installatore ha messo nella mia area
+  try { const { data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id').eq('kind', 'preventivi'); RIV.prevDoc = error ? [] : data || []; } catch { RIV.prevDoc = []; }
   RIV.listinoCarico = true; render();
 }
 /* ---------- documenti per i rivenditori ---------- */
@@ -577,10 +579,10 @@ function rRapportiRiv() {
   const per = new Map(); for (const d of RAPP.lista) { if (!per.has(d.rivenditore)) per.set(d.rivenditore, []); per.get(d.rivenditore).push(d); }
   const nome = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.azienda || m.nome || m.email) : 'Rivenditore'; };
   return `<div class="row between"><h2>Documenti dei rivenditori</h2><button class="btn sm" data-act="rappAgg" type="button">Aggiorna</button></div>
-  <div class="small muted">I PDF che hai messo nell'area riservata di ogni rivenditore (rapporti di cantiere, verbali, moduli): li trova in «I tuoi documenti» e non può modificarli. Per aggiungerne uno: dalla posa o dall'intervento tocca «Rapporto», da un modulo tocca «PDF», poi «Metti nell'area di…».</div>
+  <div class="small muted">I PDF che hai messo nell'area riservata di ogni rivenditore (preventivi, rapporti di cantiere, verbali, moduli): li trova in «I tuoi documenti» e non può modificarli. Per aggiungerne uno: dalla posa o dall'intervento tocca «Rapporto», da un modulo o da un preventivo tocca «PDF», poi «Metti nell'area di…». I preventivi nati da una richiesta ci arrivano da soli quando li salvi come inviati.</div>
   ${RAPP.err ? `<div class="notice small">${esc(RAPP.err)}</div>` : ''}
   ${[...per.entries()].map(([rid, L]) => `<section class="stack"><h3>${esc(nome(rid))} <span class="small muted">· ${L.length}</span></h3>${L.map(d => `<div class="card"><div class="row between"><span class="t">${esc(d.titolo)}</span></div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</div>
-    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">Vai al lavoro</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun documento pubblicato.</div>')}`;
+    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'preventivi' ? 'editPrev' : d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">${d.kind === 'preventivi' ? 'Vai al preventivo' : 'Vai al lavoro'}</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun documento pubblicato.</div>')}`;
 }
 function rDocumenti() {
   const L = [...DOC_LISTA()].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
@@ -649,7 +651,7 @@ function rRivMieiDoc() {
   const anni = [...new Set(M.map(d => String(d.data || '').slice(0, 4)).filter(Boolean))];
   const card = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
   return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
-  <div class="small muted">I documenti dei tuoi lavori in PDF: rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
+  <div class="small muted">I documenti dei tuoi lavori in PDF: preventivi, rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
   ${M.length ? anni.map(y => `<section class="stack"><h3>${y}</h3>${M.filter(d => String(d.data || '').startsWith(y)).map(card).join('')}</section>`).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
 }
 function rRivDocumenti() {
@@ -684,13 +686,13 @@ function rRivPreventivo() {
   return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="rivPrevNuovo" type="button">${svg('plus')} Richiedi</button></div>
   <div class="small muted">Scrivi tipologie e quantità, luogo, piano e se c'è da smontare o smurare: la richiesta arriva all'installatore, che ti manda il preventivo con il prezzo.</div>
   ${RIV.listinoErr && !RIV.prev ? `<div class="notice small">${esc(RIV.listinoErr)}</div>` : ''}
-  <section class="stack">${P.map(r => { const riaperta = r.stato === 'in_lavorazione' && r.modificata && r.risposta; const st = riaperta ? ['warn', 'In aggiornamento'] : ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); const voci = righeRichTesto(r); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+  <section class="stack">${P.map(r => { const riaperta = r.stato === 'in_lavorazione' && r.modificata && r.risposta; const st = riaperta ? ['warn', 'In aggiornamento'] : ST[r.stato] || ST.nuova; const pdf = r.preventivo_id && (RIV.prevDoc || []).find(d => d.lavoro_id === r.preventivo_id); const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); const voci = righeRichTesto(r); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
     <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz</div>
     ${voci ? `<div class="small">${esc(voci)}</div>` : ''}${r.note ? `<div class="small muted prewrap">${esc(corto(r.note, 200))}</div>` : ''}
     ${r.modificata ? `<div class="small muted">Modificata il ${quandoMod(r.modificata)}</div>` : ''}
     ${r.risposta ? `<div class="small">${r.stato === 'inviato' ? '' : 'Preventivo di prima: '}${esc(r.risposta)}</div>` : ''}
     ${fotoRichHtml(store.uid(), r.id, { aggiungi: !modAttiva && richAperta(r) })}
-    ${modAttiva && r.stato !== 'chiusa' ? `<div class="row"><button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button></div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
+    ${pdf || (modAttiva && r.stato !== 'chiusa') ? `<div class="row">${pdf ? `<button class="btn sm primary" data-act="rivPrevPdf" data-id="${esc(pdf.id)}" type="button">${svg('doc', 'i')} ${r.stato === 'inviato' || r.stato === 'chiusa' ? 'Apri il preventivo' : 'Apri il preventivo di prima'}</button>` : ''}${modAttiva && r.stato !== 'chiusa' ? `<button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button>` : ''}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
   const gruppi = [...new Set(vociPrev(L).map(v => v.gruppo))];
@@ -1005,14 +1007,47 @@ function preventivoDaRichiesta(r) {
     righe: s.righe.map(x => { const v = LIST().voci.find(y => y.id === x.voce); return v ? { ...rigaDaVoce(v, x.qta), descr: x.descr } : null; }).filter(Boolean),
     richiestaRiv: r.id, richiestaDi: r.rivenditore };
 }
-/** Quando salvi il preventivo nato da una richiesta, il rivenditore vede a che punto è. */
-function aggiornaRichiestaPrev(d, id) {
+/** Dove va il PDF di un preventivo nell'area del rivenditore: sempre lo stesso file, che si aggiorna a ogni invio. */
+const pubPrev = p => ({ x: { cliente: p.cliente?.nome, clienteId: p.clienteId }, rivId: p.richiestaDi || null, chiave: `prev-${p.id}`, cartella: 'preventivi',
+  titolo: `Preventivo N. ${p.numero || ''} · ${fmtD(p.data, { day: 'numeric', month: 'short', year: 'numeric' })}${p.riferimento ? ' · Rif. ' + p.riferimento : p.cantiere ? ' · ' + p.cantiere : ''}`,
+  data: p.data || TODAY, lavoro_id: p.id, kind: 'preventivi' });
+/** Quando salvi il preventivo nato da una richiesta, il rivenditore vede a che punto è; quando lo mandi, trova anche il PDF nella sua area. */
+async function aggiornaRichiestaPrev(d, id) {
   if (!d.richiestaRiv || store.st.mode === 'demo') return;
   const t = totali(d, LIST());
   const fatto = d.stato !== 'bozza';
-  const vista = fatto && ACC_PREV.L.find(r => r.id === d.richiestaRiv)?.precedente ? { precedente: null } : {};   // il preventivo aggiornato è partito: le modifiche sono viste
-  store.tabella('richieste_preventivo').update({ stato: fatto ? 'inviato' : 'in_lavorazione', preventivo_id: id, aggiornato: new Date().toISOString(), ...vista,
-    risposta: fatto ? `Preventivo N. ${d.numero} del ${fmtD(d.data)}: ${eur(t.totale)} (${t.ivaLabel})` : null }).eq('id', d.richiestaRiv).then(({ error }) => { if (!error) caricaRichiestePrev().then(render); });
+  const rich = ACC_PREV.L.find(r => r.id === d.richiestaRiv);
+  let pdf = null;   // null = non serve, true = messo nell'area del rivenditore, false = non riuscito
+  if (fatto) {
+    try {
+      let rid = d.richiestaDi || rich?.rivenditore;
+      if (!rid) { const { data } = await store.tabella('richieste_preventivo').select('rivenditore').eq('id', d.richiestaRiv).limit(1); rid = data?.[0]?.rivenditore; }
+      if (!rid) throw new Error('rivenditore non trovato');
+      await caricaImmagini();
+      const p = { id, ...d };
+      await pubblicaPdf({ ...pubPrev(p), bytes: creaPdfDoc('preventivo', p).bytes }, [rid]);   // prima il PDF, poi l'avviso: così quando legge «pronto» lo trova già
+      pdf = true;
+    } catch (e) { console.warn(e); pdf = false; }
+  }
+  const vista = fatto && rich?.precedente ? { precedente: null } : {};   // il preventivo aggiornato è partito: le modifiche sono viste
+  let errore = null;
+  try {
+    ({ error: errore } = await store.tabella('richieste_preventivo').update({ stato: fatto ? 'inviato' : 'in_lavorazione', preventivo_id: id, aggiornato: new Date().toISOString(), ...vista,
+      risposta: fatto ? `Preventivo N. ${d.numero} del ${fmtD(d.data)}: ${eur(t.totale)} (${t.ivaLabel})` : null }).eq('id', d.richiestaRiv));
+  } catch (e) { errore = e; }
+  if (!errore) { await caricaRichiestePrev(); render(); }
+  if (fatto) toast(errore ? 'Preventivo salvato, ma il rivenditore non lo vede ancora: serve la connessione. Riapri il preventivo e salvalo di nuovo'
+    : pdf ? 'Il rivenditore è avvisato e trova il preventivo in PDF nella sua area'
+    : 'Il rivenditore è avvisato, ma il PDF non è arrivato nella sua area: riapri il preventivo e salvalo di nuovo');
+}
+/** Toglie dall'area dei rivenditori il PDF di un preventivo eliminato. */
+async function togliPdfPrev(id) {
+  if (store.st.mode === 'demo') return;
+  try {
+    const { data } = await store.tabella('documenti_cliente').select('id,path').eq('kind', 'preventivi').eq('lavoro_id', id);
+    for (const d of data || []) { await store.tabella('documenti_cliente').delete().eq('id', d.id); store.removeFile(d.path).catch(() => {}); }
+    if (data?.length) RAPP.lista = null;
+  } catch (e) { console.warn(e); }
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#rvRighe, [name="rv_piano"], [name="rv_asc"], [name="rv_tiro"]')) aggiornaStimaRiv(); });
 document.addEventListener('change', e => {
@@ -1046,6 +1081,7 @@ document.addEventListener('click', async e => {
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
+    case 'rivPrevPdf': { const d = (RIV.prevDoc || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevMod': { const r = (RIV.prev || []).find(x => x.id === id); if (r) sheetPrevRiv(r); break; }
     case 'richPrevVista': {
       b.disabled = true;
@@ -1879,8 +1915,10 @@ function pubModulo(mod, nomeModello) {
 async function boxPubblica() {
   const pub = pdfCorrente?.pub, box = $('#pubBox'); if (!pub || !box) return;
   if (navigator.onLine) await caricaAccessi(true).catch(() => {});
-  const rivs = rivDiLavoro(pub.x || {});
   const tutti = ACC.membri.filter(m => m.ruolo === 'rivenditore' && m.stato === 'attivo');
+  let rivs = rivDiLavoro(pub.x || {});
+  const chiede = pub.rivId && tutti.find(m => m.user_id === pub.rivId);   // il rivenditore che ha fatto la richiesta
+  if (chiede) rivs = [chiede, ...rivs.filter(m => m !== chiede)];
   if (!$('#pubBox') || !tutti.length) return;
   const voce = m => `<button type="button" class="btn" data-act="pdfPubblica" data-id="${esc(m.user_id)}">${svg('doc', 'i')} Metti nell'area di ${esc(m.azienda || m.nome || 'rivenditore')}</button>`;
   $('#pubBox').innerHTML = `<div class="fs-t">Area riservata del rivenditore</div>
@@ -3025,6 +3063,7 @@ function sheetPrev(p) {
   const c = p.cliente || {};
   openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
     ${p.richiestaRiv ? novitaPrevHtml(p.richiestaRiv) : ''}
+    ${p.richiestaRiv && store.st.mode !== 'demo' ? '<div class="small muted">Nato dalla richiesta di un rivenditore: quando lo salvi con lo stato «Inviato», lui riceve l\'avviso e trova il PDF nella sua area riservata.</div>' : ''}
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
     ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
     <div class="fieldset"><span class="fs-t">Cliente</span>
@@ -3046,7 +3085,7 @@ function sheetPrev(p) {
     ${p.richiestaRiv ? fotoRichHtml(p.richiestaDi || ACC_PREV.L.find(r => r.id === p.richiestaRiv)?.rivenditore, p.richiestaRiv) : ''}
     ${boxCollegaPrev(p, isNew)}
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
-    del: isNew ? null : async () => { store.drop('preventivi', p.id); toast('Preventivo eliminato'); },
+    del: isNew ? null : async () => { store.drop('preventivi', p.id); togliPdfPrev(p.id); toast('Preventivo eliminato'); },
     extra: `<button type="button" class="btn dark" data-act="prevPdf">PDF</button>`,
   });
   aggiornaTotali();
@@ -3480,18 +3519,24 @@ async function pubblicaRapporto(kind, x, bytes, rivIds, r) {
 }
 /* ---------- PDF ---------- */
 let pdfCorrente = null;
-function apriPdf(tipo, doc, indietro) {
+/** Crea il PDF di un preventivo o di un consuntivo: i byte, il nome del file e il documento completato con i dati del cliente. */
+function creaPdfDoc(tipo, doc) {
   const cr = trovaCliente(doc.cliente?.nome);
   if (cr) doc = { ...doc, cliente: { indirizzo: cr.indirizzo, piva: cr.piva, email: cr.email, telefono: cr.telefono, ...Object.fromEntries(Object.entries(doc.cliente || {}).filter(([, v]) => v)) } };
-  let bytes;
-  try { bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG }); }
-  catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
+  const bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG });
   const dIt = s => String(s || '').split('-').reverse().join('-');
   const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}` : `Consuntivo ${dIt(doc.data)}${doc.dataFine && doc.dataFine !== doc.data ? ' al ' + dIt(doc.dataFine) : ''}`;
   const nome = `${base} ${doc.cliente?.nome || ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+  return { bytes, nome, doc };
+}
+function apriPdf(tipo, doc, indietro) {
+  let bytes, nome;
+  try { ({ bytes, nome, doc } = creaPdfDoc(tipo, doc)); }
+  catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
-  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo };
+  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo, bytes, pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : null };
+  if (pdfCorrente.pub && GESTORE() && store.st.mode !== 'demo') setTimeout(() => boxPubblica(), 0);
   let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
   openSheet(tipo === 'preventivo' ? 'Preventivo pronto' : 'Consuntivo pronto', `
     <div class="pdfready">${svg('doc')}<div><b>${esc(nome)}</b><div class="small muted">${num(bytes.length / 1024, 0)} KB${tipo === 'preventivo' && doc.condizioni ? ' · con termini, condizioni e firma' : ''}</div></div></div>
@@ -3502,6 +3547,7 @@ function apriPdf(tipo, doc, indietro) {
       ${tipo === 'preventivo' && (doc.stato || 'bozza') === 'bozza' ? `<button type="button" class="btn" data-act="prevInviato">Segna come inviato al cliente</button>` : ''}
     </div>
     ${tipo === 'preventivo' && (doc.stato || 'bozza') === 'bozza' ? '<div class="small muted">Quando il preventivo è segnato come inviato, se il cliente non risponde entro 7 giorni te lo ricordo.</div>' : ''}
+    <div id="pubBox" class="stack"></div>
   `, null, { extra: indietro ? '<button type="button" class="btn" data-act="pdfBack">‹ Torna indietro</button>' : '' });
 }
 
@@ -3994,7 +4040,7 @@ document.addEventListener('click', async e => {
     case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
-    case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { store.put('preventivi', p.id, { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
+    case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { const d = { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }; store.put('preventivi', p.id, d); aggiornaRichiestaPrev(d, p.id); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
     case 'collegaPrevScegli': {
       const form = $('#sheetForm'); if (!form.reportValidity()) break;
       const saved = salvaPrev(new FormData(form)); prevCtx.isNew = false; sheetScegliLavoro(saved); break;
