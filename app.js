@@ -131,12 +131,12 @@ async function caricaAccessi(forza) {
 store.onAccessi = () => caricaAccessi(true);
 const dipendenti = () => ACC.membri.filter(m => m.ruolo === 'dipendente' && m.stato === 'attivo');
 const nomeMembro = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.nome || m.email) : 'Dipendente'; };
-const nRichieste = () => ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(r => r.stato === 'nuova').length;
-const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(r => r.stato === 'nuova').length;
+const nRichieste = () => ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(richDaGuardare).length;
+const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(richDaGuardare).length;
 
 /** Avviso in cima al calendario quando ci sono richieste da guardare. */
 function avvisoAccessi() {
-  const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length, q = ACC_PREV.L.filter(x => x.stato === 'nuova').length;
+  const r = ACC.richieste.length, p = ACC.pren.filter(x => x.stato === 'richiesta').length, q = ACC_PREV.L.filter(richDaGuardare).length;
   if (!r && !p && !q) return '';
   return (p || q ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="richieste">${svg('cal', 'i')} <span>${[p && `<b>${p}</b> ${p === 1 ? 'prenotazione' : 'prenotazioni'} da confermare`, q && `<b>${q}</b> ${q === 1 ? 'richiesta' : 'richieste'} di preventivo`].filter(Boolean).join(' · ')}</span><span class="go">›</span></button>` : '')
     + (r ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="accessi">${svg('cli', 'i')} <span><b>${r}</b> ${r === 1 ? 'richiesta' : 'richieste'} di accesso</span><span class="go">›</span></button>` : '');
@@ -209,9 +209,9 @@ function rRichieste() {
   if (store.st.mode === 'demo') return `<h2>Richieste</h2><div class="empty">Le richieste dei rivenditori arrivano dopo il collegamento al database.</div>`;
   if (ACC.ok === false && ACC.err === 'manca') return `<h2>Richieste</h2><div class="notice">Manca lo script <code>accessi.sql</code> su Supabase.</div>`;
   if (ACC.ok === null) { caricaAccessi(true); return `<h2>Richieste</h2><div class="empty">Caricamento…</div>`; }
-  const seg = UI.richSeg || 'pren', f = UI.richFiltro || 'da';
   const P = ACC.pren, Q = ACC_PREV.L;
-  const nDa = P.filter(p => p.stato === 'richiesta').length, nQ = Q.filter(r => r.stato === 'nuova').length;
+  const nDa = P.filter(p => p.stato === 'richiesta').length, nQ = Q.filter(richDaGuardare).length;
+  const seg = UI.richSeg || (!nDa && nQ ? 'prev' : 'pren'), f = UI.richFiltro || 'da';
   const filtri = [['da', 'Da confermare', p => p.stato === 'richiesta'], ['conf', 'Confermate', p => p.stato === 'confermata' && p.data_fine >= TODAY], ['arch', 'Archivio', p => !(p.stato === 'richiesta' || (p.stato === 'confermata' && p.data_fine >= TODAY))]];
   const [, lf, fn] = filtri.find(x => x[0] === f) || filtri[0];
   const L = P.filter(fn).sort((a, b) => f === 'arch' ? b.data.localeCompare(a.data) : a.data.localeCompare(b.data));
@@ -680,26 +680,31 @@ function rRivPreventivo() {
   if (!RIV.listinoCarico) { caricaListinoRiv(); return `<div class="empty">Caricamento…</div>`; }
   const P = RIV.prev || [];
   const ST = { nuova: ['warn', 'Inviata'], in_lavorazione: ['warn', 'In preparazione'], inviato: ['ok', 'Preventivo pronto'], chiusa: ['', 'Chiusa'] };
+  const modAttiva = P.some(r => 'modifica_notificata' in r);   // il tasto compare quando l'installatore ha attivato la modifica (script modifica_richieste.sql)
   return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="rivPrevNuovo" type="button">${svg('plus')} Richiedi</button></div>
   <div class="small muted">Scrivi tipologie e quantità, luogo, piano e se c'è da smontare o smurare: la richiesta arriva all'installatore, che ti manda il preventivo con il prezzo.</div>
   ${RIV.listinoErr && !RIV.prev ? `<div class="notice small">${esc(RIV.listinoErr)}</div>` : ''}
-  <section class="stack">${P.map(r => { const st = ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
+  <section class="stack">${P.map(r => { const riaperta = r.stato === 'in_lavorazione' && r.modificata && r.risposta; const st = riaperta ? ['warn', 'In aggiornamento'] : ST[r.stato] || ST.nuova; const tot = (r.righe || []).reduce((s, x) => s + n2(x.qta), 0); const voci = righeRichTesto(r); return `<div class="card"><div class="row between"><span class="t">${esc(r.cliente || r.indirizzo || 'Richiesta')}</span><span class="chip ${st[0]}">${st[1]}</span></div>
     <div class="small muted">${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · ${esc(r.indirizzo || '')}${r.piano ? ' · ' + esc(r.piano) : ''} · ${num(tot)} pz</div>
-    ${r.risposta ? `<div class="small">${esc(r.risposta)}</div>` : ''}
-    ${fotoRichHtml(store.uid(), r.id, { aggiungi: richAperta(r) })}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
+    ${voci ? `<div class="small">${esc(voci)}</div>` : ''}${r.note ? `<div class="small muted prewrap">${esc(corto(r.note, 200))}</div>` : ''}
+    ${r.modificata ? `<div class="small muted">Modificata il ${quandoMod(r.modificata)}</div>` : ''}
+    ${r.risposta ? `<div class="small">${r.stato === 'inviato' ? '' : 'Preventivo di prima: '}${esc(r.risposta)}</div>` : ''}
+    ${fotoRichHtml(store.uid(), r.id, { aggiungi: richAperta(r) })}
+    ${modAttiva && r.stato !== 'chiusa' ? `<div class="row"><button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button></div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
   const gruppi = [...new Set(vociPrev(L).map(v => v.gruppo))];
-  return `<div class="prevriga"><select name="rv_voce" aria-label="Tipologia"><option value="">Tipologia…</option>${gruppi.map(g => `<optgroup label="${esc(g)}">${vociPrev(L).filter(v => v.gruppo === g).map(v => `<option value="${esc(v.id)}" ${v.id === r.voce ? 'selected' : ''}>${esc(nomeVoce(v))}</option>`).join('')}</optgroup>`).join('')}</select>
+  const fuori = r.voce && !vociPrev(L).some(v => v.id === r.voce) ? `<option value="${esc(r.voce)}" selected>${esc(r.descr || r.voce)}</option>` : '';   // tipologia che nel listino di oggi non c'è più
+  return `<div class="prevriga"><select name="rv_voce" aria-label="Tipologia"><option value="">Tipologia…</option>${fuori}${gruppi.map(g => `<optgroup label="${esc(g)}">${vociPrev(L).filter(v => v.gruppo === g).map(v => `<option value="${esc(v.id)}" ${v.id === r.voce ? 'selected' : ''}>${esc(nomeVoce(v))}</option>`).join('')}</optgroup>`).join('')}</select>
     <input name="rv_qta" type="number" inputmode="numeric" min="0" placeholder="Q.tà" value="${esc(r.qta || '')}" aria-label="Quantità">
     <select name="rv_vecchio" aria-label="Vecchio serramento"><option value="">Nuovo, niente da togliere</option><option value="smontaggio" ${r.vecchio === 'smontaggio' ? 'selected' : ''}>Con smontaggio del vecchio</option><option value="smuratura" ${r.vecchio === 'smuratura' ? 'selected' : ''}>Con smuratura del vecchio telaio</option></select>
     <button type="button" class="iconbtn" data-act="rvRm" aria-label="Togli riga">×</button></div>`;
 };
-function leggiPrevRiv(fd) {
+function leggiPrevRiv(fd, prima = []) {
   const v = fd.getAll('rv_voce'), q = fd.getAll('rv_qta'), o = fd.getAll('rv_vecchio');
   const righe = v.map((voce, i) => ({ voce, qta: n2(q[i]), vecchio: o[i] || '' })).filter(r => r.voce && r.qta > 0);
   const L = LISTINO_RIV();
-  righe.forEach(r => { const vv = L.voci.find(x => x.id === r.voce); r.descr = vv ? nomeVoce(vv) : r.voce; });
+  righe.forEach(r => { const vv = L.voci.find(x => x.id === r.voce); r.descr = vv ? nomeVoce(vv) : (prima || []).find(x => x.voce === r.voce)?.descr || r.voce; });
   return { cliente: String(fd.get('rv_cliente') || '').trim(), telefono: String(fd.get('rv_tel') || '').trim(), indirizzo: String(fd.get('rv_luogo') || '').trim(), piano: fd.get('rv_piano') || '', ascensore: fd.get('rv_asc') || '', tiro: !!fd.get('rv_tiro'), righe, note: String(fd.get('rv_note') || '').trim() };
 }
 function aggiornaStimaRiv() {
@@ -709,42 +714,105 @@ function aggiornaStimaRiv() {
     <div class="row between stimatot"><b>Stima posa</b><b class="num">${eur(s.totale)}</b></div><div class="small muted">IVA esclusa${s.daConcordare ? ', voci da concordare escluse' : ''}. Trasferta (${eur(L.euroKm ?? 1)}/km) ed eventuali extra esclusi: il preventivo definitivo lo prepara l'installatore.</div>`
     : `<div class="small muted">Aggiungi tipologia e quantità per vedere la stima.</div>`;
 }
-function sheetPrevRiv() {
+/** Il rivenditore corregge una richiesta già mandata (o segnala che ha aggiunto foto). */
+async function modificaRich(id, dati) {
+  try { return await store.rpc('modifica_richiesta_preventivo', { richiesta: id, dati }); }
+  catch (e) { if (/find the function|schema cache|does not exist/i.test(e.message || '')) e.userMsg = 'La modifica delle richieste non è ancora attiva: avvisa l\'installatore.'; throw e; }
+}
+/** Modulo della richiesta di preventivo: vuoto per una nuova, già compilato per modificarne una mandata. */
+function sheetPrevRiv(r = null) {
   const L = LISTINO_RIV();
-  openSheet('Richiesta di preventivo', `
+  const gia = r ? (FOTO_RICH.get(r.id)?.L.length || 0) : 0, liberi = Math.max(0, MAX_FOTO_RICH - gia);
+  const piani = !r?.piano || PIANI.includes(r.piano) ? PIANI : [r.piano, ...PIANI];
+  openSheet(r ? 'Modifica la richiesta' : 'Richiesta di preventivo', `
+    ${!r ? '' : r.stato === 'inviato' ? `<div class="notice small">Per questa richiesta hai già ricevuto il preventivo. Se la modifichi, l'installatore viene avvisato, aggiorna lo stesso preventivo e te lo rimanda.</div>`
+      : `<div class="small muted">Correggi, aggiungi o togli quello che serve: l'installatore viene avvisato e vede che cosa è cambiato. Non serve mandare una seconda richiesta.</div>`}
     <div class="fieldset"><span class="fs-t">Cantiere</span>
-      ${F('Luogo del cantiere', inp('rv_luogo', '', 'text', 'placeholder="Comune e indirizzo"'))}
-      <div class="g2">${F('Cliente finale', inp('rv_cliente', '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', '', 'tel', 'placeholder="Facoltativo"'))}</div>
-      <div class="g2">${F('Piano', sel('rv_piano', PIANI.map(p => [p, p]), 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], ''))}</div>
-      ${tog('rv_tiro', 'Serve il tiro al piano', false, 'si segna da solo se il piano è alto e non c\'è ascensore')}
+      ${F('Luogo del cantiere', inp('rv_luogo', r?.indirizzo || '', 'text', 'placeholder="Comune e indirizzo"'))}
+      <div class="g2">${F('Cliente finale', inp('rv_cliente', r?.cliente || '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', r?.telefono || '', 'tel', 'placeholder="Facoltativo"'))}</div>
+      <div class="g2">${F('Piano', sel('rv_piano', piani.map(p => [p, p]), r?.piano || 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], r?.ascensore || ''))}</div>
+      ${tog('rv_tiro', 'Serve il tiro al piano', !!r?.tiro, 'si segna da solo se il piano è alto e non c\'è ascensore')}
     </div>
     <div class="fieldset"><span class="fs-t">Tipologie e quantità</span>
-      <div id="rvRighe" class="stack">${rigaPrevRiv(L)}${rigaPrevRiv(L)}</div>
+      <div id="rvRighe" class="stack">${r?.righe?.length ? r.righe.map(x => rigaPrevRiv(L, x)).join('') : rigaPrevRiv(L) + rigaPrevRiv(L)}</div>
       <button type="button" class="btn sm" data-act="rvAdd">+ Tipologia</button>
     </div>
-    ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3"></textarea>`)}
-    <div class="fieldset"><div class="row between"><span class="fs-t">Foto del cantiere</span><span class="small muted" id="rvFotoN"></span></div>
+    ${F('Note (misure, colori, accessi…)', `<textarea id="f_rv_note" name="rv_note" rows="3">${esc(r?.note || '')}</textarea>`)}
+    <div class="fieldset"><div class="row between"><span class="fs-t">${r ? 'Altre foto del cantiere' : 'Foto del cantiere'}</span><span class="small muted" id="rvFotoN"></span></div>
       <div class="thumbs" id="rvThumbs"></div>
-      <label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label>
-      <div class="small muted">Facoltative, fino a ${MAX_FOTO_RICH}: i vani, i serramenti da togliere, gli accessi, i particolari. Con le foto il preventivo è più preciso.</div>
+      ${liberi ? `<label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label>` : ''}
+      <div class="small muted">${!r ? `Facoltative, fino a ${MAX_FOTO_RICH}: i vani, i serramenti da togliere, gli accessi, i particolari. Con le foto il preventivo è più preciso.`
+        : !liberi ? `Hai già mandato ${MAX_FOTO_RICH} foto, il massimo: per cambiarne una, toglila dalla scheda della richiesta.`
+        : `${gia ? `Ne hai già ${gia === 1 ? 'mandata una' : 'mandate ' + gia}: le vedi e le togli dalla scheda della richiesta. ` : ''}Qui puoi aggiungerne ${liberi === 1 ? 'ancora una' : 'altre ' + liberi}.`}</div>
     </div>
     <div class="small muted">Nessun campo è obbligatorio. Il prezzo te lo manda l'installatore con il preventivo.</div>`,
   async fd => {
-    const d = leggiPrevRiv(fd);
+    const d = leggiPrevRiv(fd, r?.righe);
     await rvPronte;   // se sta ancora preparando le foto scelte, aspetto
-    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente && !rvFoto.length) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
-    const id = await store.rpc('chiedi_preventivo', { dati: d });
-    // da qui la richiesta è partita: se una foto non si carica lo dico, ma non la mando due volte
-    let msg = 'Richiesta inviata: ti arriva il preventivo';
-    if (rvFoto.length) {
-      const perse = typeof id === 'string' && id ? await caricaFotoRich(id, rvFoto) : rvFoto.length;
-      msg = perse ? `Richiesta inviata, ma ${perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`} dalla richiesta` : `Richiesta inviata con ${rvFoto.length === 1 ? 'una foto' : rvFoto.length + ' foto'}`;
+    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente && !rvFoto.length && !gia) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
+    let msg;
+    if (r) {
+      const cambiata = diffRich(r, d).length > 0, n = rvFoto.length;
+      if (!cambiata && !n) { toast('Non hai cambiato niente: la richiesta resta com\'è'); return; }
+      if (cambiata) await modificaRich(r.id, { ...d, ...(n ? { conFoto: true } : {}) });
+      // da qui le modifiche sono salvate: se una foto non si carica lo dico, senza far ripetere tutto
+      const perse = n ? await caricaFotoRich(r.id, rvFoto) : 0;
+      if (!cambiata && perse < n) await modificaRich(r.id, { soloFoto: true }).catch(() => {});
+      const foto = !n ? '' : perse ? (perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`) + ' dalla richiesta' : n === 1 ? 'una foto aggiunta' : `${n} foto aggiunte`;
+      msg = !cambiata ? (perse === n ? 'Foto non caricate: controlla la rete e riprova' : perse ? `Foto aggiunte, ma ${foto}` : n === 1 ? 'Foto aggiunta alla richiesta' : `${n} foto aggiunte alla richiesta`)
+        : (r.stato === 'inviato' ? 'Richiesta modificata: l\'installatore aggiorna il preventivo e te lo rimanda' : 'Richiesta modificata: l\'installatore vede che cosa è cambiato') + (!n ? '' : perse ? `. Attenzione, ${foto}` : ` · ${foto}`);
+    } else {
+      const id = await store.rpc('chiedi_preventivo', { dati: d });
+      // da qui la richiesta è partita: se una foto non si carica lo dico, ma non la mando due volte
+      msg = 'Richiesta inviata: ti arriva il preventivo';
+      if (rvFoto.length) {
+        const perse = typeof id === 'string' && id ? await caricaFotoRich(id, rvFoto) : rvFoto.length;
+        msg = perse ? `Richiesta inviata, ma ${perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`} dalla richiesta` : `Richiesta inviata con ${rvFoto.length === 1 ? 'una foto' : rvFoto.length + ' foto'}`;
+      }
     }
     svuotaRvFoto();
     toast(msg); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
-  }, { saveLabel: 'Invia richiesta' });
-  svuotaRvFoto();
+  }, { saveLabel: r ? 'Salva le modifiche' : 'Invia richiesta' });
+  svuotaRvFoto(); rvMax = liberi;
+  // il tiro al piano si segna da solo, ma non se in questa richiesta era stato scelto a mano
+  if (r && !!r.tiro !== ((r.piano || 'Piano terra') !== 'Piano terra' && r.ascensore !== 'Sì')) $('#f_rv_tiro').dataset.toccato = '1';
 }
+/* ---------- che cosa è cambiato in una richiesta modificata dal rivenditore ---------- */
+const corto = (t, n = 160) => { t = String(t ?? '').trim(); return t.length > n ? t.slice(0, n).trimEnd() + '…' : t; };
+const quandoMod = ts => new Date(ts).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const righeRichTesto = r => (r.righe || []).map(x => `${num(x.qta)} ${x.descr || x.voce}${x.vecchio ? ' (' + x.vecchio + ')' : ''}`).join(', ');
+const CAMPI_RICH = [['indirizzo', 'Luogo'], ['cliente', 'Cliente finale'], ['telefono', 'Telefono'], ['piano', 'Piano'], ['ascensore', 'Ascensore'], ['note', 'Note', true]];
+/** Differenze tra com'era una richiesta e com'è adesso: [{ tipo: 'piu' | 'meno' | 'cambia', testo }]. */
+function diffRich(prima, dopo) {
+  const out = [], t = v => String(v ?? '').trim();
+  const nomeR = r => `${r.descr || r.voce}${r.vecchio ? ` (${r.vecchio})` : ''}`;
+  const somma = L => { const M = new Map(); for (const r of L || []) { const k = `${r.voce}|${r.vecchio || ''}`; M.set(k, { ...r, qta: n2(r.qta) + (M.get(k)?.qta || 0) }); } return M; };
+  const A = somma(prima.righe), B = somma(dopo.righe);
+  for (const [k, r] of B) { const a = A.get(k); if (!a) out.push({ tipo: 'piu', testo: `Aggiunto: ${num(r.qta)} × ${nomeR(r)}` }); else if (a.qta !== r.qta) out.push({ tipo: 'cambia', testo: `${nomeR(r)}: da ${num(a.qta)} a ${num(r.qta)}` }); }
+  for (const [k, r] of A) if (!B.has(k)) out.push({ tipo: 'meno', testo: `Tolto: ${num(r.qta)} × ${nomeR(r)}` });
+  for (const [k, l, plur] of CAMPI_RICH) {
+    const a = t(prima[k]), b = t(dopo[k]); if (a === b) continue;
+    out.push(!a ? { tipo: 'piu', testo: `${l}: ${corto(b)} (prima non c'${plur ? 'erano' : 'era'})` }
+      : !b ? { tipo: 'meno', testo: `${l} ${plur ? 'tolte' : 'tolto'} (${plur ? 'erano' : 'era'}: ${corto(a)})` }
+      : { tipo: 'cambia', testo: `${l}: ${corto(b)} (prima: ${corto(a)})` });
+  }
+  if (!!prima.tiro !== !!dopo.tiro) out.push({ tipo: 'cambia', testo: dopo.tiro ? 'Ora serve il tiro al piano' : 'Il tiro al piano non serve più' });
+  return out;
+}
+/** Le modifiche del rivenditore che l'installatore non ha ancora visto (null se non ce ne sono). */
+function novitaRich(r) {
+  if (!r?.precedente || typeof r.precedente !== 'object') return null;
+  const d = diffRich(r.precedente, r), foto = !!r.precedente.foto;
+  return d.length || foto ? { d, foto } : null;
+}
+const richDaGuardare = r => r.stato === 'nuova' || !!novitaRich(r);
+function novitaHtml(r, nov, nelPreventivo = false) {
+  return `<div class="modrich stack"><div class="small"><b>${nelPreventivo ? 'Il rivenditore ha modificato la richiesta' : 'Modificata dal rivenditore'}</b>${r.modificata ? ' · ' + quandoMod(r.modificata) : ''}</div>
+    <ul class="difflist small">${nov.d.map(x => `<li class="${x.tipo}">${esc(x.testo)}</li>`).join('')}${nov.foto ? '<li class="piu">Nuove foto del cantiere</li>' : ''}</ul>
+    ${nelPreventivo ? '<div class="small muted">Sistema le voci qui sotto. Quando salvi il preventivo come inviato, il rivenditore riceve l\'avviso che è pronto.</div>' : ''}
+    <div class="row"><button class="btn sm" data-act="richPrevVista" data-id="${esc(r.id)}" type="button">Ho visto</button></div></div>`;
+}
+const novitaPrevHtml = id => { const r = ACC_PREV.L.find(x => x.id === id), nov = novitaRich(r); return nov ? novitaHtml(r, nov, true) : ''; };
 /* ---------- foto del cantiere nelle richieste di preventivo ---------- */
 // Le carica il rivenditore nella sua cartella: <rivenditore>/richieste/<id richiesta>/f-<n>.jpg (foto) e t-<n>.jpg (miniatura).
 // L'installatore le legge da lì: non serve nessun dato in più nel database.
@@ -818,12 +886,12 @@ async function caricaFotoRich(id, foto) {
   return perse;
 }
 // foto scelte nel modulo della richiesta, prima dell'invio
-let rvFoto = [], rvPronte = Promise.resolve(), rvGiro = 0;
+let rvFoto = [], rvPronte = Promise.resolve(), rvGiro = 0, rvMax = MAX_FOTO_RICH;
 const svuotaRvFoto = () => { rvFoto.forEach(f => URL.revokeObjectURL(f.url)); rvFoto = []; rvGiro++; };
 /** Prepara le foto scelte nel modulo; chi invia aspetta che siano tutte pronte. */
 function aggiungiRvFoto(files) {
   const giro = rvGiro, n = $('#rvFotoN'); if (n) n.textContent = 'Preparo le foto…';
-  rvPronte = rvPronte.then(() => scegliFoto(files, MAX_FOTO_RICH - rvFoto.length)).then(nuove => {
+  rvPronte = rvPronte.then(() => scegliFoto(files, rvMax - rvFoto.length)).then(nuove => {
     if (giro !== rvGiro) { nuove.forEach(f => URL.revokeObjectURL(f.url)); return; }   // il modulo è stato chiuso nel frattempo
     rvFoto.push(...nuove); disegnaRvFoto();
   }).catch(() => {});
@@ -831,8 +899,8 @@ function aggiungiRvFoto(files) {
 function disegnaRvFoto() {
   const box = $('#rvThumbs'); if (!box) return;
   box.innerHTML = rvFoto.map((f, i) => `<span class="thumbx"><img src="${f.url}" alt="Foto ${i + 1}"><button type="button" data-act="rvFotoRm" data-arg="${i}" aria-label="Togli la foto ${i + 1}">×</button></span>`).join('');
-  const piu = $('#rvFotoPiuBtn'); if (piu) piu.hidden = rvFoto.length >= MAX_FOTO_RICH;
-  const n = $('#rvFotoN'); if (n) n.textContent = rvFoto.length ? `${rvFoto.length} di ${MAX_FOTO_RICH}` : '';
+  const piu = $('#rvFotoPiuBtn'); if (piu) piu.hidden = rvFoto.length >= rvMax;
+  const n = $('#rvFotoN'); if (n) n.textContent = rvFoto.length ? `${rvFoto.length} di ${rvMax}` : '';
 }
 async function scegliFoto(files, quante) {
   const out = []; let scartate = 0;
@@ -848,6 +916,7 @@ async function aggiungiFotoRich(id, files) {
   const foto = await scegliFoto(files, MAX_FOTO_RICH - gia); if (!foto.length) return;
   const perse = await caricaFotoRich(id, foto);
   foto.forEach(f => URL.revokeObjectURL(f.url));
+  if (perse < foto.length) await modificaRich(id, { soloFoto: true }).catch(() => {});   // l'installatore viene avvisato delle foto nuove
   toast(perse ? `${perse === foto.length ? 'Foto non caricate' : `${perse} foto non caricate`}: controlla la rete e riprova` : (foto.length === 1 ? 'Foto aggiunta alla richiesta' : `${foto.length} foto aggiunte alla richiesta`));
   render();
 }
@@ -918,10 +987,11 @@ async function caricaRichiestePrev() {
 }
 function cardRichPrev(r) {
   const m = ACC.membri.find(x => x.user_id === r.rivenditore) || {};
-  const pz = (r.righe || []).map(x => `${num(x.qta)} ${x.descr || x.voce}${x.vecchio ? ' (' + x.vecchio + ')' : ''}`).join(', ');
-  return `<div class="card"><div class="row between"><span class="t">${esc(m.azienda || m.nome || 'Rivenditore')}</span><span class="chip ${r.stato === 'nuova' ? 'warn' : ''}">${r.stato === 'nuova' ? 'Nuova' : 'In preparazione'}</span></div>
+  const pz = righeRichTesto(r), nov = novitaRich(r);
+  return `<div class="card"><div class="row between"><span class="t">${esc(m.azienda || m.nome || 'Rivenditore')}</span><span class="chipgrp">${nov ? '<span class="chip warn">Modificata</span>' : ''}<span class="chip ${r.stato === 'nuova' ? 'warn' : ''}">${r.stato === 'nuova' ? 'Nuova' : 'In preparazione'}</span></span></div>
     <div class="small"><b>${esc(r.indirizzo || '')}</b>${r.piano ? ' · ' + esc(r.piano) : ''}${r.ascensore ? ' · ascensore ' + esc(r.ascensore.toLowerCase()) : ''}${r.tiro ? ' · tiro al piano' : ''}${r.cliente ? ' · ' + esc(r.cliente) : ''}</div>
-    <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}
+    <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted prewrap">${esc(r.note)}</div>` : ''}
+    ${nov ? novitaHtml(r, nov) : ''}
     ${fotoRichHtml(r.rivenditore, r.id)}
     <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
 }
@@ -940,7 +1010,8 @@ function aggiornaRichiestaPrev(d, id) {
   if (!d.richiestaRiv || store.st.mode === 'demo') return;
   const t = totali(d, LIST());
   const fatto = d.stato !== 'bozza';
-  store.tabella('richieste_preventivo').update({ stato: fatto ? 'inviato' : 'in_lavorazione', preventivo_id: id, aggiornato: new Date().toISOString(),
+  const vista = fatto && ACC_PREV.L.find(r => r.id === d.richiestaRiv)?.precedente ? { precedente: null } : {};   // il preventivo aggiornato è partito: le modifiche sono viste
+  store.tabella('richieste_preventivo').update({ stato: fatto ? 'inviato' : 'in_lavorazione', preventivo_id: id, aggiornato: new Date().toISOString(), ...vista,
     risposta: fatto ? `Preventivo N. ${d.numero} del ${fmtD(d.data)}: ${eur(t.totale)} (${t.ivaLabel})` : null }).eq('id', d.richiestaRiv).then(({ error }) => { if (!error) caricaRichiestePrev().then(render); });
 }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#rvRighe, [name="rv_piano"], [name="rv_asc"], [name="rv_tiro"]')) aggiornaStimaRiv(); });
@@ -975,6 +1046,14 @@ document.addEventListener('click', async e => {
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
+    case 'rivPrevMod': { const r = (RIV.prev || []).find(x => x.id === id); if (r) sheetPrevRiv(r); break; }
+    case 'richPrevVista': {
+      b.disabled = true;
+      const { error } = await store.tabella('richieste_preventivo').update({ precedente: null }).eq('id', id);
+      if (error) { b.disabled = false; toast('Non sono riuscito a segnarlo, riprova'); break; }
+      b.closest('.modrich')?.remove();
+      await caricaRichiestePrev(); render(); break;
+    }
     case 'rvAdd': $('#rvRighe').insertAdjacentHTML('beforeend', rigaPrevRiv(LISTINO_RIV())); break;
     case 'rvRm': { const box = $('#rvRighe'); if (box.children.length > 1) b.closest('.prevriga').remove(); else b.closest('.prevriga').querySelectorAll('select,input').forEach(x => { x.value = ''; }); aggiornaStimaRiv(); break; }
     case 'listinoPdf': { if (S.impostazioni?.accessi?.listinoPdf && await apriPdfRemoto(`${store.owner()}/listino-rivenditori.pdf`, 'Listino rivenditori.pdf')) break; const L = LIST(); await pdfListino(L, AZ(), `Listino posa ${L.anno || ''}.pdf`); break; }
@@ -2362,7 +2441,7 @@ function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = body;
   onSubmit = submit; sheetDel = del;
-  $('#sheetFoot').innerHTML = `${del ? `<button type="button" class="btn danger" data-act="del">Elimina</button>` : ''}${extra}<span class="sp"></span><button type="button" class="btn" data-act="close">${submit ? 'Annulla' : 'Chiudi'}</button>${submit ? `<button type="submit" class="btn primary" id="saveBtn">${saveLabel}</button>` : ''}`;
+  $('#sheetFoot').innerHTML = `${del ? `<button type="button" class="btn danger" data-act="del">Elimina</button>` : ''}${extra}<span class="sp"></span><button type="button" class="btn" data-act="close">${submit ? 'Annulla' : 'Chiudi'}</button>${submit ? `<button type="submit" class="btn primary" id="saveBtn" data-l="${esc(saveLabel)}">${saveLabel}</button>` : ''}`;
   $('#sheet').hidden = false;
   aggiornaCliInfo();
   $('#sheetBody').scrollTop = 0;
@@ -2376,7 +2455,7 @@ $('#sheetForm').addEventListener('submit', async e => {
   if (bad) { bad.focus(); toast('Compila: ' + (bad.closest('label')?.querySelector('span')?.textContent || 'campo obbligatorio')); return; }
   const b = $('#saveBtn'); if (b) { b.disabled = true; b.textContent = 'Salvo…'; }
   try { await onSubmit(new FormData(form), form); closeSheet(); render(); }
-  catch (err) { console.warn(err); toast(err.userMsg || 'Non sono riuscito a salvare, riprova.'); if (b) { b.disabled = false; b.textContent = 'Salva'; } }
+  catch (err) { console.warn(err); toast(err.userMsg || 'Non sono riuscito a salvare, riprova.'); if (b) { b.disabled = false; b.textContent = b.dataset.l || 'Salva'; } }
 });
 const F = (label, inner, cls = '') => `<label class="f ${cls}"><span>${label}</span>${inner}</label>`;
 const inp = (name, val, type = 'text', extra = '') => `<input id="f_${name}" name="${name}" type="${type}" value="${esc(val ?? '')}" ${type === 'number' ? 'step="any" inputmode="decimal"' : ''} ${extra}>`;
@@ -2945,6 +3024,7 @@ function sheetPrev(p) {
   prevFirmato = p.firmato || null;
   const c = p.cliente || {};
   openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
+    ${p.richiestaRiv ? novitaPrevHtml(p.richiestaRiv) : ''}
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
     ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
     <div class="fieldset"><span class="fs-t">Cliente</span>

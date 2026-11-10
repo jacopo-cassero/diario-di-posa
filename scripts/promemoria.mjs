@@ -94,7 +94,9 @@ async function segnaNotificato(tab, ids) {
 const nuoveRich = await leggiSeEsiste('/richieste_accesso?notificato=eq.false&stato=eq.nuova&select=id,titolare,nome,azienda,ruolo');
 const nuovePren = await leggiSeEsiste('/prenotazioni?notificato=eq.false&stato=eq.richiesta&select=id,titolare,data,data_fine,tipo,cliente,rivenditore');
 const nuoviPrev = await leggiSeEsiste('/richieste_preventivo?notificato=eq.false&stato=eq.nuova&select=id,titolare,rivenditore,indirizzo,cliente,righe');
-const membri = (nuoveRich?.length || nuovePren?.length || nuoviPrev?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
+// richieste di preventivo che il rivenditore ha modificato dopo averle mandate (o a cui ha aggiunto foto)
+const modPrev = await leggiSeEsiste('/richieste_preventivo?modifica_notificata=eq.false&stato=neq.chiusa&select=id,titolare,rivenditore,cliente,indirizzo,telefono,piano,ascensore,tiro,righe,note,precedente');
+const membri = (nuoveRich?.length || nuovePren?.length || nuoviPrev?.length || modPrev?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
 const dataIt = s => new Date(s + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
 for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuoviPrev || [])].map(x => x.titolare))) {
   const R = (nuoveRich || []).filter(x => x.titolare === tit), P = (nuovePren || []).filter(x => x.titolare === tit), Q = (nuoviPrev || []).filter(x => x.titolare === tit);
@@ -111,6 +113,18 @@ for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuovi
   await segnaNotificato('prenotazioni', P.map(x => x.id));
   await segnaNotificato('richieste_preventivo', Q.map(x => x.id));
   scrivi(`Accessi: ${R.length} richieste e ${P.length} prenotazioni segnalate`);
+}
+
+// Richieste di preventivo modificate: un avviso al titolare, con chi l'ha modificata e per quale cantiere.
+const soloFoto = q => { const p = q.precedente || {}; return !!p.foto && ['cliente', 'indirizzo', 'telefono', 'piano', 'ascensore', 'note'].every(k => String(p[k] ?? '').trim() === String(q[k] ?? '').trim()) && !!p.tiro === !!q.tiro && JSON.stringify(p.righe || []) === JSON.stringify(q.righe || []); };
+for (const tit of new Set((modPrev || []).map(x => x.titolare))) {
+  const M = modPrev.filter(x => x.titolare === tit);
+  const righe = M.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'} ${soloFoto(q) ? 'ha aggiunto foto' : 'ha modificato la richiesta'}: ${[q.cliente, q.indirizzo].filter(Boolean).join(' · ') || 'preventivo'}`; });
+  const titolo = M.length === 1 ? (soloFoto(M[0]) ? 'Nuove foto in una richiesta di preventivo' : 'Richiesta di preventivo modificata') : `${M.length} richieste di preventivo modificate`;
+  const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#richieste', tag: `prevmod-${Date.now()}` });
+  for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);
+  await fetch(`${base}/richieste_preventivo?id=in.(${M.map(x => x.id).join(',')})`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ modifica_notificata: true }) }).catch(() => {});
+  scrivi(`Preventivi: ${M.length} ${M.length === 1 ? 'richiesta modificata segnalata' : 'richieste modificate segnalate'}`);
 }
 
 // Avvisi al rivenditore: prenotazione confermata, spostata, rifiutata o annullata; preventivo pronto o richiesta chiusa.
