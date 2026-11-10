@@ -731,7 +731,7 @@ function sheetPrevRiv(r = null) {
       ${F('Luogo del cantiere', inp('rv_luogo', r?.indirizzo || '', 'text', 'placeholder="Comune e indirizzo"'))}
       <div class="g2">${F('Cliente finale', inp('rv_cliente', r?.cliente || '', 'text', 'placeholder="Facoltativo"'))}${F('Telefono', inp('rv_tel', r?.telefono || '', 'tel', 'placeholder="Facoltativo"'))}</div>
       <div class="g2">${F('Piano', sel('rv_piano', piani.map(p => [p, p]), r?.piano || 'Piano terra'))}${F('Ascensore', sel('rv_asc', [['', '—'], ['Sì', 'Sì'], ['No', 'No']], r?.ascensore || ''))}</div>
-      ${tog('rv_tiro', 'Serve il tiro al piano', !!r?.tiro, 'si segna da solo se il piano è alto e non c\'è ascensore')}
+      ${tog('rv_tiro', 'Serve il tiro al piano', !!r?.tiro)}
     </div>
     <div class="fieldset"><span class="fs-t">Tipologie e quantità</span>
       <div id="rvRighe" class="stack">${r?.righe?.length ? r.righe.map(x => rigaPrevRiv(L, x)).join('') : rigaPrevRiv(L) + rigaPrevRiv(L)}</div>
