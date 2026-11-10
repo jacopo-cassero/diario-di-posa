@@ -50,7 +50,6 @@ export function oreGiornata(g) {
   const m = t => { const [h, mm] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
   return Math.max(0, Math.round((m(g.fine) - m(g.inizio) - n2(g.pausa)) / 60 * 100) / 100);
 }
-const GIORNI_SETT = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
 
 /**
  * Elenco delle cose da fare.
@@ -130,62 +129,6 @@ export function promemoria(S, today = oggi(), momento = 'app') {
   return out;
 }
 
-/** Lettura semplice dello scontrino dal testo riconosciuto (OCR). */
-export function leggiScontrino(testo, nomiMagazzino = []) {
-  const righe = testo.split(/\r?\n/).map(r => r.trim()).filter(Boolean);
-  const amountRe = /(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+[.,]\d{2})(?!\d)/g;
-  const toNum = s => n2(s.replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
-  let totale = 0;
-  for (const r of righe) {
-    if (/tot(ale)?|importo pagato|pagamento|contanti|da pagare/i.test(r) && !/sub ?tot|iva|imponibile|resto/i.test(r)) {
-      const m = r.match(amountRe); if (m) totale = Math.max(totale, ...m.map(toNum));
-    }
-  }
-  if (!totale) { const all = testo.match(amountRe) || []; totale = all.length ? Math.max(...all.map(toNum).filter(x => x < 100000)) : 0; }
-
-  let data = null;
-  const dm = testo.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
-  if (dm) {
-    let [, g, m, a] = dm; if (a.length === 2) a = '20' + a;
-    if (+m >= 1 && +m <= 12 && +g >= 1 && +g <= 31) data = `${a}-${String(m).padStart(2, '0')}-${String(g).padStart(2, '0')}`;
-  }
-  const fornitore = (righe.find(r => /[a-zà-ù]{3,}/i.test(r) && (r.match(/\d/g) || []).length < 4) || '').replace(/[^\p{L}\p{N} .,&'-]/gu, '').trim().slice(0, 60);
-  const numero = (testo.match(/(?:\bn\.|\bnum(?:ero)?\.?|\bfattura|\bscontrino)\s*(?:n\.)?\s*[:#]?\s*([A-Z0-9\/-]*\d[A-Z0-9\/-]*)/i) || [])[1] || '';
-
-  const low = testo.toLowerCase();
-  let categoria = 'altro';
-  if (/gasolio|diesel|benzina|carburant|self ?service|adblue|\bgpl\b/.test(low)) categoria = 'carburante';
-  else if (/officina|tagliando|revisione|assicuraz|bollo auto|pneumatic|gommist|ricambi auto/.test(low)) categoria = 'furgone';
-  else if (/silicon|schiuma|poliuretan|vit[ei]\b|tassell|guarnizion|nastro|sigillant|cune[io]|spessor|staff[ae]|coprifil|primer|ferramenta|edil/.test(low)) categoria = 'materiale';
-  else if (/punt[ae] |disco|dischi|trapan|avvitator|utensil|scala|livella/.test(low)) categoria = 'attrezzatura';
-
-  const mat = [];
-  if (categoria === 'materiale') {
-    const kw = /silicon|schiuma|poliuretan|vit[ei]|tassell|guarnizion|nastro|sigillant|cune|spessor|staff|coprifil|primer/i;
-    let attesa = null; // nome su una riga, prezzo sulla riga dopo
-    for (const r of righe) {
-      const known = nomiMagazzino.find(n => n.length > 3 && r.toLowerCase().includes(n.toLowerCase().split(' ')[0]));
-      const am = r.match(amountRe);
-      const qm = r.match(/(\d+)\s*[xX*]\s*(\d+[.,]\d{2})/);
-      const soloNumeri = !/[a-zà-ù]{3,}/i.test(r.replace(/\b[xX]\b/g, ''));
-      if (am && soloNumeri && attesa) {
-        const tot = toNum(am[am.length - 1]); const qta = qm ? +qm[1] : 1;
-        mat.push({ nome: attesa, qta, unita: 'pz', prezzoUnit: Math.round(tot / qta * 100) / 100 });
-        attesa = null; continue;
-      }
-      if (!kw.test(r) && !known) { attesa = null; continue; }
-      let nome = known || r.replace(amountRe, '').replace(/(\d+)\s*[xX*]\s*(?=\d+[.,]\d{2})/, '').replace(/[^\p{L}\p{N} .,x\/-]/gu, '').replace(/\s+/g, ' ').trim();
-      nome = nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase();
-      if (nome.length < 3) continue;
-      if (!am) { attesa = nome.slice(0, 50); continue; }
-      const prezzoTot = toNum(am[am.length - 1]);
-      const qta = qm ? +qm[1] : 1;
-      mat.push({ nome: nome.slice(0, 50), qta, unita: 'pz', prezzoUnit: Math.round(prezzoTot / qta * 100) / 100 });
-      attesa = null;
-    }
-  }
-  return { data, fornitore, numero, totale, categoria, descrizione: '', righe: mat.slice(0, 15) };
-}
 
 /* ---------- orari di pose e interventi ---------- */
 export const TUTTO_GIORNO = ['08:00', '18:00'];
@@ -214,29 +157,4 @@ export function ritmoKm(S, today = oggi()) {
   if (L.length < 2) return 0;
   const gg = daysBetween(L[0][0], L[L.length - 1][0]), km = L[L.length - 1][1] - L[0][1];
   return gg >= 7 && km > 0 ? km / gg : 0;
-}
-/** Consumo medio (km/l) dai pieni con km e litri. */
-export function consumoMedio(S) {
-  const L = (S.movimenti || []).filter(m => m.categoria === 'carburante' && n2(m.km) > 0).sort((a, b) => n2(a.km) - n2(b.km));
-  if (L.length < 2) return 0;
-  const litri = L.slice(1).reduce((a, m) => a + n2(m.litri), 0), km = n2(L[L.length - 1].km) - n2(L[0].km);
-  const c = litri > 0 && km > 0 ? km / litri : 0;
-  return c >= 4 && c <= 25 ? c : 0; // fuori da questi valori mancano dei pieni: meglio non mostrarlo
-}
-/** Litri e km letti da uno scontrino del carburante (se ci sono). */
-export function leggiCarburante(testo) {
-  const t = String(testo || '');
-  const lm = t.match(/(\d{1,3}[.,]\d{2,3})\s*(?:lt\b|l\b|litri)/i) || t.match(/(?:litri|lt\.?|quantit[aà])\s*[:=]?\s*(\d{1,3}[.,]\d{2,3})/i);
-  const km = t.match(/\b(?:km|chilometri|odometro)\s*[:.=]?\s*(\d{1,3}(?:[.\s]?\d{3})+|\d{4,7})\b/i);
-  return { litri: lm ? n2(lm[1].replace(',', '.')) : 0, km: km ? n2(km[1].replace(/[.\s]/g, '')) : 0 };
-}
-/** Categoria di una spesa dal testo del documento. */
-export function categoriaDa(testo) {
-  const low = String(testo || '').toLowerCase();
-  if (/gasolio|diesel|benzina|carburant|self ?service|adblue|\bgpl\b|metano|rifornimento|erogat/.test(low)) return 'carburante';
-  if (/officina|tagliando|revisione|assicuraz|bollo auto|pneumatic|gommist|ricambi auto|autoriparaz|carrozzeria|cambio olio|filtro olio/.test(low)) return 'furgone';
-  if (/telefon|cellulare|tim\b|vodafone|wind|iliad|fastweb|cancelleria|toner|stampant/.test(low)) return 'telefono';
-  if (/silicon|schiuma|poliuretan|vit[ei]\b|tassell|guarnizion|nastro|sigillant|cune[io]|spessor|staff[ae]|coprifil|primer|ferramenta|edil|serrament|controtelai/.test(low)) return 'materiale';
-  if (/punt[ae] |disco|dischi|trapan|avvitator|utensil|scala|livella|smerigliatric|batteria makita|dewalt|hilti|bosch/.test(low)) return 'attrezzatura';
-  return 'altro';
 }

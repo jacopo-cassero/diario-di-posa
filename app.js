@@ -1,9 +1,8 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, leggiScontrino, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm, consumoMedio, leggiCarburante, categoriaDa } from './logica.js';
+import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino, creaRapporto } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
 import { POSIZIONI } from './moduli-posizioni.js';
-import { xmlDaFile, leggiFatturaXml, leggiFatturaTesto } from './fatture-fornitori.js';
 import { creaCalendario } from './calendario-ics.js';
 import { createStore } from './store.js';
 
@@ -135,7 +134,6 @@ store.onAccessi = () => caricaAccessi(true);
 const dipendenti = () => ACC.membri.filter(m => m.ruolo === 'dipendente' && m.stato === 'attivo');
 const nomeMembro = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.nome || m.email) : 'Dipendente'; };
 const nRichieste = () => ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(richDaGuardare).length;
-const daFareAccessi = () => ACC.richieste.length + ACC.pren.filter(p => p.stato === 'richiesta').length + ACC_PREV.L.filter(richDaGuardare).length;
 
 /** Avviso in cima al calendario quando ci sono richieste da guardare. */
 function avvisoAccessi() {
@@ -1442,7 +1440,6 @@ async function caricaImmagini() {
     try { const r = await fetch(f); if (r.ok) IMG[k] = new Uint8Array(await r.arrayBuffer()); } catch {}
   }
 }
-const costoMat = list => sum(list || [], m => n2(m.qta) * prezzoMat(m.nome));
 
 /* ---------- render ---------- */
 function render() {
@@ -1476,7 +1473,7 @@ function render() {
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
   h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
-  hydrateFiles($('#main')); hydrateFotoRich($('#main'));
+  hydrateFiles($('#main')); hydrateFotoRich($('#main')); if (UI.tab === "set") caricaBackup();
 }
 async function hydrateFiles(root) {
   for (const img of root.querySelectorAll('img[data-file]')) {
@@ -2374,8 +2371,7 @@ function descrGiorni(g) {
 
 /* ---------- menu laterale ---------- */
 function menuHtml() {
-  const N = IMP().notifiche, G = IMP().giornata, A = IMP().analisi;
-  const attive = Object.values(A).filter(Boolean).length, tot = Object.keys(A).length;
+  const N = IMP().notifiche, G = IMP().giornata;
   const st = store.st;
   const item = (act, arg, icon, label, sub = '', on = false) => `<button class="dr-item ${on ? 'on' : ''}" data-act="${act}" data-arg="${arg}" type="button">${svg(icon)}<span>${label}${sub ? `<small>${sub}</small>` : ''}</span></button>`;
   return `<div class="dr-head"><div><img class="dr-logo" src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
@@ -2390,10 +2386,8 @@ function menuHtml() {
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
   ${item('setNotifiche', '', 'bell', 'Notifiche e promemoria', [N.mattino ? `mattino ${N.oraMattino}:00` : '', N.sera ? `sera ${N.oraSera}:00` : ''].filter(Boolean).join(' · ') || 'disattivate')}
   ${item('setGiornata', '', 'clock', 'Giornata e orari', `${G.inizio}–${G.fine} · ${descrGiorni(G.giorni)} · ${num(oreGiornata(G))} ore`)}
-  ${item('setAnalisi', '', 'an', 'Statistiche da mostrare', `${attive} di ${tot} attive`)}
   ${item('editListino', '', 'prev', 'Listino prezzi', `${LIST().voci.length} voci · trasferta ${eur(euroKm())}/km`)}
   ${item('editAzienda', '', 'doc', 'Dati azienda e condizioni', `IVA predefinita: ${ivaOf(AZ().ivaPredefinita)[1]}`)}
-  ${item('editVan', '', 'van', 'Dati del furgone', S.furgone?.targa ? esc(S.furgone.targa) : 'targa e scadenze')}
   ${item('menuGo', 'set', 'folder', 'Cartelle, account e installazione', '')}
   <div class="dr-foot small muted">${st.mode === 'demo' ? '' : st.online ? 'Dati sincronizzati sui tuoi dispositivi' : 'Offline: le modifiche partono appena torna la rete'}</div>`;
 }
@@ -2611,10 +2605,25 @@ function pushState() {
   if (!CFG.vapidPublicKey || store.st.mode === 'demo') return 'notready';
   return Notification.permission;
 }
+/** Elenco dei backup notturni nella cartella privata del titolare. */
+async function caricaBackup() {
+  const box = $('#backupLista'); if (!box || store.st.mode === 'demo' || box.dataset.ok) return;
+  box.dataset.ok = '1';
+  try {
+    const L = (await store.elencoFile(`${store.owner()}/backup`)).filter(f => /^backup-.*\.json$/.test(f.nome)).reverse();
+    box.innerHTML = L.length ? L.slice(0, 7).map((f, i) => { const m = f.nome.match(/backup-(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})/); return `<div class="row between"><span>${i === 0 ? '<b>Ultimo:</b> ' : ''}${m ? `${+m[3]}/${+m[2]}/${m[1]} alle ${m[4]}:${m[5]}` : esc(f.nome)}</span><button type="button" class="btn sm" data-act="backupScarica" data-arg="${esc(f.path)}">Scarica</button></div>`; }).join('') + (L.length > 7 ? `<span class="muted">e altri ${L.length - 7} più vecchi</span>` : '')
+      : '<span class="muted">Il primo backup automatico arriva stanotte.</span>';
+  } catch { box.innerHTML = '<span class="muted">Non riesco a leggere i backup: controlla la rete.</span>'; box.dataset.ok = ''; }
+}
 function rSet() {
   const ps = pushState();
   const L = [...S.cartelle].sort((a, b) => String(a.nome).localeCompare(b.nome));
   return `<div class="row between"><h2>Cartelle e impostazioni</h2></div>
+  <section class="stack"><h3>Backup dei dati</h3>
+    <div class="panel stack"><div class="small muted">Ogni notte l'app salva una copia di tutti i dati (lavori, interventi, clienti, preventivi, consuntivi, moduli, accessi) nella tua cartella privata e tiene le ultime 30. Foto e PDF restano salvati dove sono. Puoi anche scaricare una copia adesso e tenerla sul computer.</div>
+      <div id="backupLista" class="stack small"><span class="muted">${store.st.mode === 'demo' ? 'Nella modalità prova i backup non ci sono.' : 'Carico l\'elenco…'}</span></div>
+      <div class="row"><button class="btn sm primary" data-act="backupOra" type="button">${svg('doc', 'i')} Scarica una copia adesso</button></div></div>
+  </section>
   <section class="stack"><h3>Calendario sull'iPhone e cantieri</h3>
     ${boxCalendario()}
     <button class="btn" data-act="menuGo" data-arg="cantieri" type="button">${svg('pin')} Tutti gli indirizzi dei cantieri</button>
@@ -3041,46 +3050,6 @@ function sheetCons(kind, id) {
 const stripId = o => { const { id, ...r } = o; return r; };
 
 /* movimento */
-function sheetMov(m, prefill) {
-  const isNew = !m; m = m || { tipo: 'uscita', data: TODAY, categoria: 'materiale', ...(prefill || {}) };
-  openSheet(isNew ? 'Nuova spesa' : 'Spesa', `
-    ${m._preview ? `<img class="receipt" src="${m._preview}" alt="Foto dello scontrino">` : m.foto ? `<button type="button" data-act="openPath" data-arg="${esc(m.foto)}" style="border:0;background:none;padding:0"><img class="receipt" data-file="${esc(m.foto)}" alt="Foto dello scontrino"></button>` : ''}
-    ${m.documento ? `<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="openPath" data-arg="${esc(m.documento.path)}">${esc(m.documento.nome)}</button></div>` : ''}
-    ${m._fattura ? `<div class="notice small">${m._fattura === 'xml' ? 'Ho letto la fattura elettronica: dati e righe sono quelli del fornitore.' : 'Ho letto il documento in automatico.'} <b>Controlla categoria, importo${m.categoria === 'materiale' ? ' e materiali' : ''}</b> prima di salvare.${m.categoria === 'carburante' && !m.km ? ' <b>Scrivi i km del furgone</b> per gli avvisi del tagliando.' : ''}${m._forf ? ' I prezzi dei materiali comprendono l\'IVA, perché per il forfettario è un costo.' : ''}</div>` : m._letto ? `<div class="notice small">Ho letto lo scontrino in automatico. <b>Controlla importo, data e materiali</b> prima di salvare: la lettura può sbagliare.</div>` : ''}
-    ${m._doppia ? `<div class="notice small bad">Attenzione: hai già registrato una fattura ${esc(m.numero)} di ${esc(m.fornitore)} il ${fmtD(m._doppia)}. Se è la stessa, non salvarla due volte.</div>` : ''}
-    <div class="g2">${F('Tipo', sel('tipo', [['uscita', 'Spesa'], ['entrata', 'Entrata']], m.tipo))}${F('Data', inp('data', m.data, 'date', 'required'))}</div>
-    <div class="g2">${F('Categoria', sel('categoria', CAT, m.categoria))}${F('Importo totale €', inp('importo', m.importo, 'number', 'required'))}</div>
-    <div class="g2">${F('Fornitore', inp('fornitore', m.fornitore))}${F('N. documento', inp('numero', m.numero))}</div>
-    ${F('Descrizione', inp('descrizione', m.descrizione))}
-    <div id="carBox" class="fieldset" ${['carburante', 'furgone'].includes(m.categoria) ? '' : 'hidden'}><span class="fs-t">Furgone</span>
-      <div class="g2">${F('Km del furgone', inp('mkm', m.km || '', 'number', `inputmode="numeric" placeholder="${kmFurgone(S) ? 'ultimo: ' + num(kmFurgone(S), 0) : 'es. 152300'}"`))}<label class="f" id="litriWrap" ${m.categoria === 'carburante' ? '' : 'hidden'}><span>Litri</span>${inp('mlitri', m.litri || '', 'number', 'step="any" inputmode="decimal"')}</label></div>
-      <label class="check" id="tagWrap" ${m.categoria === 'furgone' ? '' : 'hidden'}><input type="checkbox" name="mtagliando" ${m.tagliandoFatto ? 'checked' : ''}> È il tagliando: il prossimo tra ${num(n2(S.furgone?.intervalloKm) || 30000, 0)} km e un anno</label>
-      <div class="small muted">I km aggiornano il furgone: quando ti avvicini al tagliando ti arriva l'avviso.</div>
-    </div>
-    <div id="buyBox" ${m.categoria === 'materiale' ? '' : 'hidden'}>
-      ${matBox(m.righe, true, 'Materiale acquistato (facoltativo)')}
-      <div class="small muted">Serve solo a conoscere il prezzo di ogni materiale, per calcolare quanto costa il materiale usato nei cantieri.</div>
-    </div>`, async fd => {
-    const cat = fd.get('categoria');
-    const righe = cat === 'materiale' ? readMats(fd, true) : [];
-    const d = { tipo: fd.get('tipo'), data: fd.get('data'), categoria: cat, importo: n2(fd.get('importo')), fornitore: fd.get('fornitore').trim(), numero: fd.get('numero').trim(), descrizione: fd.get('descrizione').trim(), righe };
-    if (m.foto) d.foto = m.foto;
-    if (m.documento) d.documento = m.documento;
-    if (['carburante', 'furgone'].includes(cat)) {
-      const km = n2(fd.get('mkm')), litri = cat === 'carburante' ? n2(fd.get('mlitri')) : 0;
-      if (km) d.km = km; if (litri) d.litri = litri;
-      const f = S.furgone || {}, nf = { ...f };
-      if (km > n2(f.km)) nf.km = km;
-      if (cat === 'furgone' && fd.get('mtagliando')) { d.tagliandoFatto = true; const base = km || kmFurgone(S); if (base) nf.tagliandoKm = base + (n2(f.intervalloKm) || 30000); nf.tagliando = addYears(d.data, 1); }
-      if (JSON.stringify(nf) !== JSON.stringify(f)) store.put('cfg', 'furgone', nf);
-    }
-    if (m.esempio) d.esempio = true;
-    store.put('movimenti', isNew ? null : m.id, d);
-    UI.cMonth = d.data.slice(0, 7);
-    toast('Spesa salvata');
-  }, { del: isNew ? null : async () => { if (m.foto) store.removeFile(m.foto).catch(() => {}); if (m.documento) store.removeFile(m.documento.path).catch(() => {}); store.drop('movimenti', m.id); toast('Spesa eliminata'); } });
-}
-
 /* ---------- voci e prezzi dal listino ---------- */
 const UNITA_OPT = [['pz', 'pezzo'], ['ora', 'ore'], ['corpo', 'corpo']];
 function opzioniListino() {
@@ -3956,102 +3925,6 @@ async function shrink(file, max = 1600) {
     return await new Promise(r => c.toBlob(b => r(b || file), 'image/jpeg', .82));
   } catch { return file; }
 }
-let tessP = null;
-function loadTesseract() {
-  if (window.Tesseract) return Promise.resolve();
-  return tessP ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'; s.onload = res; s.onerror = () => { tessP = null; rej(new Error('tesseract')); }; document.head.appendChild(s); });
-}
-/* ---------- fatture dei fornitori ---------- */
-let pdfjsP = null;
-function loadPdfjs() {
-  if (window.pdfjsLib) return Promise.resolve();
-  return pdfjsP ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(); }; s.onerror = () => { pdfjsP = null; rej(new Error('pdfjs')); }; document.head.appendChild(s); });
-}
-/** Testo di un PDF, riga per riga; se è una scansione, legge le prime pagine come foto. */
-async function testoPdf(bytes, passo) {
-  await loadPdfjs();
-  const doc = await window.pdfjsLib.getDocument({ data: bytes }).promise;
-  let out = '';
-  for (let p = 1; p <= Math.min(doc.numPages, 6); p++) {
-    const page = await doc.getPage(p); const c = await page.getTextContent();
-    const righe = new Map();
-    for (const it of c.items) { if (!it.str.trim()) continue; const y = Math.round(it.transform[5] / 3); const L = righe.get(y) || []; L.push([it.transform[4], it.str]); righe.set(y, L); }
-    out += [...righe.entries()].sort((a, b) => b[0] - a[0]).map(([, L]) => L.sort((a, b) => a[0] - b[0]).map(x => x[1]).join(' ')).join('\n') + '\n';
-  }
-  if (out.replace(/\s/g, '').length > 40) return out;
-  // PDF scansionato: lo leggo come immagine
-  passo('Il PDF è una scansione: lo leggo come foto…');
-  await loadTesseract();
-  for (let p = 1; p <= Math.min(doc.numPages, 2); p++) {
-    const page = await doc.getPage(p); const vp = page.getViewport({ scale: 2 });
-    const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
-    await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
-    const { data } = await window.Tesseract.recognize(cv, 'ita'); out += (data.text || '') + '\n';
-  }
-  return out;
-}
-async function caricaFattura(file, mag = false) {
-  if (!file) return;
-  openSheet('Lettura fattura', `<div class="stack" style="align-items:center;padding:20px 0;text-align:center"><div class="spinner"></div><b id="phStep">Apro la fattura…</b><span class="small muted">Fattura elettronica (XML o .p7m), PDF o foto.</span></div>`, null);
-  const passo = t => { const el = $('#phStep'); if (el) el.textContent = t; };
-  const forf = ['fo'].includes(String(AZ().ivaPredefinita));
-  const nome = file.name || 'fattura', ext = (nome.split('.').pop() || '').toLowerCase();
-  let letto = null, documento = null;
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (['xml', 'p7m'].includes(ext) || /xml/.test(file.type)) {
-      passo('Leggo la fattura elettronica…');
-      const xml = xmlDaFile(bytes); if (!xml) throw Object.assign(new Error('xml'), { userMsg: 'Non trovo la fattura dentro il file: prova con il PDF' });
-      letto = leggiFatturaXml(xml, { forfettario: forf });
-      letto.categoria = categoriaDa([letto.fornitore, ...letto.righe.map(r => r.nome)].join(' '));
-      if (letto.categoria === 'carburante') letto.litri = letto.righe.filter(r => /^l/i.test(r.unita) || /gasolio|benzina|diesel/i.test(r.nome)).reduce((a, r) => a + r.qta, 0);
-    } else if (ext === 'pdf' || file.type === 'application/pdf') {
-      passo('Leggo il PDF…');
-      const testo = await testoPdf(bytes.slice(), passo);
-      letto = { ...leggiFatturaTesto(testo, { forfettario: forf }), categoria: categoriaDa(testo), ...leggiCarburante(testo) };
-    } else if (file.type.startsWith('image/')) {
-      passo('Leggo la foto…');
-      await loadTesseract(); const { data } = await window.Tesseract.recognize(await shrink(file, 2400), 'ita');
-      const testo = data.text || '', sc = leggiScontrino(testo, nomiMateriale()), ft = leggiFatturaTesto(testo, { forfettario: forf });
-      letto = { ...sc, ...ft, fornitore: ft.fornitore || sc.fornitore, numero: ft.numero || sc.numero, data: ft.data || sc.data, totale: ft.totale || sc.totale, righe: ft.righe.length ? ft.righe : sc.righe, tipo: 'testo', categoria: categoriaDa(testo), ...leggiCarburante(testo) };
-    } else throw Object.assign(new Error('tipo'), { userMsg: 'Formato non riconosciuto: usa XML, .p7m, PDF o una foto' });
-  } catch (e) { console.warn(e); toast(e.userMsg || 'Non sono riuscito a leggere la fattura: compila a mano'); }
-  try { passo('Salvo il documento…'); const blob = file.type.startsWith('image/') ? await shrink(file, 2400) : file; documento = { path: await store.uploadFile(blob, nome), nome: nome.slice(0, 80), tipo: file.type }; }
-  catch (e) { toast(e.userMsg || 'Documento non salvato: lo puoi allegare dopo'); }
-  const L = letto || { righe: [] };
-  const doppia = L.numero && S.movimenti.find(x => x.numero && x.numero.trim().toLowerCase() === L.numero.trim().toLowerCase() && normNome(x.fornitore) === normNome(L.fornitore));
-  const cat = L.categoria && L.categoria !== 'altro' ? L.categoria : (L.righe || []).length ? 'materiale' : (mag ? 'materiale' : 'altro');
-  sheetMov(null, {
-    categoria: cat, documento, _fattura: letto ? letto.tipo : '', _forf: forf && cat === 'materiale' && L.righe.length > 0, _doppia: doppia ? doppia.data : '',
-    data: L.data && L.data <= TODAY ? L.data : TODAY, importo: L.totale || '', fornitore: L.fornitore || '', numero: L.numero || '', km: L.km || '', litri: L.litri ? Math.round(L.litri * 100) / 100 : '',
-    descrizione: cat === 'carburante' ? 'Carburante' : L.numero ? `Fattura ${L.numero}` : '',
-    righe: cat !== 'materiale' ? [] : (L.righe || []).map(r => ({ nome: nomiMateriale().find(n => normNome(n) === normNome(r.nome)) || r.nome, qta: r.qta, unita: r.unita, prezzoUnit: r.prezzoUnit })),
-  });
-  if (letto && !L.righe.length) toast('Non ho trovato le righe dei materiali: aggiungile a mano');
-}
-async function onPhoto(file) {
-  if (!file) return;
-  openSheet('Lettura scontrino', `<div class="stack" style="align-items:center;padding:20px 0;text-align:center"><div class="spinner"></div><b id="phStep">Preparo la foto…</b><span class="small muted">La prima volta servono circa 30 secondi, poi è più veloce.</span></div>`, null);
-  const blob = await shrink(file);
-  const preview = URL.createObjectURL(blob);
-  let foto = null, letto = null;
-  try { foto = await store.uploadFile(blob, 'scontrino.jpg'); } catch (e) { toast(e.userMsg || 'Foto non salvata: la allego quando torna la rete'); }
-  if (navigator.onLine) {
-    try {
-      const st = $('#phStep'); if (st) st.textContent = 'Leggo lo scontrino…';
-      await loadTesseract();
-      const { data } = await window.Tesseract.recognize(blob, 'ita');
-      letto = { ...leggiScontrino(data.text || '', nomiMateriale()), ...leggiCarburante(data.text) };
-    } catch (e) { console.warn(e); toast('Lettura automatica non riuscita: compila a mano'); }
-  }
-  const ok = letto && (letto.totale || letto.fornitore);
-  sheetMov(null, {
-    foto, _preview: preview, _letto: !!ok, categoria: ok && letto.categoria !== 'altro' ? letto.categoria : 'materiale',
-    data: ok && letto.data && letto.data <= TODAY ? letto.data : TODAY,
-    importo: ok ? letto.totale || '' : '', fornitore: ok ? letto.fornitore : '', numero: ok ? letto.numero : '', descrizione: '', km: letto?.km || '', litri: letto?.litri || '',
-    righe: ok ? letto.righe : [],
-  });
-}
 
 
 /* cartelle */
@@ -4122,18 +3995,6 @@ function advance(kind, id) {
   store.put(kind, id, { ...stripId(x), amm: nx }); toast(ammOf(nx)[1]);
 }
 
-/* esportazione CSV */
-function csv(kind) {
-  const q = v => { const s = String(v ?? ''); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const it = v => String(+v || 0).replace('.', ',');
-  let rows;
-  if (kind === 'movimenti') rows = [['Data', 'Tipo', 'Categoria', 'Fornitore', 'N. documento', 'Descrizione', 'Importo']].concat([...S.movimenti].sort((a, b) => String(a.data).localeCompare(b.data)).map(m => [m.data, m.tipo, catName(m.categoria), m.fornitore, m.numero, m.descrizione || (m.righe || []).map(r => r.nome).join(', '), it(m.importo)]));
-  else rows = [['Data', 'Cliente', 'Indirizzo', 'Lavoro', 'Pezzi', 'Ore', 'Importo', 'Situazione']].concat([...S.lavori].sort((a, b) => String(a.data).localeCompare(b.data)).map(l => [l.data, l.cliente, l.indirizzo, l.installato, l.pezzi, it(l.ore), it(l.importo), ammOf(l.amm)[1]]));
-  const blob = new Blob(['﻿' + rows.map(r => r.map(q).join(';')).join('\n')], { type: 'text/csv;charset=utf-8' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${kind === 'movimenti' ? 'spese' : 'lavori'}-${TODAY}.csv` });
-  document.body.appendChild(a); a.click(); a.remove();
-}
-
 /* dati di esempio */
 function seed() {
   const d = n => { const x = pd(TODAY); x.setDate(x.getDate() + n); return iso(x); };
@@ -4143,8 +4004,6 @@ function seed() {
     { data: d(-20), fornitore: 'Ferramenta Bianchi', importo: 110.7, righe: [{ nome: 'Schiuma poliuretanica', qta: 8, unita: 'bomboletta', prezzoUnit: 7.9 }, { nome: 'Nastro autoespandente', qta: 5, unita: 'rotolo', prezzoUnit: 9.5 }] },
     { data: d(-12), fornitore: 'Edilcolor', importo: 54, righe: [{ nome: 'Viti 6x80 telaio', qta: 300, unita: 'pz', prezzoUnit: .18 }] }];
   for (const b of buys) store.put('movimenti', null, { tipo: 'uscita', categoria: 'materiale', numero: '', descrizione: 'Materiale di consumo', ...b, ...ex });
-  store.put('movimenti', null, { tipo: 'uscita', data: d(-5), categoria: 'carburante', importo: 85, fornitore: 'Distributore', numero: '', descrizione: 'Gasolio', righe: [], ...ex });
-  store.put('movimenti', null, { tipo: 'uscita', data: d(-30), categoria: 'furgone', importo: 240, fornitore: 'Officina Rossi', numero: '', descrizione: 'Tagliando furgone', righe: [], ...ex });
   const lav = [
     { data: d(-15), cliente: 'Impresa Edil Nord', indirizzo: 'Via Nizza 120, Torino', installato: '6 finestre PVC 120×140 con controtelaio', righe: [{ voce: 'fin', descr: 'Finestra', qta: 6, unita: 'pz', prezzo: 80 }], pezzi: 6, ore: 9, importo: 720, materiali: [{ nome: 'Schiuma poliuretanica', qta: 3 }, { nome: 'Silicone neutro bianco', qta: 4 }, { nome: 'Viti 6x80 telaio', qta: 48 }], amm: 'fatt' },
     { data: d(-8), cliente: 'Famiglia Ferrero', indirizzo: 'Corso Francia 45, Collegno', installato: '2 portefinestre alluminio + 2 persiane', righe: [{ voce: 'pf', descr: 'Portafinestra', qta: 2, unita: 'pz', prezzo: 90 }, { voce: 'ptf', descr: 'Persiana telaio finestra', qta: 2, unita: 'pz', prezzo: 40 }], pezzi: 4, ore: 7.5, importo: 560, materiali: [{ nome: 'Schiuma poliuretanica', qta: 2 }, { nome: 'Nastro autoespandente', qta: 2 }, { nome: 'Viti 6x80 telaio', qta: 24 }], amm: 'cons' },
@@ -4183,9 +4042,7 @@ document.addEventListener('click', async e => {
   switch (a) {
     case 'tab': if (arg === 'cli' && UI.tab === 'cli') UI.cliApri = null; UI.tab = arg; try { history.replaceState(null, '', '#' + arg); } catch {} go(); break;
     case 'fatt': UI.tab = 'cons'; go(); break;
-    case 'mag': UI.tab = 'an'; go(); break;
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
-    case 'cMonth': UI.cMonth = shiftMonth(UI.cMonth, +arg); render(); break;
     case 'day':
       if (UI.sel && UI.tab === 'cal') { UI.sel.has(arg) ? UI.sel.delete(arg) : UI.sel.add(arg); UI.day = arg; render(); break; }
       UI.tab = 'cal'; UI.day = arg; UI.month = arg.slice(0, 7); render(); break;
@@ -4294,6 +4151,15 @@ document.addEventListener('click', async e => {
         toast(senza ? 'Segnato: resta tra quelli da programmare' : sov ? `Riprogrammato. Attenzione: si sovrappone a ${sov}` : `Riprogrammato al ${fmtD(nd, { weekday: 'long', day: 'numeric', month: 'long' })}`);
       }, { saveLabel: 'Riprogramma' });
       break;
+    }
+    case 'backupScarica': scaricaFile(arg, arg.split('/').pop()); break;
+    case 'backupOra': {
+      // copia locale di tutto quello che l'app ha in memoria (gli stessi dati del database)
+      const dati = { app: 'Diario di Posa', versione: 1, creato: new Date().toISOString(), copiaDa: 'app', dati: JSON.parse(JSON.stringify(S)), accessi: GESTORE() ? { membri: ACC.membri, prenotazioni: ACC.pren, richieste_preventivo: ACC_PREV.L } : null };
+      const blob = new Blob([JSON.stringify(dati)], { type: 'application/json' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `Diario di Posa - backup ${TODAY}.json` });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      toast('Copia scaricata: tienila sul computer o in iCloud'); break;
     }
     case 'seg': UI.seg = arg; render(); break;
     case 'authView': UI.authView = arg; UI.authErr = ''; UI.authMsg = ''; render(); break;
@@ -4475,8 +4341,7 @@ document.addEventListener('click', async e => {
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per ripristinare i prezzi originali'; break; }
       store.drop('cfg', 'listino'); closeSheet(); render(); toast('Listino 2027 ripristinato'); break;
     case 'unseed': unseed(); render(); break;
-    case 'csv': csv(arg); break;
-    case 'pushOn': case 'pushTest': pushOn(); break;
+    case 'pushOn': pushOn(); break;
     case 'logout': await store.logout(); UI.tab = 'cal'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '', listino: null, listinoCarico: false, prev: null }); UI.rivTab = 'cal'; RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
   }
 });
@@ -4490,8 +4355,6 @@ document.addEventListener('change', e => {
   if (t.id === 'f_stato' && $('#f_dataProg') && t.value === 'aperto' && $('#f_dataProg').value) { $('#f_dataProg').value = ''; const r = $('#togliDataRow'); if (r) r.hidden = true; toast('Data tolta: resta in «Da programmare»'); }
   if (t.id === 'f_dataProg' && $('#f_stato')) { const r = $('#togliDataRow'); if (r) r.hidden = !t.value; if (t.value && $('#f_stato').value === 'aperto') $('#f_stato').value = 'programmato'; if (!t.value && $('#f_stato').value === 'programmato') $('#f_stato').value = 'aperto'; }
   if (t.classList?.contains('intChk') && UI.intSel) { const d = $('#intSelData')?.value; UI.intSel[t.checked ? 'add' : 'delete'](t.dataset.id); render(); if (d && $('#intSelData')) $('#intSelData').value = d; return; }
-  if (t.id === 'fatturaIn' || t.id === 'fatturaIn2') { const f = t.files && t.files[0]; t.value = ''; caricaFattura(f, t.id === 'fatturaIn2'); return; }
-  if (t.id === 'photo') { const f = t.files && t.files[0]; t.value = ''; onPhoto(f); return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
   if (t.id === 'f_oraInizio' && $('#f_oraFine') && !$('#f_oraFine').value && t.value) { const h = Math.min(+t.value.slice(0, 2) + 2, 23); $('#f_oraFine').value = `${String(h).padStart(2, '0')}${t.value.slice(2)}`; }
