@@ -70,6 +70,22 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       `DESCRIPTION:${esc([x.descrizione, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
     ]);
   }
+  // giorni in cui sono già passato per un intervento non finito
+  for (const x of S.interventi || []) {
+    if (x.stato === 'annullato' || !Array.isArray(x.visite)) continue;
+    for (const v of x.visite) {
+      if (!v?.data || v.data < limite || v.data === x.dataProg) continue;
+      const [a, b] = String(v.ora || '').split('-');
+      const inizio = hm(a || G.inizio), fine = b ? hm(b) : `${pad(Math.min(+inizio.slice(0, 2) + 2, 23))}${inizio.slice(2)}`;
+      evento(`int-${x.id}-${v.data}`, [
+        `SUMMARY:${esc(`Intervento · ${x.cliente || 'Cliente'}${x.riferimento ? ' · ' + x.riferimento : ''} (non finito)`)}`,
+        `DTSTART;TZID=Europe/Rome:${compatto(v.data)}T${inizio}`,
+        `DTEND;TZID=Europe/Rome:${compatto(v.data)}T${fine}`,
+        ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
+        `DESCRIPTION:${esc([x.descrizione, v.nota && 'Da completare: ' + v.nota, x.dataProg && 'Si torna il ' + x.dataProg.split('-').reverse().join('/')].filter(Boolean).join('\n'))}`,
+      ]);
+    }
+  }
   for (const x of S.eventi || []) {
     if (!x.data) continue;
     const fine = x.dataFine && x.dataFine > x.data ? x.dataFine : x.data;

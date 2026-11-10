@@ -40,6 +40,9 @@ const ICON = {
   clock: '<path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
+  tel: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
+  mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>',
+  chat: '<path d="M4 4h16v12H8l-4 4z"/>',
   clip2: '<path d="M8 4h8v3H8zM6 5H5v16h14V5h-1M8.5 12l2 2 4-4M8.5 17h7"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
@@ -54,10 +57,10 @@ const store = createStore(CFG, () => {
 });
 const S = store.S;
 const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['van', 'Furgone', 'van'], ['an', 'Analisi', 'an']];
+const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'richieste', 'documenti', 'rapportiriv'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van'].includes(h)) UI.tab = h;
   if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
@@ -183,6 +186,15 @@ function rAccessi() {
   const perRuolo = RUOLI.map(([k, l]) => [k, l, ACC.membri.filter(m => m.ruolo === k)]);
   return `<div class="row between"><h2>Accessi</h2><button class="btn primary" data-act="accNuovo" type="button">${svg('plus')} Persona</button></div>
   ${ACC.ok === false ? `<div class="notice small">Non riesco a leggere gli accessi: controlla la rete.</div>` : ''}
+  ${prenR.length || ACC_PREV.L.length ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="richieste">${svg('cal', 'i')} <span>Prenotazioni e preventivi dei rivenditori sono nella pagina <b>Richieste</b></span><span class="go">›</span></button>` : ''}
+  ${rich.length ? `<section class="stack"><h3>Richieste di accesso</h3>${rich.map(r => `<div class="card"><div class="row between"><span class="t">${esc(r.nome)}${r.azienda ? ' · ' + esc(r.azienda) : ''}</span><span class="chip">${r.ruolo === 'altro' ? 'da decidere' : nomeRuolo(r.ruolo)}</span></div>
+      <div class="small muted">${esc(r.email)}${r.telefono ? ' · ' + esc(r.telefono) : ''} · ${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</div>
+      ${r.messaggio ? `<div class="small">${esc(r.messaggio)}</div>` : ''}
+      <div class="row"><button class="btn sm primary" data-act="accDai" data-id="${r.id}" type="button">Dai accesso</button><button class="btn sm" data-act="accRifiuta" data-id="${r.id}" type="button">Rifiuta</button></div></div>`).join('')}</section>` : ''}
+  <section class="stack"><h3>Persone con accesso</h3>
+    ${perRuolo.map(([k, l, L]) => L.length ? `<div class="panel"><div class="fs-t">${L.length > 1 ? { titolare: 'Titolari', rivenditore: 'Rivenditori', dipendente: 'Dipendenti' }[k] : l}</div>${L.map(m => `<div class="list-line" role="button" tabindex="0" data-act="accMembro" data-id="${m.user_id}"><div><b>${esc(m.nome || m.email)}</b><div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div></div><span class="chip ${m.stato === 'attivo' ? 'ok' : 'bad'}">${m.stato === 'attivo' ? (m.cambio_password ? 'primo accesso' : 'attivo') : 'sospeso'}</span></div>`).join('')}</div>` : '').join('') || `<div class="empty small">Ancora nessuno. Manda il link o tocca <b>+ Persona</b>.</div>`}
+  </section>
+  <h3>Link e impostazioni</h3>
   <section class="panel stack"><b>Link per scaricare l'app e chiedere l'accesso</b>
     ${link ? `<div class="small muted">Chi apre questo link può installare l'app e chiederti l'accesso. Entra solo chi approvi tu, con il ruolo che scegli.</div>
       <div class="linkbox num small">${esc(link)}</div>
@@ -193,14 +205,6 @@ function rAccessi() {
     <div class="fieldset"><span class="fs-t">Listino in PDF da scaricare</span>
       <div class="small muted">${a.listinoPdf ? `Stanno scaricando il tuo PDF, caricato il ${fmtD(a.listinoPdf)}.` : 'Ora scaricano il listino creato dall\'app. Carica il tuo PDF per far scaricare quello.'}</div>
       <div class="row"><button class="btn sm" data-act="listinoPdf" type="button">${svg('doc', 'i')} Vedi</button><label class="btn sm primary">${a.listinoPdf ? 'Sostituisci il PDF' : 'Carica il tuo PDF'}<input type="file" id="listinoPdfIn" accept="application/pdf,.pdf" hidden></label>${a.listinoPdf ? '<button class="btn sm" data-act="listinoPdfTogli" type="button">Togli</button>' : ''}</div></div>
-  </section>
-  ${prenR.length || ACC_PREV.L.length ? `<button type="button" class="notice accnote" data-act="menuGo" data-arg="richieste">${svg('cal', 'i')} <span>Prenotazioni e preventivi dei rivenditori sono nella pagina <b>Richieste</b></span><span class="go">›</span></button>` : ''}
-  ${rich.length ? `<section class="stack"><h3>Richieste di accesso</h3>${rich.map(r => `<div class="card"><div class="row between"><span class="t">${esc(r.nome)}${r.azienda ? ' · ' + esc(r.azienda) : ''}</span><span class="chip">${r.ruolo === 'altro' ? 'da decidere' : nomeRuolo(r.ruolo)}</span></div>
-      <div class="small muted">${esc(r.email)}${r.telefono ? ' · ' + esc(r.telefono) : ''} · ${new Date(r.creato).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</div>
-      ${r.messaggio ? `<div class="small">${esc(r.messaggio)}</div>` : ''}
-      <div class="row"><button class="btn sm primary" data-act="accDai" data-id="${r.id}" type="button">Dai accesso</button><button class="btn sm" data-act="accRifiuta" data-id="${r.id}" type="button">Rifiuta</button></div></div>`).join('')}</section>` : ''}
-  <section class="stack"><h3>Persone con accesso</h3>
-    ${perRuolo.map(([k, l, L]) => L.length ? `<div class="panel"><div class="fs-t">${L.length > 1 ? { titolare: 'Titolari', rivenditore: 'Rivenditori', dipendente: 'Dipendenti' }[k] : l}</div>${L.map(m => `<div class="list-line" role="button" tabindex="0" data-act="accMembro" data-id="${m.user_id}"><div><b>${esc(m.nome || m.email)}</b><div class="small muted">${[m.azienda, m.email, m.telefono].filter(Boolean).map(esc).join(' · ')}</div></div><span class="chip ${m.stato === 'attivo' ? 'ok' : 'bad'}">${m.stato === 'attivo' ? (m.cambio_password ? 'primo accesso' : 'attivo') : 'sospeso'}</span></div>`).join('')}</div>` : '').join('') || `<div class="empty small">Ancora nessuno. Manda il link o tocca <b>+ Persona</b>.</div>`}
   </section>
 `;
 }
@@ -616,6 +620,40 @@ function chipScad(x, perRiv) {
 const pesoFile = b => b > 1e6 ? `${num(b / 1e6, 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
 /** I rapporti di cantiere messi nelle aree dei rivenditori, divisi per rivenditore. */
 const RAPP = { lista: null, err: '' };
+/** Nome senza forma societaria, come lo calcola il database (_nome_base): «EDILCHIERI S.R.L.» = «edilchieri». */
+const nomeBaseDb = t => String(t || '').toLowerCase().replace(/[.,'"&()\-]/g, ' ').replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?n ?c|s ?a ?s|srls|di|ditta|impresa)\b/g, ' ').replace(/\s+/g, ' ').trim();
+const chiaveGruppo = m => m.cliente_id ? 'c:' + m.cliente_id : nomeBaseDb(m.cliente_nome || m.azienda || m.nome) ? 'n:' + nomeBaseDb(m.cliente_nome || m.azienda || m.nome) : 'u:' + m.user_id;
+/** I rivenditori raggruppati per azienda: chi ha più accessi ha una sola cartella. */
+function gruppiRiv(tutti = false) {
+  const G = new Map();
+  for (const m of ACC.membri.filter(x => x.ruolo === 'rivenditore' && (tutti || x.stato === 'attivo'))) {
+    const k = chiaveGruppo(m); if (!G.has(k)) G.set(k, { key: k, membri: [] }); G.get(k).membri.push(m);
+  }
+  for (const g of G.values()) {
+    g.membri.sort((a, b) => String(a.user_id).localeCompare(b.user_id));
+    g.primo = g.membri.find(m => m.stato === 'attivo')?.user_id || g.membri[0].user_id;   // la cartella vera è quella del primo accesso
+    const cli = g.membri.find(m => m.cliente_id && S.clienti.find(c => c.id === m.cliente_id));
+    const nomeM = g.membri.find(m => m.cliente_nome)?.cliente_nome || g.membri.find(m => m.azienda)?.azienda || g.membri[0].nome || 'Rivenditore';
+    const rub = !cli && S.clienti.find(c => c.tipo === 'rivenditore' && stessoCliente(nomeM, '', c.nome, '')) || null;
+    g.nome = cli ? S.clienti.find(c => c.id === cli.cliente_id).nome : rub ? rub.nome : nomeM;
+  }
+  return [...G.values()].sort((a, b) => a.nome.localeCompare(b.nome));
+}
+const gruppoDi = rid => gruppiRiv(true).find(g => g.membri.some(m => m.user_id === rid));
+/** Tipo di documento (sottocartella) di un PDF nell'area del rivenditore. */
+function tipoDoc(d) {
+  const cart = String(d.path || '').split('/').slice(-2, -1)[0] || '';
+  if (cart === 'rapporti') return 'Rapporti di cantiere';
+  if (cart === 'preventivi') return 'Preventivi';
+  if (cart === 'consuntivi') return 'Consuntivi';
+  if (cart === 'moduli') {
+    const mid = String(d.path).split('/').pop().replace(/^mod-/, '').replace(/\.pdf$/, '');
+    const m = S.moduli.find(x => x.id === mid), mod = m && nomeModelloDi(m);
+    return mod?.nome || m?.titolo || String(d.titolo || 'Moduli').split(' · ')[0];
+  }
+  return 'Altri documenti';
+}
+const chiaveDoc = d => String(d.path || '').split('/').slice(-2).join('/');   // cartella/nome: uguale per tutti gli accessi della stessa azienda
 async function caricaRapportiRiv() {
   RAPP.lista = [];
   try { await caricaAccessi(true); const { data, error } = await store.tabella('documenti_cliente').select('*').order('data', { ascending: false }).limit(500); if (error) throw error; RAPP.lista = data || []; RAPP.err = ''; }
@@ -624,14 +662,35 @@ async function caricaRapportiRiv() {
 }
 function rRapportiRiv() {
   if (RAPP.lista === null) { caricaRapportiRiv(); return `<div class="empty">Caricamento…</div>`; }
-  const per = new Map(); for (const d of RAPP.lista) { if (!per.has(d.rivenditore)) per.set(d.rivenditore, []); per.get(d.rivenditore).push(d); }
-  const nome = id => { const m = ACC.membri.find(x => x.user_id === id); return m ? (m.azienda || m.nome || m.email) : 'Rivenditore'; };
+  const G = gruppiRiv(true), gr = new Map(G.map(g => [g.key, g]));
+  // un documento per azienda, anche se vecchie copie stanno negli altri accessi
+  const visti = new Set(), docs = [];
+  for (const d of RAPP.lista) { const g = gruppoDi(d.rivenditore), k = (g?.key || d.rivenditore) + '|' + chiaveDoc(d); if (visti.has(k)) continue; visti.add(k); docs.push({ ...d, g: g?.key || 'u:' + d.rivenditore, tipo: tipoDoc(d) }); }
+  const nomeG = k => gr.get(k)?.nome || 'Rivenditore non più attivo';
+  const sel = UI.rappG && docs.some(d => d.g === UI.rappG) ? UI.rappG : null, cat = sel && UI.rappT && docs.some(d => d.g === sel && d.tipo === UI.rappT) ? UI.rappT : null;
+  const cartella = (act, arg, nome, n, sub = '') => `<button type="button" class="card folderc" data-act="${act}" data-arg="${esc(arg)}">${svg('folder')}<span class="mid"><b>${esc(nome)}</b>${sub ? `<span class="small muted">${esc(sub)}</span>` : ''}</span><span class="chip">${n}</span><span class="go">›</span></button>`;
+  const doc = d => `<div class="card"><div class="row between"><span class="t">${esc(d.titolo)}</span></div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</div>
+    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'preventivi' ? 'editPrev' : d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">${d.kind === 'preventivi' ? 'Vai al preventivo' : 'Vai al lavoro'}</button>` : ''}<button class="btn sm" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dalla cartella</button></div></div>`;
+  const percorso = `<div class="crumbs small"><button type="button" class="linkbtn" data-act="rappVai" data-arg="">Tutti i rivenditori</button>${sel ? ` › ${cat ? `<button type="button" class="linkbtn" data-act="rappVai" data-arg="${esc(sel)}">${esc(nomeG(sel))}</button> › <b>${esc(cat)}</b>` : `<b>${esc(nomeG(sel))}</b>`}` : ''}</div>`;
+  let corpo;
+  if (!sel) {
+    const conDoc = [...new Set(docs.map(d => d.g))];
+    const vuoti = G.filter(g => !conDoc.includes(g.key) && g.membri.some(m => m.stato === 'attivo'));
+    corpo = conDoc.sort((a, b) => nomeG(a).localeCompare(nomeG(b))).map(k => { const g = gr.get(k); return cartella('rappVai', k, nomeG(k), docs.filter(d => d.g === k).length, g && g.membri.length > 1 ? `${g.membri.length} accessi, una sola cartella` : ''); }).join('')
+      + (vuoti.length ? `<div class="small muted">Cartelle ancora vuote: ${vuoti.map(g => esc(g.nome)).join(', ')}.</div>` : '')
+      || '<div class="empty small">Nessun documento nelle cartelle dei rivenditori.</div>';
+  } else if (!cat) {
+    const T = [...new Set(docs.filter(d => d.g === sel).map(d => d.tipo))].sort((a, b) => ORD_TIPI(a) - ORD_TIPI(b) || a.localeCompare(b));
+    const g = gr.get(sel);
+    corpo = (g && g.membri.length > 1 ? `<div class="small muted">Accessi che vedono questa cartella: ${g.membri.map(m => esc(m.nome || m.email)).join(', ')}.</div>` : '') + T.map(t => cartella('rappTipo', t, t, docs.filter(d => d.g === sel && d.tipo === t).length)).join('');
+  } else corpo = docs.filter(d => d.g === sel && d.tipo === cat).map(doc).join('');
   return `<div class="row between"><h2>Documenti dei rivenditori</h2><button class="btn sm" data-act="rappAgg" type="button">Aggiorna</button></div>
-  <div class="small muted">I PDF che hai messo nell'area riservata di ogni rivenditore (preventivi, rapporti di cantiere, verbali, moduli): li trova in «I tuoi documenti» e non può modificarli. Per aggiungerne uno: dalla posa o dall'intervento tocca «Rapporto», da un modulo o da un preventivo tocca «PDF», poi «Metti nell'area di…». I preventivi nati da una richiesta ci arrivano da soli quando li salvi come inviati.</div>
+  ${percorso}
+  ${!sel ? `<div class="small muted">Una cartella per ogni rivenditore (una sola anche se ha più accessi), divisa per tipo di documento. Il rivenditore la trova in «I tuoi documenti», in PDF non modificabili. Qualsiasi PDF che crei (rapporti, verbali, moduli, preventivi, consuntivi) ha il tasto «Metti nella cartella di…». Per i moduli puoi mandarli tutti insieme dalla pagina Moduli.</div>` : ''}
   ${RAPP.err ? `<div class="notice small">${esc(RAPP.err)}</div>` : ''}
-  ${[...per.entries()].map(([rid, L]) => `<section class="stack"><h3>${esc(nome(rid))} <span class="small muted">· ${L.length}</span></h3>${L.map(d => `<div class="card"><div class="row between"><span class="t">${esc(d.titolo)}</span></div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</div>
-    <div class="row"><button class="btn sm" data-act="rappApri" data-id="${esc(d.id)}" type="button">${svg('doc', 'i')} Apri</button>${d.lavoro_id && S[d.kind || 'lavori']?.some(x => x.id === d.lavoro_id) ? `<button class="btn sm" data-act="${d.kind === 'preventivi' ? 'editPrev' : d.kind === 'interventi' ? 'editInt' : 'editLav'}" data-id="${esc(d.lavoro_id)}" type="button">${d.kind === 'preventivi' ? 'Vai al preventivo' : 'Vai al lavoro'}</button>` : ''}<button class="btn sm ghost" data-act="rappTogli" data-id="${esc(d.id)}" type="button">Togli dall'area</button></div></div>`).join('')}</section>`).join('') || (RAPP.err ? '' : '<div class="empty">Nessun documento pubblicato.</div>')}`;
+  <div class="stack">${corpo}</div>`;
 }
+const ORD_TIPI = t => ({ 'Rapporti di cantiere': 0, 'Verbale di corretta installazione e conclusione cantiere': 1, Preventivi: 3, Consuntivi: 4, 'Altri documenti': 9 })[t] ?? 2;
 function rDocumenti() {
   const L = [...DOC_LISTA()].sort((a, b) => String(a.titolo).localeCompare(b.titolo));
   return `<div class="row between"><h2>Documenti azienda</h2><button class="btn primary" data-act="docNuovo" type="button">${svg('plus')} Aggiungi</button></div>
@@ -693,14 +752,16 @@ async function caricaDocRiv() {
   catch (e) { RIV.docs = []; RIV.docErr = /function|schema cache/i.test(e.message || '') ? 'I documenti non sono ancora attivi: avvisa l\'installatore.' : 'Non riesco a caricare i documenti, riprova.'; }
   render();
 }
+/** Per il rivenditore il tipo si capisce dalla cartella e dal titolo (i moduli dell'installatore lui non li ha). */
+const tipoDocRiv = d => { const c = String(d.path || '').split('/').slice(-2, -1)[0]; return c === 'moduli' ? String(d.titolo || 'Moduli').split(' · ')[0] : tipoDoc(d); };
 function rRivMieiDoc() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
-  const M = RIV.mieiDoc || [];
-  const anni = [...new Set(M.map(d => String(d.data || '').slice(0, 4)).filter(Boolean))];
+  const visti = new Set(), M = (RIV.mieiDoc || []).filter(d => { const k = chiaveDoc(d); if (visti.has(k)) return false; visti.add(k); return true; }).map(d => ({ ...d, tipo: tipoDocRiv(d) }));
+  const tipi = [...new Set(M.map(d => d.tipo))].sort((a, b) => ORD_TIPI(a) - ORD_TIPI(b) || a.localeCompare(b));
   const card = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
   return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
   <div class="small muted">I documenti dei tuoi lavori in PDF: preventivi, rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
-  ${M.length ? anni.map(y => `<section class="stack"><h3>${y}</h3>${M.filter(d => String(d.data || '').startsWith(y)).map(card).join('')}</section>`).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
+  ${M.length ? tipi.map(t => { const L = M.filter(d => d.tipo === t); return `<details class="cartella" ${tipi.length === 1 ? 'open' : ''}><summary>${svg('folder', 'i')} <b>${esc(t)}</b> <span class="chip">${L.length}</span></summary><div class="stack">${L.map(card).join('')}</div></details>`; }).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
 }
 function rRivDocumenti() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
@@ -1392,7 +1453,8 @@ function render() {
   $('#tabsNav').hidden = !pieno;
   $('#menuBtn').hidden = !pieno;
   document.body.dataset.ruolo = logged ? st.ruolo || '' : '';
-  $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}</button>`).join('');
+  const nR = st.mode === 'demo' ? 0 : nRichieste();
+  $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}${k === 'richieste' && nR ? `<span class="tabbadge">${nR}</span>` : ''}</button>`).join('');
   const pend = store.pending();
   $('#sync').innerHTML = logged && !pieno ? '' : st.mode === 'demo' ? '<span class="st off">Prova</span>'
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
@@ -1574,14 +1636,19 @@ const FILTRI_GIORNO = [['dafare', 'Da fare'], ['tutti', 'Tutto'], ['pose', 'Pose
 UI.dayFiltro = (() => { try { return localStorage.getItem('ddp:dayFiltro') || 'dafare'; } catch { return 'dafare'; } })();
 const posaFatta = (l, k) => (l.giorniFatti || []).includes(k);
 const intChiuso = i => ['completato', 'annullato'].includes(i.stato);
+/** Giorni in cui sono già passato per un intervento non finito (riprogrammato). */
+const visiteDi = i => (Array.isArray(i.visite) ? i.visite : []).filter(v => v && v.data);
+const intNelGiorno = (i, k) => (i.dataProg || '') === k || visiteDi(i).some(v => v.data === k);
+const visitaDel = (i, k) => (i.dataProg || '') !== k && visiteDi(i).find(v => v.data === k);
 function elencoGiorno(dl, di, de) {
   const f = UI.dayFiltro || 'dafare', k = UI.day;
   const vediL = f === 'int' ? [] : f === 'dafare' ? dl.filter(l => !posaFatta(l, k)) : dl;
-  const vediI = f === 'pose' ? [] : f === 'dafare' ? di.filter(i => !intChiuso(i)) : di;
-  const nasc = f === 'dafare' ? dl.filter(l => posaFatta(l, k)).length + di.filter(intChiuso).length : 0;
+  const chiusoQui = i => intChiuso(i) || !!visitaDel(i, k);
+  const vediI = f === 'pose' ? [] : f === 'dafare' ? di.filter(i => !chiusoQui(i)) : di;
+  const nasc = f === 'dafare' ? dl.filter(l => posaFatta(l, k)).length + di.filter(chiusoQui).length : 0;
   const tot = dl.length + di.length;
-  const filtri = tot ? `<div class="chips dayfiltri">${FILTRI_GIORNO.map(([v, l]) => { const n = v === 'dafare' ? dl.filter(x => !posaFatta(x, k)).length + di.filter(x => !intChiuso(x)).length : v === 'tutti' ? tot : v === 'pose' ? dl.length : di.length; return `<button type="button" class="chipf" data-act="dayFiltro" data-arg="${v}" aria-pressed="${f === v}">${l} <span class="num">${n}</span></button>`; }).join('')}</div>` : '';
-  const carte = [...vediL.map(x => [x, lavoroCard]), ...vediI.map(x => [x, intCard])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, fn]) => fn(x)).join('');
+  const filtri = tot ? `<div class="chips dayfiltri">${FILTRI_GIORNO.map(([v, l]) => { const n = v === 'dafare' ? dl.filter(x => !posaFatta(x, k)).length + di.filter(x => !chiusoQui(x)).length : v === 'tutti' ? tot : v === 'pose' ? dl.length : di.length; return `<button type="button" class="chipf" data-act="dayFiltro" data-arg="${v}" aria-pressed="${f === v}">${l} <span class="num">${n}</span></button>`; }).join('')}</div>` : '';
+  const carte = [...vediL.map(x => [x, lavoroCard]), ...vediI.map(x => [x, i => intCard(i, k)])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, fn]) => fn(x)).join('');
   return `${filtri}${(f === 'tutti' || f === 'dafare') ? de.map(eventoCard).join('') : ''}${carte}
     ${!tot && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
     ${tot && !vediL.length && !vediI.length && f === 'dafare' ? `<div class="empty small">Tutto fatto per oggi 👍</div>` : ''}
@@ -1611,19 +1678,21 @@ function rigaNoteSospesi(x, kind) {
   const intAperto = x.sospInt && S.interventi.some(i => i.id === x.sospInt && !['completato', 'annullato'].includes(i.stato));
   return `${x.note ? `<div class="small muted prewrap">${esc(x.note)}</div>` : ''}${ap.length ? `<div class="sospcard"><b>Da completare (${ap.length})</b><ul>${ap.map(r => `<li>${esc(r.t)}</li>`).join('')}</ul>${intAperto ? `<span class="small muted">Intervento per completare già creato</span>` : kind ? `<button type="button" class="btn sm" data-act="intDaSospesi" data-arg="${kind}" data-id="${esc(x.id)}">${svg('plus', 'i')} Crea intervento per completare</button>` : ''}</div>` : ''}`;
 }
-function intCard(i) {
+function intCard(i, giorno = '') {
   const st = STATI.find(s => s[0] === (i.stato || 'aperto')) || STATI[0];
+  const vis = giorno && visitaDel(i, giorno), V = visiteDi(i);
+  const puoRiprog = i.dataProg && !intChiuso(i) && i.dataProg <= TODAY;
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
     <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
-    ${i.dataProg ? badgeOrario(i) : ''}
+    ${vis ? `<div class="visita small"><b>Passaggio del ${fmtD(vis.data, { day: 'numeric', month: 'short' })}: lavoro non finito</b>${i.stato === 'completato' ? ' · poi completato' : i.dataProg ? ` · si torna ${fmtD(i.dataProg, { weekday: 'short', day: 'numeric', month: 'short' })}` : ' · da riprogrammare'}${vis.nota ? `<br>${esc(vis.nota)}` : ''}</div>` : i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
     ${i.descrizione ? `<div class="prewrap">${esc(i.descrizione)}</div>` : ''}
     ${rigaNoteSospesi(i, 'interventi')}
-    <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
+    <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${V.length ? `<span>Già passato ${V.map(v => fmtD(v.data, { day: 'numeric', month: 'short' })).join(', ')}</span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
     ${dettaglioPrev(i)}
-    ${i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
+    ${vis ? '' : i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}${puoRiprog ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(i.id)}">${svg('cal', 'i')} Non finito: riprogramma</button>` : ''}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -1644,13 +1713,13 @@ function rCal() {
   for (let d = 1; d <= dim; d++) {
     const k = `${UI.month}-${String(d).padStart(2, '0')}`, dow = (off + d - 1) % 7;
     const posaK = LAV.filter(l => inPosa(l, k)); const nl = posaK.length;
-    const ints = INT.filter(i => (i.dataProg || '') === k);
+    const ints = INT.filter(i => intNelGiorno(i, k));
     const evs = evDel(k), ferie = evs.some(e => e.tipo === 'ferie');
-    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' ? 'done' : ''}"></i>`).slice(0, 2).join('')}${evs.filter(e => e.tipo !== 'ferie').slice(0, 2).map(e => `<i class="mk ev ev-${esc(e.tipo)}"></i>`).join('')}</span></button>`;
+    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' || visitaDel(i, k) ? 'done' : ''}"></i>`).slice(0, 2).join('')}${evs.filter(e => e.tipo !== 'ferie').slice(0, 2).map(e => `<i class="mk ev ev-${esc(e.tipo)}"></i>`).join('')}</span></button>`;
   }
   const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
   const dl = LAV.filter(l => inPosa(l, UI.day));
-  const di = INT.filter(i => i.dataProg === UI.day);
+  const di = INT.filter(i => intNelGiorno(i, UI.day));
   const de = evDel(UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
   return `${avvisoAccessi()}${rTodo()}
@@ -1771,6 +1840,8 @@ const modelli = () => [
   ...S.modelli.filter(m => !VECCHI_BASE.has(m.id) && !MODELLI_UFFICIALI.some(u => u.id === m.id)).map(m => ({ ...m, mio: true })),
 ];
 const ufficiale = id => MODELLI_UFFICIALI.find(m => m.id === id);
+/** Il modello di un modulo compilato (anche se nascosto o tolto). */
+const nomeModelloDi = m => MODELLI_UFFICIALI.find(x => x.id === m.modelloId) || S.modelli.find(x => x.id === m.modelloId) || MODELLI_BASE.find(x => x.id === m.modelloId) || null;
 let modCtx = {};
 function ctxDa(kind, x) {
   if (kind === 'clienti') return { cliente: x.nome, clienteId: x.id, indirizzo: x.indirizzo, telefono: x.telefono };
@@ -1955,7 +2026,10 @@ function apriFirmaGrande(piccolo, hidden, R) {
   impagina();
 }
 
+const hashTesto = t => { let h = 5381; for (const c of String(t)) h = (h * 33 + c.charCodeAt(0)) >>> 0; return h.toString(36); };
+const pubGenerico = (nome, x = {}, cartella = 'documenti') => ({ x, chiave: `pdf-${hashTesto(nome)}`, cartella, titolo: String(nome).replace(/\.pdf$/i, ''), data: TODAY });
 function mostraPdf(bytes, nome, titolo, indietro, pub) {
+  if (!pub && GESTORE() && !['Listino', 'Documento'].includes(titolo)) pub = pubGenerico(nome);
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
   pdfCorrente = { file, url: URL.createObjectURL(file), indietro, bytes, pub };
@@ -1981,26 +2055,71 @@ function pubModulo(mod, nomeModello) {
 async function boxPubblica() {
   const pub = pdfCorrente?.pub, box = $('#pubBox'); if (!pub || !box) return;
   if (navigator.onLine) await caricaAccessi(true).catch(() => {});
-  const tutti = ACC.membri.filter(m => m.ruolo === 'rivenditore' && m.stato === 'attivo');
-  let rivs = rivDiLavoro(pub.x || {});
-  const chiede = pub.rivId && tutti.find(m => m.user_id === pub.rivId);   // il rivenditore che ha fatto la richiesta
-  if (chiede) rivs = [chiede, ...rivs.filter(m => m !== chiede)];
+  const tutti = gruppiRiv();
+  const suoi = new Set(rivDiLavoro(pub.x || {}).map(m => chiaveGruppo(m)));
+  if (pub.rivId) { const g = gruppoDi(pub.rivId); if (g) suoi.add(g.key); }   // il rivenditore che ha fatto la richiesta
+  const rivs = tutti.filter(g => suoi.has(g.key));
   if (!$('#pubBox') || !tutti.length) return;
-  const voce = m => `<button type="button" class="btn" data-act="pdfPubblica" data-id="${esc(m.user_id)}">${svg('doc', 'i')} Metti nell'area di ${esc(m.azienda || m.nome || 'rivenditore')}</button>`;
+  const voce = g => `<button type="button" class="btn" data-act="pdfPubblica" data-id="${esc(g.primo)}">${svg('folder', 'i')} Metti nella cartella di ${esc(g.nome)}${g.membri.length > 1 ? ` <small>(${g.membri.length} accessi)</small>` : ''}</button>`;
   $('#pubBox').innerHTML = `<div class="fs-t">Area riservata del rivenditore</div>
     ${rivs.map(voce).join('')}
     ${tutti.length > rivs.length ? `<details><summary class="small muted">${rivs.length ? 'Altri rivenditori' : 'Scegli il rivenditore'}</summary><div class="stack">${tutti.filter(m => !rivs.includes(m)).map(voce).join('')}</div></details>` : ''}
-    <div class="small muted">Lo trova in «I tuoi documenti», in PDF non modificabile.</div>`;
+    <div class="small muted">Lo trova in «I tuoi documenti», in PDF non modificabile. Chi ha più accessi ha una sola cartella: lo vedono tutti.</div>`;
+}
+/** Cartella di un modulo compilato: il tipo di modulo e, dentro, il rivenditore (cliente) per cui è stato fatto. */
+const cartModulo = m => { const md = nomeModelloDi(m); return md ? 'id:' + md.id : 't:' + String(m.titolo || 'Modulo').trim(); };
+const nomeCartModulo = m => nomeModelloDi(m)?.nome || String(m.titolo || 'Modulo').trim();
+function cliModulo(m) {
+  const lav = m.ref?.id ? (S.lavori.find(x => x.id === m.ref.id) || S.interventi.find(x => x.id === m.ref.id)) : null;
+  const c = (m.clienteId && S.clienti.find(x => x.id === m.clienteId)) || (lav?.clienteId && S.clienti.find(x => x.id === lav.clienteId)) || trovaCliente(m.cliente || lav?.cliente);
+  const nome = c?.nome || m.cliente || lav?.cliente || '';
+  return { k: c ? 'c:' + c.id : nome ? 'n:' + normNome(nome) : '-', nome: nome || 'Senza cliente' };
 }
 function rModuli() {
   const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  const tipi = new Map(); for (const m of L) { const k = cartModulo(m); if (!tipi.has(k)) tipi.set(k, { k, nome: nomeCartModulo(m), L: [] }); tipi.get(k).L.push(m); }
+  const t = UI.modT && tipi.get(UI.modT), clis = new Map();
+  if (t) for (const m of t.L) { const c = cliModulo(m); if (!clis.has(c.k)) clis.set(c.k, { ...c, L: [] }); clis.get(c.k).L.push(m); }
+  const c = t && UI.modC && clis.get(UI.modC);
+  const cartella = (act, arg, nome, n, sub = '') => `<button type="button" class="card folderc" data-act="${act}" data-arg="${esc(arg)}">${svg('folder')}<span class="mid"><b>${esc(nome)}</b>${sub ? `<span class="small muted">${esc(sub)}</span>` : ''}</span><span class="chip">${n}</span><span class="go">›</span></button>`;
+  const card = m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}${m.autoreNome ? ' · compilato da ' + esc(m.autoreNome) : ''}</div></div>`;
+  const ultimo = X => X.length ? 'ultimo ' + fmtD(X[0].data, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const scelti = c ? c.L : t ? t.L : L;
+  const esporta = store.st.mode !== 'demo' && scelti.length ? `<button class="btn sm" data-act="modEsporta" type="button">${svg('folder', 'i')} Metti ${scelti.length === 1 ? 'il modulo' : `tutti (${scelti.length})`} nelle cartelle dei rivenditori</button>` : '';
+  const percorso = t ? `<div class="crumbs small"><button type="button" class="linkbtn" data-act="modVai" data-arg="">Tutti i moduli</button> › ${c ? `<button type="button" class="linkbtn" data-act="modVai" data-arg="${esc(t.k)}">${esc(t.nome)}</button> › <b>${esc(c.nome)}</b>` : `<b>${esc(t.nome)}</b>`}</div>` : '';
+  const corpo = c ? c.L.map(card).join('')
+    : t ? [...clis.values()].sort((a, b) => a.nome.localeCompare(b.nome)).map(x => cartella('modCli', x.k, x.nome, x.L.length, ultimo(x.L))).join('')
+    : [...tipi.values()].sort((a, b) => a.nome.localeCompare(b.nome)).map(x => cartella('modVai', x.k, x.nome, x.L.length, ultimo(x.L))).join('')
+      || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Rapporto di assistenza, scheda di manutenzione, verbale di fine cantiere e consenso foto e video: si compilano qui, si firmano sullo schermo e diventano il tuo PDF.</span></div>`;
   return `<div class="row between"><h2>Moduli</h2><button class="btn primary" data-act="modScegli" type="button">${svg('plus')} Nuovo</button></div>
-  <section class="stack"><h3>Compilati</h3>
-    ${L.map(m => `<div class="card" role="button" tabindex="0" data-act="editMod" data-id="${m.id}"><div class="row between"><span class="t">${esc(m.titolo)}</span><span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span></div><div class="small muted">${esc(m.cliente || 'Senza cliente')} · ${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })}${m.autoreNome ? ' · compilato da ' + esc(m.autoreNome) : ''}</div></div>`).join('') || `<div class="empty"><b>Nessun modulo compilato.</b><span class="small">Rapporto di assistenza, scheda di manutenzione, verbale di collaudo e consenso foto e video: si compilano qui, si firmano sullo schermo e diventano il tuo PDF.</span></div>`}
+  <section class="stack"><div class="row between"><h3>Compilati</h3>${esporta}</div>
+    ${percorso}
+    ${!t && L.length ? '<div class="small muted">Divisi per modulo e, dentro, per rivenditore.</div>' : ''}
+    ${corpo}
   </section>
-  <section class="stack"><div class="row between"><h3>Modelli</h3><button class="btn sm" data-act="modelloNuovo" type="button">${svg('plus')} Modello</button></div>
+  ${t ? '' : `  <section class="stack"><div class="row between"><h3>Modelli</h3><button class="btn sm" data-act="modelloNuovo" type="button">${svg('plus')} Modello</button></div>
     <div class="panel">${modelli().map(m => `<div class="list-line"><div><b>${esc(m.nome)}</b><div class="small muted">${m.ufficiale ? 'Modulo Cassero · grafica originale' : `${(m.campi || []).length} campi · creato da te`}</div></div>${m.ufficiale ? `<button class="btn sm" data-act="modNuovo" data-arg="${esc(m.id)}" type="button">Compila</button>` : `<button class="btn sm" data-act="editModello" data-arg="${esc(m.id)}" type="button">Modifica</button>`}</div>`).join('')}</div>
-  </section>`;
+  </section>`}`;
+}
+/** Mette nelle cartelle dei rivenditori tutti i moduli scelti (quelli dei clienti che non hanno l'accesso restano fuori). */
+async function esportaModuli(L) {
+  await caricaAccessi(true).catch(() => {});
+  if (!gruppiRiv().length) { toast('Nessun rivenditore con accesso'); return; }
+  await caricaImmagini();
+  let ok = 0, senza = 0, err = 0;
+  for (const [i, m] of L.entries()) {
+    const pub = pubModulo(m, nomeCartModulo(m));
+    const G = [...new Set(rivDiLavoro(pub.x || {}).map(r => gruppoDi(r.user_id)?.primo).filter(Boolean))];
+    if (!G.length) { senza++; continue; }
+    toast(`Preparo ${i + 1} di ${L.length}…`);
+    try {
+      const md = ufficiale(m.modelloId);
+      const bytes = md ? creaModuloUfficiale({ mod: m, modello: md, sfondo: await sfondoModulo(md.id) }) : creaModulo({ mod: { ...m, clienteDati: trovaCliente(m.cliente) || {} }, azienda: AZ(), immagini: IMG });
+      await pubblicaPdf({ ...pub, bytes }, G); ok++;
+    } catch (e) { console.warn(e); err++; }
+  }
+  RAPP.lista = null;
+  toast([ok ? `${ok} ${ok === 1 ? 'modulo messo' : 'moduli messi'} nelle cartelle` : 'Nessun modulo messo nelle cartelle', senza ? `${senza} di clienti senza accesso` : '', err ? `${err} non riusciti: riprova` : ''].filter(Boolean).join(' · '));
 }
 
 /* ---------- moduli CASSERO (PDF originali) ---------- */
@@ -2195,7 +2314,7 @@ function rCantieri() {
   const oggi = tutti.filter(s => s.oggi.length);
   const pross = tutti.filter(s => !s.oggi.length && s.prossimo).sort((a, b) => a.prossimo.d.localeCompare(b.prossimo.d));
   const pass = tutti.filter(s => !s.oggi.length && !s.prossimo).sort((a, b) => String(b.ultimo?.d || '').localeCompare(String(a.ultimo?.d || '')));
-  return `<div class="row between"><h2>Cantieri</h2></div>
+  return `<div class="row between"><h2>Cantieri</h2><button class="btn sm" data-act="menuGo" data-arg="set" type="button">Indietro</button></div>
   <div class="notice small"><b>Su CarPlay:</b> con l'iPhone collegato all'auto, tocca <b>Mappe</b>, <b>Google Maps</b> o <b>Waze</b> e il percorso parte sullo schermo dell'auto. Con il calendario «Diario di Posa» qui sotto trovi tutti i lavori anche nell'app Calendario di CarPlay, con l'indirizzo pronto per la navigazione.</div>
   ${boxCalendario()}
   <label class="f"><span class="sr">Cerca</span><input id="cercaCantiere" type="search" placeholder="Cerca per indirizzo o cliente…" value="${esc(UI.cercaCant || '')}" autocomplete="off"></label>
@@ -2262,11 +2381,10 @@ function menuHtml() {
   return `<div class="dr-head"><div><img class="dr-logo" src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
   <div class="tape" aria-hidden="true"></div>
   <div class="dr-sec">Sezioni</div>
-  ${TABS.map(([k, l, i]) => item('menuGo', k, i, l, '', UI.tab === k)).join('')}
-  ${item('menuGo', 'cantieri', 'pin', 'Cantieri', 'indirizzi, navigazione e CarPlay', UI.tab === 'cantieri')}
-  ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'rapporti, manutenzioni, collaudi, consensi', UI.tab === 'moduli')}
-  ${st.mode === 'demo' ? '' : item('menuGo', 'richieste', 'cal', `Richieste${nRichieste() ? ` <span class="badge">${nRichieste()}</span>` : ''}`, 'prenotazioni e preventivi dei rivenditori', UI.tab === 'richieste')}
-  ${st.mode === 'demo' ? '' : item('menuGo', 'rapportiriv', 'doc', 'Documenti dei rivenditori', 'rapporti, verbali e moduli nelle loro aree', UI.tab === 'rapportiriv')}
+  ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'compilati, divisi per modulo e rivenditore', UI.tab === 'moduli')}
+  ${item('menuGo', 'an', 'an', 'Analisi', 'statistiche di lavoro e materiale', UI.tab === 'an')}
+  ${item('menuGo', 'van', 'van', 'Furgone', 'scadenze e chilometri', UI.tab === 'van')}
+  ${st.mode === 'demo' ? '' : item('menuGo', 'rapportiriv', 'folder', 'Documenti dei rivenditori', 'una cartella per rivenditore', UI.tab === 'rapportiriv')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'documenti', 'doc', `Documenti azienda per i rivenditori${docInScadenza() ? ` <span class="badge">${docInScadenza()}</span>` : ''}`, 'certificati, DURC, assicurazioni da scaricare', UI.tab === 'documenti')}
   ${st.mode === 'demo' ? '' : item('menuGo', 'accessi', 'cli', `Accessi${ACC.richieste.length ? ` <span class="badge">${ACC.richieste.length}</span>` : ''}`, 'titolari, rivenditori, dipendenti', UI.tab === 'accessi')}
   <div class="dr-sec">Impostazioni <span class="dr-note">uguali su tutti i tuoi dispositivi</span></div>
@@ -2497,6 +2615,10 @@ function rSet() {
   const ps = pushState();
   const L = [...S.cartelle].sort((a, b) => String(a.nome).localeCompare(b.nome));
   return `<div class="row between"><h2>Cartelle e impostazioni</h2></div>
+  <section class="stack"><h3>Calendario sull'iPhone e cantieri</h3>
+    ${boxCalendario()}
+    <button class="btn" data-act="menuGo" data-arg="cantieri" type="button">${svg('pin')} Tutti gli indirizzi dei cantieri</button>
+  </section>
   <section class="stack"><div class="row between"><h3>Cartelle di lavoro</h3><button class="btn sm primary" data-act="newCart" type="button">${svg('plus')} Cartella</button></div>
     <div class="panel">${L.map(c => `<div class="folder">${svg('folder')}<div class="mid"><b>${esc(c.nome)}</b><span>${esc(c.nota || c.url || '')}</span></div>${isUrl(c.url) ? `<a class="btn sm" href="${esc(c.url)}" target="_blank" rel="noopener">Apri</a>` : ''}<button class="btn sm ghost" data-act="editCart" data-id="${c.id}" type="button">Modifica</button></div>`).join('') || `<div class="small muted">Aggiungi qui le cartelle che usi per l'attività (preventivi, schede tecniche, foto cantieri). Con un tocco si aprono su iPhone, iPad e Mac.</div>`}</div>
     <details class="panel small"><summary><b>Come ottenere il link di una cartella iCloud Drive</b></summary>
@@ -2774,6 +2896,7 @@ function sheetInt(i, day, prefill) {
     ${boxNoteSospesi(i)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
+    ${visiteDi(i).length ? `<div class="small muted">Già passato: ${visiteDi(i).map(v => `<b>${fmtD(v.data, { day: 'numeric', month: 'short', year: 'numeric' })}</b>${v.nota ? ' (' + esc(v.nota) + ')' : ''}`).join(', ')} — lavoro non finito, riprogrammato.</div>` : ''}
     <div class="row" id="togliDataRow" ${i.dataProg ? '' : 'hidden'}><button type="button" class="btn sm" data-act="togliData">${svg('cal', 'i')} Togli la data: rimetti «Da programmare»</button></div>
     ${campoOrario(i, 'int')}
     <div class="g2">${F('Costo al cliente €', inp('costo', i.costo, 'number'))}${F('Ore', inp('ore', i.ore, 'number'))}</div>
@@ -3307,25 +3430,178 @@ function importaClienti() {
   }
   return n;
 }
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'crmStato') { const id = t.dataset.id, v = t.value; cambiaCliente(id, c => { const d = { ...c }; if (v) d.stato = v; else delete d.stato; return d; }); toast(v ? 'Stato cambiato' : 'Stato automatico'); }
+});
+// i tasti Chiama, WhatsApp ed Email della scheda cliente segnano il contatto nella storia
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[data-crm-log]'); if (!a) return;
+  const id = a.dataset.id, tipo = a.dataset.crmLog, c = S.clienti.find(x => x.id === id); if (!c) return;
+  const ora = new Date().toTimeString().slice(0, 5);
+  if ((c.attivita || []).some(x => x.tipo === tipo && x.data === TODAY && x.auto)) return;   // una volta al giorno basta
+  store.put('clienti', id, { ...stripId(c), attivita: [...(c.attivita || []), { id: nuovoId(), tipo, data: TODAY, ora, auto: true, testo: { chiamata: 'Chiamato', whatsapp: 'Scritto su WhatsApp', email: 'Mandata un\'email' }[tipo] || 'Contattato' }] });
+});
+/* ---------- CRM clienti ---------- */
+const STATI_CLI = [['attivo', 'Attivo', 'ok'], ['potenziale', 'Potenziale', 'in'], ['inattivo', 'Inattivo', '']];
+const TIPI_ATT = [['chiamata', 'Telefonata', 'tel'], ['whatsapp', 'WhatsApp', 'chat'], ['email', 'Email', 'mail'], ['visita', 'Sopralluogo o visita', 'pin'], ['nota', 'Nota', 'doc']];
+const nuovoId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const iniziali = n => String(n || '?').replace(/\b(s\.?r\.?l\.?s?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?)\b/gi, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+const giorniFa = d => { const n = daysBetween(d, TODAY); return n <= 0 ? 'oggi' : n === 1 ? 'ieri' : n < 30 ? `${n} giorni fa` : n < 365 ? `${Math.round(n / 30)} mesi fa` : `${Math.round(n / 365 * 10) / 10} anni fa`.replace('.', ','); };
+const azioniAperte = c => (c.azioni || []).filter(z => !z.fatto).sort((a, b) => String(a.data || '9').localeCompare(String(b.data || '9')));
+/** Tutto quello che il CRM sa di un cliente. */
+function crmDi(c) {
+  const s = storicoCliente(c);
+  const prossimi = [...s.lav.filter(l => (l.dataFine || l.data) >= TODAY).map(l => ({ d: l.data, kind: 'lavori', x: l })), ...s.int.filter(i => i.dataProg && i.dataProg >= TODAY && !intChiuso(i)).map(i => ({ d: i.dataProg, kind: 'interventi', x: i }))].sort((a, b) => a.d.localeCompare(b.d));
+  const prevAperti = s.prev.filter(p => ['bozza', 'inviato'].includes(p.stato || 'bozza'));
+  const decisi = s.prev.filter(p => ['accettato', 'rifiutato'].includes(p.stato));
+  const conv = decisi.length ? Math.round(decisi.filter(p => p.stato === 'accettato').length / decisi.length * 100) : null;
+  const contatti = (c.attivita || []).map(a => a.data).filter(Boolean);
+  const ultimo = [s.ultimo, ...contatti].filter(Boolean).filter(d => d <= TODAY).sort().pop() || '';
+  const auto = s.lav.length || s.int.length ? (ultimo && daysBetween(ultimo, TODAY) > 365 && !prossimi.length ? 'inattivo' : 'attivo') : 'potenziale';
+  const accessi = ACC.membri.filter(m => m.ruolo === 'rivenditore' && m.stato === 'attivo' && (m.cliente_id ? m.cliente_id === c.id : stessoCliente(m.cliente_nome || m.azienda || m.nome, '', c.nome, '')));
+  const richieste = accessi.length ? ACC_PREV.L.filter(r => accessi.some(m => m.user_id === r.rivenditore)) : [];
+  const az = azioniAperte(c);
+  return { ...s, prossimi, prevAperti, conv, ultimo, stato: c.stato || auto, statoAuto: !c.stato, accessi, richieste, az, scadute: az.filter(z => z.data && z.data <= TODAY) };
+}
+const chipStato = k => { const x = STATI_CLI.find(t => t[0] === k) || STATI_CLI[0]; return `<span class="chip ${x[2]}">${x[1]}</span>`; };
+function contattiRapidi(c, piccoli = false) {
+  const b = piccoli ? 'btn sm' : 'btn';
+  return `${c.telefono ? `<a class="${b}" href="tel:${esc(c.telefono.replace(/\s/g, ''))}" data-crm-log="chiamata" data-id="${esc(c.id)}">${svg('tel', 'i')} Chiama</a><a class="${b}" href="https://wa.me/${esc(telWa(c.telefono))}" target="_blank" rel="noopener" data-crm-log="whatsapp" data-id="${esc(c.id)}">WhatsApp</a>` : ''}${c.email ? `<a class="${b}" href="mailto:${esc(c.email)}" data-crm-log="email" data-id="${esc(c.id)}">${svg('mail', 'i')} Email</a>` : ''}${c.indirizzo ? `<a class="${b}" href="https://maps.apple.com/?q=${encodeURIComponent(c.indirizzo)}" target="_blank" rel="noopener">${svg('pin', 'i')} Mappa</a>` : ''}`;
+}
 function rClienti() {
+  const c0 = UI.cliApri && S.clienti.find(c => c.id === UI.cliApri);
+  if (c0) return rCliente(c0);
+  UI.cliApri = null;
   const q = normNome(UI.cerca);
-  const L = S.clienti.filter(c => (UI.cliTipo === 'tutti' || (c.tipo || 'finale') === UI.cliTipo) && (!q || [c.nome, c.referente, c.telefono, c.email, c.indirizzo].some(v => normNome(v).includes(q))))
-    .map(c => ({ c, s: storicoCliente(c) }))
-    .sort((a, b) => UI.cliOrd === 'nome' ? a.c.nome.localeCompare(b.c.nome) : (b.s.ultimo || '').localeCompare(a.s.ultimo || '') || a.c.nome.localeCompare(b.c.nome));
+  const tutti = S.clienti.map(c => ({ c, k: crmDi(c) }));
+  const fs = UI.cliStato || 'tutti';
+  const L = tutti.filter(({ c, k }) => (UI.cliTipo === 'tutti' || (c.tipo || 'finale') === UI.cliTipo) && (fs === 'tutti' || (fs === 'azioni' ? k.az.length : k.stato === fs))
+      && (!q || [c.nome, c.referente, c.telefono, c.email, c.indirizzo, c.piva, ...(c.contatti || []).flatMap(x => [x.nome, x.telefono, x.email])].some(v => normNome(v).includes(q))))
+    .sort((a, b) => UI.cliOrd === 'nome' ? a.c.nome.localeCompare(b.c.nome)
+      : UI.cliOrd === 'lavori' ? (b.k.lav.length + b.k.int.length) - (a.k.lav.length + a.k.int.length) || a.c.nome.localeCompare(b.c.nome)
+      : (b.k.ultimo || '').localeCompare(a.k.ultimo || '') || a.c.nome.localeCompare(b.c.nome));
   const senza = nomiSenzaScheda();
   const FT = [['tutti', 'Tutti'], ...TIPI_CLIENTE.map(([k, l]) => [k, l.split(' ')[0] === 'Cliente' ? 'Privati' : l === 'Rivenditore' ? 'Rivenditori' : 'Imprese'])];
+  const daFare = tutti.flatMap(({ c, k }) => k.scadute.map(z => ({ c, z }))).sort((a, b) => a.z.data.localeCompare(b.z.data));
+  const conta = st => tutti.filter(x => x.k.stato === st).length;
+  const ORD = { recenti: 'ultimo contatto', nome: 'nome', lavori: 'più lavori' };
+  const prossimoOrd = { recenti: 'nome', nome: 'lavori', lavori: 'recenti' }[UI.cliOrd] || 'nome';
   return `<div class="row between"><h2>Clienti</h2><button class="btn primary" data-act="newCli" type="button">${svg('plus')} Nuovo</button></div>
-  ${senza.length ? `<div class="notice row between"><span><b>${senza.length} ${senza.length === 1 ? 'cliente' : 'clienti'}</b> dei tuoi lavori ${senza.length === 1 ? 'non ha' : 'non hanno'} ancora una scheda: ${esc(senza.slice(0, 3).join(', '))}${senza.length > 3 ? '…' : ''}</span><button class="btn sm dark" data-act="importaCli" type="button">Crea le schede</button></div>` : ''}
-  <label class="f"><span class="sr">Cerca</span><input id="cercaCliente" type="search" placeholder="Cerca per nome, telefono, email…" value="${esc(UI.cerca)}" autocomplete="off"></label>
+  <div class="kpis crmkpi">
+    <button type="button" class="kpi" data-act="cliStato" data-arg="attivo"><div class="l">Attivi</div><div class="v">${conta('attivo')}</div></button>
+    <button type="button" class="kpi" data-act="cliStato" data-arg="potenziale"><div class="l">Potenziali</div><div class="v">${conta('potenziale')}</div></button>
+    <button type="button" class="kpi" data-act="cliStato" data-arg="azioni"><div class="l">Azioni aperte</div><div class="v">${tutti.reduce((n, x) => n + x.k.az.length, 0)}</div></button>
+    <div class="kpi"><div class="l">Preventivi aperti</div><div class="v">${tutti.reduce((n, x) => n + x.k.prevAperti.length, 0)}</div></div>
+  </div>
+  ${daFare.length ? `<section class="panel stack crmoggi"><b>Da fare con i clienti</b>${daFare.slice(0, 6).map(({ c, z }) => `<div class="azrow ${z.data < TODAY ? 'late' : ''}"><button type="button" class="azcheck" data-act="crmAzFatto" data-id="${esc(c.id)}" data-arg="${esc(z.id)}" aria-label="Fatto"></button><button type="button" class="mid linkbtn" data-act="crmApri" data-arg="${esc(c.id)}"><b>${esc(c.nome)}</b> · ${esc(z.testo)}</button><span class="small ${z.data < TODAY ? 'bad' : 'muted'}">${z.data < TODAY ? 'scaduta ' + fmtD(z.data, { day: 'numeric', month: 'short' }) : 'oggi'}</span></div>`).join('')}${daFare.length > 6 ? `<button type="button" class="linkbtn small" data-act="cliStato" data-arg="azioni">Tutte le ${daFare.length}</button>` : ''}</section>` : ''}
+  ${senza.length ? `<div class="notice row between"><span><b>${senza.length} ${senza.length === 1 ? 'cliente' : 'clienti'}</b> dei tuoi lavori ${senza.length === 1 ? 'non ha' : 'non hanno'} ancora una scheda: ${esc(senza.slice(0, 3).join(', '))}${senza.length > 3 ? '…' : ''}</span><button class="btn sm dark" data-act="importaCli" type="button">Crea schede</button></div>` : ''}
+  <label class="f"><span class="sr">Cerca</span><input id="cercaCliente" type="search" placeholder="Cerca per nome, referente, telefono, email, P. IVA…" value="${esc(UI.cerca)}" autocomplete="off"></label>
   <div class="seg" role="group" aria-label="Tipo">${FT.map(([k, l]) => `<button data-act="cliTipo" data-arg="${k}" aria-pressed="${UI.cliTipo === k}" type="button">${l}</button>`).join('')}</div>
-  <div class="row between small muted"><span>${S.clienti.length} in rubrica</span><button class="linkbtn" data-act="cliOrd" type="button">Ordina per ${UI.cliOrd === 'nome' ? 'ultimo lavoro' : 'nome'}</button></div>
-  <div class="stack" id="listaClienti">${L.map(({ c, s }) => `<div class="card" role="button" tabindex="0" data-act="editCli" data-id="${c.id}">
-      <div class="row between"><span class="t">${esc(c.nome)}</span><span class="chip ${c.tipo === 'rivenditore' ? 'in' : c.tipo === 'impresa' ? 'warn' : ''}">${tipoCliente(c.tipo)}</span></div>
-      ${c.referente || c.telefono ? `<div class="addr">${esc([c.referente, c.telefono].filter(Boolean).join(' · '))}</div>` : ''}
-      <div class="meta"><span><b class="num">${s.lav.length}</b> ${s.lav.length === 1 ? 'posa' : 'pose'}</span><span><b class="num">${s.int.length}</b> ${s.int.length === 1 ? 'intervento' : 'interventi'}</span><span><b class="num">${s.prev.length}</b> ${s.prev.length === 1 ? 'preventivo' : 'preventivi'}</span>${s.fatturato ? `<span>Lavorato <b>${eur(s.fatturato)}</b></span>` : ''}${s.aperto ? `<span class="chip warn">da incassare ${eur(s.aperto)}</span>` : ''}</div>
-    </div>`).join('') || `<div class="empty"><b>${S.clienti.length ? 'Nessun cliente trovato.' : 'La rubrica è vuota.'}</b><span class="small">Ogni cliente che scrivi in una posa, un intervento o un preventivo finisce qui da solo, con tutto lo storico.</span></div>`}</div>`;
+  <div class="chips">${[['tutti', 'Tutti'], ...STATI_CLI.map(([k, l]) => [k, l === 'Attivo' ? 'Attivi' : l === 'Potenziale' ? 'Potenziali' : 'Inattivi']), ['azioni', 'Con azioni aperte']].map(([k, l]) => `<button type="button" class="chipf" data-act="cliStato" data-arg="${k}" aria-pressed="${fs === k}">${l}</button>`).join('')}</div>
+  <div class="row between small muted"><span>${L.length === S.clienti.length ? `${S.clienti.length} clienti` : `${L.length} di ${S.clienti.length} clienti`}</span><button class="linkbtn" data-act="cliOrd" data-arg="${prossimoOrd}" type="button">Ordinati per ${ORD[UI.cliOrd] || ORD.recenti} · cambia</button></div>
+  <div class="stack" id="listaClienti">${L.map(({ c, k }) => { const z = k.az[0]; return `<div class="card crmcard" role="button" tabindex="0" data-act="crmApri" data-arg="${c.id}">
+      <div class="crmtop"><span class="avatar t-${esc(c.tipo || 'finale')}">${esc(iniziali(c.nome))}</span><span class="mid"><span class="t">${esc(c.nome)}</span><span class="small muted">${esc([tipoCliente(c.tipo), c.referente, c.telefono].filter(Boolean).join(' · '))}</span></span>${chipStato(k.stato)}</div>
+      <div class="meta"><span><b class="num">${k.lav.length}</b> ${k.lav.length === 1 ? 'posa' : 'pose'}</span><span><b class="num">${k.int.length}</b> ${k.int.length === 1 ? 'intervento' : 'interventi'}</span>${k.prevAperti.length ? `<span><b class="num">${k.prevAperti.length}</b> ${k.prevAperti.length === 1 ? 'preventivo aperto' : 'preventivi aperti'}</span>` : ''}${k.accessi.length ? '<span class="chip in">area riservata</span>' : ''}<span>${k.ultimo ? 'ultimo contatto ' + giorniFa(k.ultimo) : 'nessun contatto'}</span></div>
+      ${k.prossimi[0] ? `<div class="small">${svg('cal', 'i')} ${k.prossimi[0].kind === 'lavori' ? 'Posa' : 'Intervento'} ${fmtD(k.prossimi[0].d, { weekday: 'short', day: 'numeric', month: 'short' })}</div>` : ''}
+      ${z ? `<div class="small ${z.data && z.data < TODAY ? 'bad' : ''}">${svg('bell', 'i')} ${esc(z.testo)}${z.data ? ' · ' + fmtD(z.data, { day: 'numeric', month: 'short' }) : ''}</div>` : ''}
+    </div>`; }).join('') || `<div class="empty"><b>${S.clienti.length ? 'Nessun cliente trovato.' : 'La rubrica è vuota.'}</b><span class="small">Ogni cliente che scrivi in una posa, un intervento o un preventivo finisce qui da solo, con tutto lo storico.</span></div>`}</div>`;
 }
-function sheetCliente(c) {
+/** La scheda del cliente, a tutta pagina. */
+function rCliente(c) {
+  const k = crmDi(c); cliCtx = c;
+  const tab = UI.crmTab || 'panoramica';
+  const TABC = [['panoramica', 'Panoramica'], ['attivita', 'Attività'], ['lavori', `Lavori ${k.lav.length + k.int.length || ''}`], ['preventivi', `Preventivi ${k.prev.length || ''}`], ['documenti', 'Documenti'], ['contatti', 'Contatti']];
+  const riga = (d, tipo, testo, chip, act, id, futuro) => `<div class="hist ${futuro ? 'futuro' : ''}" role="button" tabindex="0" data-act="${act}" data-id="${esc(id)}"><span class="hd num">${d ? fmtD(d, { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'}</span><span class="hm"><b>${tipo}</b>${testo ? ' · ' + esc(testo) : ''}</span><span class="hr">${chip || ''}</span></div>`;
+  const chipInt = i => { const st = STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0]; return `<span class="chip ${st[2]}">${st[1]}</span>`; };
+  const rigaLav = l => riga(l.data, l.dataFine && l.dataFine > l.data ? `Posa (${daysBetween(l.data, l.dataFine) + 1} giorni)` : 'Posa', [rifDi(l), l.installato || l.indirizzo].filter(Boolean).join(' · '), `<span class="chip ${(l.giorniFatti || []).length ? 'ok' : l.data > TODAY ? 'in' : ''}">${(l.giorniFatti || []).length ? 'Fatta' : l.data > TODAY ? 'In programma' : ammOf(l.amm)[1]}</span>`, 'editLav', l.id, l.data > TODAY);
+  const rigaInt = i => riga(i.dataProg || i.data, i.dataProg ? 'Intervento' : 'Intervento da programmare', [rifDi(i), i.descrizione].filter(Boolean).join(' · '), chipInt(i), 'editInt', i.id, (i.dataProg || '') > TODAY);
+  const rigaPrev = p => riga(p.data, `Preventivo ${p.numero || ''}`, [p.riferimento, p.oggetto || p.cantiere].filter(Boolean).join(' · '), `<span class="num small">${eur(totPrev(p).totale)}</span> <span class="chip ${statoPrev(p.stato)[2]}">${statoPrev(p.stato)[1]}</span>`, 'editPrev', p.id);
+  // la storia: attività scritte a mano + tutto quello che è successo nell'app
+  const att = (c.attivita || []).map(a => ({ d: a.data, ord: a.data + (a.ora || ''), h: `<div class="tl man"><span class="tli">${svg((TIPI_ATT.find(t => t[0] === a.tipo) || TIPI_ATT[4])[2] || 'doc', 'i')}</span><div class="mid"><div class="small muted">${fmtD(a.data, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}${a.ora ? ' · ' + esc(a.ora) : ''} · ${(TIPI_ATT.find(t => t[0] === a.tipo) || TIPI_ATT[4])[1]}</div><div class="prewrap">${esc(a.testo || '')}</div></div><button type="button" class="iconbtn sm" data-act="crmAttDel" data-id="${esc(c.id)}" data-arg="${esc(a.id)}" aria-label="Elimina">×</button></div>` }));
+  const auto = [
+    ...k.prev.map(p => ({ d: p.data, ord: p.data, h: `<div class="tl" role="button" tabindex="0" data-act="editPrev" data-id="${esc(p.id)}"><span class="tli">${svg('prev', 'i')}</span><div class="mid"><div class="small muted">${fmtD(p.data, { day: 'numeric', month: 'short', year: 'numeric' })} · Preventivo</div><div>N. ${esc(p.numero || '')} ${statoPrev(p.stato)[1].toLowerCase()}${p.riferimento ? ' · Rif. ' + esc(p.riferimento) : ''}</div></div></div>` })),
+    ...k.lav.map(l => ({ d: l.data, ord: l.data, h: `<div class="tl" role="button" tabindex="0" data-act="editLav" data-id="${esc(l.id)}"><span class="tli">${svg('cal', 'i')}</span><div class="mid"><div class="small muted">${fmtD(l.data, { day: 'numeric', month: 'short', year: 'numeric' })} · Posa</div><div>${esc([rifDi(l), l.installato || l.indirizzo].filter(Boolean).join(' · ') || 'Posa')}</div></div></div>` })),
+    ...k.int.filter(i => i.dataProg || i.data).map(i => ({ d: i.dataProg || i.data, ord: i.dataProg || i.data, h: `<div class="tl" role="button" tabindex="0" data-act="editInt" data-id="${esc(i.id)}"><span class="tli">${svg('int', 'i')}</span><div class="mid"><div class="small muted">${fmtD(i.dataProg || i.data, { day: 'numeric', month: 'short', year: 'numeric' })} · Intervento ${chipInt(i)}</div><div>${esc(i.descrizione || '')}</div></div></div>` })),
+    ...k.mod.map(m => ({ d: m.data, ord: m.data, h: `<div class="tl" role="button" tabindex="0" data-act="editMod" data-id="${esc(m.id)}"><span class="tli">${svg('clip2', 'i')}</span><div class="mid"><div class="small muted">${fmtD(m.data, { day: 'numeric', month: 'short', year: 'numeric' })} · Modulo</div><div>${esc(m.titolo || '')} · ${m.stato === 'firmato' ? 'firmato' : 'da firmare'}</div></div></div>` })),
+    ...k.richieste.map(r => ({ d: String(r.creato || '').slice(0, 10), ord: String(r.creato || ''), h: `<div class="tl" role="button" tabindex="0" data-act="menuGo" data-arg="richieste"><span class="tli">${svg('bell', 'i')}</span><div class="mid"><div class="small muted">${fmtD(String(r.creato).slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' })} · Richiesta dall'area riservata</div><div>${esc([r.cliente, r.indirizzo].filter(Boolean).join(' · ') || 'Richiesta di preventivo')}</div></div></div>` })),
+  ];
+  const storia = [...att, ...auto].filter(x => x.d && x.d <= TODAY).sort((a, b) => String(b.ord).localeCompare(String(a.ord)));
+  const formAtt = `<div class="panel stack crmadd"><div class="row between"><b>Segna un contatto o una nota</b></div>
+    <div class="chips" role="group" aria-label="Tipo">${TIPI_ATT.map(([t, l], i) => `<button type="button" class="chipf" data-act="crmAttTipo" data-arg="${t}" aria-pressed="${(UI.crmAttTipo || 'chiamata') === t}">${l}</button>`).join('')}</div>
+    <textarea id="crmAttTesto" rows="2" placeholder="Es. sentito per il preventivo, richiama lunedì; misure prese…"></textarea>
+    <div class="row"><input type="date" id="crmAttData" value="${TODAY}" aria-label="Data"><button type="button" class="btn sm primary" data-act="crmAttAdd" data-id="${esc(c.id)}">Aggiungi</button></div></div>`;
+  const formAz = `<div class="row crmazadd"><input id="crmAzTesto" type="text" placeholder="Prossima azione: es. richiamare per conferma"><input id="crmAzData" type="date" value="${piuGiorni(TODAY, 3)}" aria-label="Entro il"><button type="button" class="btn sm primary" data-act="crmAzAdd" data-id="${esc(c.id)}">${svg('plus', 'i')}</button></div>`;
+  const azioni = `<section class="panel stack"><div class="row between"><b>Prossime azioni</b>${k.az.length ? `<span class="chip ${k.scadute.length ? 'bad' : ''}">${k.az.length}</span>` : ''}</div>
+    ${k.az.map(z => `<div class="azrow ${z.data && z.data < TODAY ? 'late' : ''}"><button type="button" class="azcheck" data-act="crmAzFatto" data-id="${esc(c.id)}" data-arg="${esc(z.id)}" aria-label="Fatto"></button><span class="mid">${esc(z.testo)}</span><span class="small ${z.data && z.data < TODAY ? 'bad' : 'muted'}">${z.data ? (z.data === TODAY ? 'oggi' : fmtD(z.data, { day: 'numeric', month: 'short' })) : ''}</span><button type="button" class="iconbtn sm" data-act="crmAzDel" data-id="${esc(c.id)}" data-arg="${esc(z.id)}" aria-label="Elimina">×</button></div>`).join('') || '<div class="small muted">Nessuna azione in sospeso. Aggiungine una per non dimenticarti di richiamare: te la ricordo nel «Da fare» del giorno.</div>'}
+    ${formAz}</section>`;
+  const fatte = (c.azioni || []).filter(z => z.fatto).slice(-5).reverse();
+  let corpo = '';
+  if (tab === 'panoramica') corpo = `
+    <div class="kpis"><div class="kpi"><div class="l">Pose</div><div class="v">${k.lav.length}</div></div><div class="kpi"><div class="l">Interventi</div><div class="v">${k.int.length}</div></div><div class="kpi"><div class="l">Preventivi aperti</div><div class="v">${k.prevAperti.length}</div></div><div class="kpi"><div class="l">Preventivi accettati</div><div class="v">${k.conv == null ? '—' : k.conv + '%'}</div></div></div>
+    ${azioni}
+    <section class="stack"><div class="row between"><h3>In programma</h3><div class="row"><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button></div></div>
+      <div class="histlist">${k.prossimi.map(p => p.kind === 'lavori' ? rigaLav(p.x) : rigaInt(p.x)).join('') || '<div class="small muted">Niente in programma.</div>'}</div></section>
+    ${k.prevAperti.length ? `<section class="stack"><h3>Preventivi aperti</h3><div class="histlist">${k.prevAperti.map(rigaPrev).join('')}</div></section>` : ''}
+    <section class="stack"><div class="row between"><h3>Ultime attività</h3><button class="linkbtn small" data-act="crmTab" data-arg="attivita" type="button">Tutte</button></div>
+      <div class="timeline">${storia.slice(0, 4).map(x => x.h).join('') || '<div class="small muted">Ancora niente.</div>'}</div></section>
+    ${c.note ? `<section class="panel stack"><b>Note</b><div class="small prewrap">${esc(c.note)}</div></section>` : ''}`;
+  else if (tab === 'attivita') corpo = `${formAtt}<div class="timeline">${storia.map(x => x.h).join('') || '<div class="small muted">Ancora niente: segna qui telefonate, sopralluoghi e accordi presi.</div>'}</div>
+    ${fatte.length ? `<details><summary class="small muted">Azioni fatte di recente</summary><ul class="small">${fatte.map(z => `<li>${esc(z.testo)}${z.fattoIl ? ' · ' + fmtD(z.fattoIl, { day: 'numeric', month: 'short' }) : ''} <button type="button" class="linkbtn" data-act="crmAzRiapri" data-id="${esc(c.id)}" data-arg="${esc(z.id)}">riapri</button></li>`).join('')}</ul></details>` : ''}`;
+  else if (tab === 'lavori') {
+    const fut = [...k.lav.filter(l => (l.dataFine || l.data) >= TODAY).map(l => [l.data, rigaLav(l)]), ...k.int.filter(i => !intChiuso(i)).map(i => [i.dataProg || '9999', rigaInt(i)])].sort((a, b) => a[0].localeCompare(b[0]));
+    const pas = [...k.lav.filter(l => (l.dataFine || l.data) < TODAY).map(l => [l.data, rigaLav(l)]), ...k.int.filter(intChiuso).map(i => [i.dataProg || i.data, rigaInt(i)])].sort((a, b) => b[0].localeCompare(a[0]));
+    corpo = `<div class="row"><button class="btn sm primary" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button><button class="btn sm dark" data-act="cliCal" type="button">${svg('cal', 'i')} Calendario</button></div>
+      <section class="stack"><h3>Da fare</h3><div class="histlist">${fut.map(x => x[1]).join('') || '<div class="small muted">Niente da fare.</div>'}</div></section>
+      <section class="stack"><h3>Fatti</h3><div class="histlist">${pas.map(x => x[1]).join('') || '<div class="small muted">Ancora nessun lavoro.</div>'}</div></section>`;
+  } else if (tab === 'preventivi') corpo = `<div class="row"><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button></div>
+    ${k.prev.length ? `<div class="small muted">${k.prev.length} preventivi · ${k.prev.filter(p => p.stato === 'accettato').length} accettati${k.conv != null ? ` (${k.conv}% di quelli decisi)` : ''}</div>` : ''}
+    <div class="histlist">${[...k.prev].sort((a, b) => String(b.data).localeCompare(String(a.data))).map(rigaPrev).join('') || '<div class="small muted">Nessun preventivo.</div>'}</div>
+    ${k.richieste.length ? `<section class="stack"><h3>Richieste dall'area riservata</h3><div class="histlist">${k.richieste.map(r => riga(String(r.creato).slice(0, 10), 'Richiesta', [r.cliente, r.indirizzo].filter(Boolean).join(' · '), `<span class="chip">${{ nuova: 'Nuova', in_lavorazione: 'In preparazione', inviato: 'Preventivo pronto', chiusa: 'Chiusa' }[r.stato] || ''}</span>`, 'menuGo', '', false).replace('data-act="menuGo" data-id=""', 'data-act="menuGo" data-arg="richieste"')).join('')}</div></section>` : ''}`;
+  else if (tab === 'documenti') {
+    const g = k.accessi.length ? gruppoDi(k.accessi[0].user_id) : null;
+    corpo = `<div class="row"><button class="btn sm primary" data-act="cliMod" type="button">+ Modulo</button>${g ? `<button class="btn sm" data-act="crmCartella" data-arg="${esc(g.key)}" type="button">${svg('folder', 'i')} Cartella nell'area riservata</button>` : ''}</div>
+      <section class="stack"><h3>Moduli</h3><div class="histlist">${[...k.mod].sort((a, b) => String(b.data).localeCompare(String(a.data))).map(m => riga(m.data, nomeCartModulo(m), m.titolo !== nomeCartModulo(m) ? m.titolo : '', `<span class="chip ${m.stato === 'firmato' ? 'ok' : ''}">${m.stato === 'firmato' ? 'Firmato' : 'Da firmare'}</span>`, 'editMod', m.id)).join('') || '<div class="small muted">Nessun modulo.</div>'}</div></section>
+      ${g ? '' : '<div class="small muted">Questo cliente non ha l\'accesso all\'area riservata: i documenti glieli mandi tu dal tasto «PDF».</div>'}`;
+  } else if (tab === 'contatti') corpo = `
+    <section class="panel stack"><div class="row between"><b>Dati</b><button class="btn sm" data-act="crmDati" data-id="${esc(c.id)}" type="button">Modifica</button></div>
+      <dl class="crmdati">${[['Tipo', tipoCliente(c.tipo)], ['Referente', c.referente], ['Telefono', c.telefono], ['Email', c.email], ['Indirizzo', c.indirizzo], ['P. IVA / C.F.', c.piva], ['SDI o PEC', c.sdi], ['Cliente dal', c.creato ? fmtD(c.creato, { day: 'numeric', month: 'long', year: 'numeric' }) : '']].filter(([, v]) => v).map(([l, v]) => `<dt>${l}</dt><dd>${esc(v)}</dd>`).join('')}</dl></section>
+    <section class="stack"><div class="row between"><h3>Persone di riferimento</h3><button class="btn sm" data-act="crmCont" data-id="${esc(c.id)}" type="button">${svg('plus', 'i')} Persona</button></div>
+      ${(c.contatti || []).map(p => `<div class="card"><div class="row between"><span class="t">${esc(p.nome || '')}${p.ruolo ? ` <small class="muted">${esc(p.ruolo)}</small>` : ''}</span><button type="button" class="btn sm" data-act="crmCont" data-id="${esc(c.id)}" data-arg="${esc(p.id)}">Modifica</button></div>
+        <div class="links">${p.telefono ? `<a href="tel:${esc(p.telefono.replace(/\s/g, ''))}">${esc(p.telefono)}</a><a href="https://wa.me/${esc(telWa(p.telefono))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : ''}</div></div>`).join('') || '<div class="small muted">Aggiungi le persone con cui parli: titolare, ufficio tecnico, amministrazione, capocantiere…</div>'}</section>
+    ${k.accessi.length ? `<section class="panel stack"><b>Accessi all'area riservata</b>${k.accessi.map(m => `<div class="small">${esc(m.nome || '')}${m.email ? ' · ' + esc(m.email) : ''}</div>`).join('')}<div class="small muted">Vedono una sola cartella di documenti.</div></section>` : ''}`;
+  return `<div class="crmhead">
+    <button type="button" class="linkbtn small" data-act="crmIndietro">‹ Tutti i clienti</button>
+    <div class="crmtop big"><span class="avatar t-${esc(c.tipo || 'finale')}">${esc(iniziali(c.nome))}</span><span class="mid"><h2>${esc(c.nome)}</h2><span class="small muted">${esc([tipoCliente(c.tipo), c.referente].filter(Boolean).join(' · '))}${k.ultimo ? ' · ultimo contatto ' + giorniFa(k.ultimo) : ''}</span></span></div>
+    <div class="row">${chipStato(k.stato)}<select id="crmStato" data-id="${esc(c.id)}" aria-label="Stato del cliente" class="sm">${[['', `Stato automatico${k.statoAuto ? '' : ''}`], ...STATI_CLI.map(([v, l]) => [v, l])].map(([v, l]) => `<option value="${v}" ${(c.stato || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>${k.accessi.length ? '<span class="chip in">area riservata</span>' : ''}</div>
+    <div class="row crmquick">${contattiRapidi(c, true)}<button class="btn sm" data-act="crmDati" data-id="${esc(c.id)}" type="button">Modifica dati</button></div>
+    <div class="row crmquick"><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button><button class="btn sm" data-act="cliMod" type="button">+ Modulo</button></div>
+  </div>
+  <div class="seg segscroll crmtabs" role="tablist">${TABC.map(([t, l]) => `<button type="button" data-act="crmTab" data-arg="${t}" aria-pressed="${tab === t}">${l.trim()}</button>`).join('')}</div>
+  <div class="stack">${corpo}</div>`;
+}
+/** Persona di riferimento del cliente. */
+function sheetContatto(c, p) {
+  const isNew = !p; p = p || {};
+  openSheet(isNew ? 'Nuova persona' : 'Persona di riferimento', `
+    <div class="g2">${F('Nome', inp('pNome', p.nome, 'text', 'required'))}${F('Ruolo', inp('pRuolo', p.ruolo, 'text', 'placeholder="Es. ufficio tecnico" list="ruolilist"'))}</div>
+    <datalist id="ruolilist">${['Titolare', 'Ufficio tecnico', 'Amministrazione', 'Commerciale', 'Capocantiere', 'Progettista'].map(r => `<option value="${r}">`).join('')}</datalist>
+    <div class="g2">${F('Telefono', inp('pTel', p.telefono, 'tel'))}${F('Email', inp('pEmail', p.email, 'email'))}</div>`,
+  async fd => {
+    const x = { id: p.id || nuovoId(), nome: fd.get('pNome').trim(), ruolo: fd.get('pRuolo').trim(), telefono: fd.get('pTel').trim(), email: fd.get('pEmail').trim() };
+    const cur = S.clienti.find(y => y.id === c.id) || c;
+    const L = (cur.contatti || []).filter(y => y.id !== x.id);
+    store.put('clienti', c.id, { ...stripId(cur), contatti: isNew ? [...L, x] : (cur.contatti || []).map(y => y.id === x.id ? x : y) });
+    toast('Salvato');
+  }, { del: isNew ? null : async () => { const cur = S.clienti.find(y => y.id === c.id) || c; store.put('clienti', c.id, { ...stripId(cur), contatti: (cur.contatti || []).filter(y => y.id !== p.id) }); toast('Persona tolta'); } });
+}
+/** Modifica un elenco del cliente (attività, azioni) e salva. */
+function cambiaCliente(id, fn) {
+  const c = S.clienti.find(x => x.id === id); if (!c) return;
+  store.put('clienti', id, fn({ ...stripId(c) }));
+  render();
+}
+function sheetCliente(c, soloDati = false) {
   const isNew = !c; c = c || { tipo: 'finale' };
   const s = isNew ? null : storicoCliente(c);
   const az = AZ();
@@ -3337,8 +3613,8 @@ function sheetCliente(c) {
     ...s.int.map(i => ({ d: i.dataProg || i.data, h: voce(i.dataProg || i.data, 'Intervento', i.descrizione, i.costo, `<span class="chip ${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[2]}">${(STATI.find(x => x[0] === (i.stato || 'aperto')) || STATI[0])[1]}</span>`, 'editInt', i.id) })),
   ].sort((a, b) => String(b.d).localeCompare(String(a.d)));
   cliCtx = isNew ? null : c;
-  openSheet(isNew ? 'Nuovo cliente' : c.nome, `
-    ${isNew ? '' : `<div class="kpis"><div class="kpi"><div class="l">Lavorato</div><div class="v">${eur(s.fatturato)}</div></div><div class="kpi"><div class="l">Quest'anno</div><div class="v">${eur(s.anno)}</div></div><div class="kpi"><div class="l">Da incassare</div><div class="v">${eur(s.aperto)}</div></div><div class="kpi"><div class="l">Ultimo lavoro</div><div class="v">${s.ultimo ? fmtD(s.ultimo, { day: 'numeric', month: 'short' }) : '—'}</div></div></div>
+  openSheet(isNew ? 'Nuovo cliente' : soloDati ? 'Dati del cliente' : c.nome, `
+    ${isNew || soloDati ? '' : `<div class="kpis"><div class="kpi"><div class="l">Lavorato</div><div class="v">${eur(s.fatturato)}</div></div><div class="kpi"><div class="l">Quest'anno</div><div class="v">${eur(s.anno)}</div></div><div class="kpi"><div class="l">Da incassare</div><div class="v">${eur(s.aperto)}</div></div><div class="kpi"><div class="l">Ultimo lavoro</div><div class="v">${s.ultimo ? fmtD(s.ultimo, { day: 'numeric', month: 'short' }) : '—'}</div></div></div>
     <div class="row">${c.telefono ? `<a class="btn sm" href="tel:${esc(c.telefono.replace(/\s/g, ''))}">Chiama</a><a class="btn sm" href="https://wa.me/${esc(c.telefono.replace(/\D/g, '').replace(/^(?!39)(?=3)/, '39'))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}">Email</a>` : ''}${c.indirizzo ? `<a class="btn sm" href="https://maps.apple.com/?q=${encodeURIComponent(c.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>
     <div class="row"><button class="btn sm dark" data-act="cliCal" type="button">${svg('cal', 'i')} Vedi nel calendario</button><button class="btn sm primary" data-act="cliPrev" type="button">+ Preventivo</button><button class="btn sm" data-act="cliLav" type="button">+ Posa</button><button class="btn sm" data-act="cliInt" type="button">+ Intervento</button><button class="btn sm" data-act="cliMod" type="button">+ Modulo</button></div>
     <div class="fieldset"><span class="fs-t">Storico</span><div class="histlist">${storia.map(x => x.h).join('') || '<div class="small muted">Ancora nessun lavoro.</div>'}</div></div>`}
@@ -3357,6 +3633,7 @@ function sheetCliente(c) {
     const d = { ...stripId(c), nome, tipo: fd.get('kTipo'), referente: fd.get('kRef').trim(), telefono: fd.get('kTel').trim(), email: fd.get('kEmail').trim(), piva: fd.get('kPiva').trim(), indirizzo: fd.get('kInd').trim(), sdi: fd.get('kSdi').trim(), iva: fd.get('kIva'), note: fd.get('kNote').trim() };
     if (isNew) d.creato = TODAY;
     const id = store.put('clienti', isNew ? null : c.id, d);
+    if (isNew) { UI.cliApri = id; UI.crmTab = 'panoramica'; UI.tab = 'cli'; }
     if (!isNew && normNome(c.nome) !== normNome(nome)) {
       // nome cambiato: aggiorna anche pose, interventi e preventivi collegati
       for (const x of s.lav) store.put('lavori', x.id, { ...stripId(x), cliente: nome, clienteId: id });
@@ -3364,7 +3641,7 @@ function sheetCliente(c) {
       for (const x of s.prev) store.put('preventivi', x.id, { ...stripId(x), cliente: { ...(x.cliente || {}), nome }, clienteId: id });
     }
     toast('Cliente salvato');
-  }, { del: isNew ? null : async () => { store.drop('clienti', c.id); toast('Cliente tolto dalla rubrica (i lavori restano)'); } });
+  }, { del: isNew ? null : async () => { store.drop('clienti', c.id); if (UI.cliApri === c.id) UI.cliApri = null; toast('Cliente tolto dalla rubrica (i lavori restano)'); } });
 }
 let cliCtx = null;
 /** Campo cliente: si scrive il nome o si sceglie dalla rubrica. */
@@ -3571,6 +3848,11 @@ async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica
  */
 async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = null, kind = null }, rivIds) {
   const blob = new Blob([bytes], { type: 'application/pdf' });
+  // più accessi della stessa azienda: una sola cartella (quella del primo accesso); tolgo le copie vecchie negli altri
+  const G = rivIds.map(r => gruppoDi(r)).filter(Boolean);
+  const vecchie = G.flatMap(g => g.membri.map(m => m.user_id).filter(u => u !== g.primo).map(u => `${chiave}-${u}`));
+  rivIds = [...new Set(rivIds.map(r => gruppoDi(r)?.primo || r))];
+  if (vecchie.length) store.tabella('documenti_cliente').delete().in('id', vecchie).then(() => {}, () => {});
   for (const rid of rivIds) {
     const path = await store.caricaFisso(`rivenditori/${rid}/${cartella}/${chiave}.pdf`, blob);
     const { error } = await store.tabella('documenti_cliente').upsert({ id: `${chiave}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id, kind, data: data || TODAY, creato: new Date().toISOString() });
@@ -3604,7 +3886,8 @@ function apriPdf(tipo, doc, indietro) {
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il PDF'); return; }
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
-  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo, bytes, pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : null };
+  pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo, bytes,
+    pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : tipo === 'consuntivo' ? { ...pubGenerico(nome, { cliente: doc.cliente?.nome, clienteId: doc.clienteId || trovaCliente(doc.cliente?.nome)?.id }, 'consuntivi'), chiave: `cons-${hashTesto([doc.cliente?.nome, doc.data, doc.dataFine].join('|'))}`, data: doc.dataFine || doc.data || TODAY } : null };
   if (pdfCorrente.pub && GESTORE() && store.st.mode !== 'demo') setTimeout(() => boxPubblica(), 0);
   let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
   openSheet(tipo === 'preventivo' ? 'Preventivo pronto' : 'Consuntivo pronto', `
@@ -3898,7 +4181,7 @@ document.addEventListener('click', async e => {
   if (e.target.closest('.card a')) return;
   const go = () => { render(); window.scrollTo({ top: 0 }); };
   switch (a) {
-    case 'tab': UI.tab = arg; try { history.replaceState(null, '', '#' + arg); } catch {} go(); break;
+    case 'tab': if (arg === 'cli' && UI.tab === 'cli') UI.cliApri = null; UI.tab = arg; try { history.replaceState(null, '', '#' + arg); } catch {} go(); break;
     case 'fatt': UI.tab = 'cons'; go(); break;
     case 'mag': UI.tab = 'an'; go(); break;
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
@@ -3938,10 +4221,19 @@ document.addEventListener('click', async e => {
     case 'pdfPubblica': {
       const pub = pdfCorrente?.pub; if (!pub) break;
       b.disabled = true;
-      try { await pubblicaPdf({ ...pub, bytes: pdfCorrente.bytes }, [id]); b.textContent = '✓ Messo nella sua area'; toast('Documento messo nell\'area del rivenditore'); }
+      try { await pubblicaPdf({ ...pub, bytes: pdfCorrente.bytes }, [id]); b.textContent = '✓ Messo nella sua cartella'; toast('Documento messo nella cartella del rivenditore'); }
       catch (e) { b.disabled = false; toast(e.userMsg || 'Pubblicazione non riuscita: controlla la rete e riprova'); }
       break;
     }
+    case 'modVai': UI.modT = arg || null; UI.modC = null; render(); window.scrollTo({ top: 0 }); break;
+    case 'modCli': UI.modC = arg; render(); window.scrollTo({ top: 0 }); break;
+    case 'modEsporta': {
+      const L = [...S.moduli].sort((a, b) => String(b.data).localeCompare(String(a.data))).filter(m => (!UI.modT || cartModulo(m) === UI.modT) && (!UI.modC || cliModulo(m).k === UI.modC));
+      if (L.length > 1 && !b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = `Tocca di nuovo: metto ${L.length} moduli nelle cartelle`; break; }
+      b.disabled = true; await esportaModuli(L); b.disabled = false; b.classList.remove('armed'); render(); break;
+    }
+    case 'rappVai': UI.rappG = arg || null; UI.rappT = null; render(); window.scrollTo({ top: 0 }); break;
+    case 'rappTipo': UI.rappT = arg; render(); window.scrollTo({ top: 0 }); break;
     case 'rappApri': { const d = (RAPP.lista || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rappTogli': {
       const d = (RAPP.lista || []).find(x => x.id === id); if (!d) break;
@@ -3980,6 +4272,27 @@ document.addEventListener('click', async e => {
         const sov = sovrapposti('interventi', x.id, [d.dataProg], d);
         toast(sov ? `Fissato. Attenzione: si sovrappone a ${sov}` : `Fissato il ${fmtD(d.dataProg, { weekday: 'long', day: 'numeric', month: 'long' })}`);
       }, { saveLabel: 'Fissa' });
+      break;
+    }
+    case 'intRiprog': {
+      const x = S.interventi.find(r => r.id === id); if (!x || !x.dataProg) break;
+      const prima = x.dataProg;
+      openSheet('Riprogramma l\'intervento', `<div class="small">${esc(x.cliente || '')}${x.descrizione ? ' · ' + esc(x.descrizione) : ''}</div>
+        <div class="small muted">Il passaggio del <b>${fmtD(prima, { weekday: 'long', day: 'numeric', month: 'long' })}</b> resta segnato in calendario come «lavoro non finito», e l'intervento compare anche sulla nuova data.</div>
+        ${F('Cosa resta da fare (facoltativo)', `<textarea name="rnota" id="f_rnota" rows="2" placeholder="Es. manca la guarnizione, da ordinare"></textarea>`)}
+        <div class="g2">${F('Nuova data', inp('rdata', piuGiorni(prima > TODAY ? prima : TODAY, 1), 'date', 'required'))}</div>${campoOrario(x, 'int')}
+        ${tog('rsenza', 'Data ancora da decidere', false, 'resta in «Da programmare»')}`, async fd => {
+        const senza = !!fd.get('rsenza'), nd = senza ? '' : fd.get('rdata');
+        if (!senza && (!nd || nd <= prima)) throw Object.assign(new Error('data'), { userMsg: 'Scegli una data dopo il ' + fmtD(prima, { day: 'numeric', month: 'short' }) });
+        const nota = String(fd.get('rnota') || '').trim();
+        const o = orarioDi(x);
+        const visite = [...visiteDi(x).filter(v => v.data !== prima), { data: prima, ...(o ? { ora: o.join('-') } : {}), ...(nota ? { nota } : {}) }].sort((a, b) => a.data.localeCompare(b.data));
+        const d = { ...stripId(x), visite, dataProg: nd, stato: senza ? 'aperto' : 'programmato', ...(senza ? {} : leggiOrario(fd)) };
+        if (nota) d.sospesi = [...(x.sospesi || []), { t: nota, fatto: false }];
+        store.put('interventi', x.id, d); if (nd) spostaPrenotazioniDi(x.id, nd, nd);
+        const sov = nd && sovrapposti('interventi', x.id, [nd], d);
+        toast(senza ? 'Segnato: resta tra quelli da programmare' : sov ? `Riprogrammato. Attenzione: si sovrappone a ${sov}` : `Riprogrammato al ${fmtD(nd, { weekday: 'long', day: 'numeric', month: 'long' })}`);
+      }, { saveLabel: 'Riprogramma' });
       break;
     }
     case 'seg': UI.seg = arg; render(); break;
@@ -4083,10 +4396,34 @@ document.addEventListener('click', async e => {
     case 'evTipo': document.querySelectorAll('.evseg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); $('#f_etipo').value = arg; break;
     case 'cliCal': { const c = cliCtx; if (!c) break; const s2 = storicoCliente(c); const prox = [...s2.lav.map(x => x.data), ...s2.int.map(x => x.dataProg || x.data)].filter(Boolean).sort(); const d = prox.find(x => x >= TODAY) || prox.pop() || TODAY; UI.calCli = c.id; UI.tab = 'cal'; UI.day = d; UI.month = d.slice(0, 7); closeSheet(); render(); window.scrollTo({ top: 0 }); break; }
     case 'calTutti': UI.calCli = null; render(); break;
-    case 'editCli': sheetCliente(S.clienti.find(x => x.id === id)); break;
+    case 'editCli': case 'crmApri': {
+      const cid = id || arg; if (!S.clienti.some(x => x.id === cid)) break;
+      closeSheet(); UI.tab = 'cli'; if (UI.cliApri !== cid) UI.crmTab = 'panoramica'; UI.cliApri = cid;
+      try { history.replaceState(null, '', '#cli'); } catch {} render(); window.scrollTo({ top: 0 }); break;
+    }
+    case 'crmIndietro': UI.cliApri = null; render(); window.scrollTo({ top: 0 }); break;
+    case 'crmTab': UI.crmTab = arg; render(); break;
+    case 'crmDati': sheetCliente(S.clienti.find(x => x.id === id), true); break;
+    case 'crmCont': { const c = S.clienti.find(x => x.id === id); if (c) sheetContatto(c, arg ? (c.contatti || []).find(p => p.id === arg) : null); break; }
+    case 'crmCartella': UI.tab = 'rapportiriv'; UI.rappG = arg; UI.rappT = null; render(); window.scrollTo({ top: 0 }); break;
+    case 'crmAttTipo': UI.crmAttTipo = arg; b.parentElement.querySelectorAll('[data-act="crmAttTipo"]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); break;
+    case 'crmAttAdd': {
+      const t = $('#crmAttTesto').value.trim(); if (!t) { toast('Scrivi cosa è successo'); $('#crmAttTesto').focus(); break; }
+      const data = $('#crmAttData').value || TODAY, ora = data === TODAY ? new Date().toTimeString().slice(0, 5) : '';
+      cambiaCliente(id, c => ({ ...c, attivita: [...(c.attivita || []), { id: nuovoId(), tipo: UI.crmAttTipo || 'chiamata', data, ora, testo: t }] })); toast('Segnato'); break;
+    }
+    case 'crmAttDel': if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Elimina?'; break; } cambiaCliente(id, c => ({ ...c, attivita: (c.attivita || []).filter(a => a.id !== arg) })); break;
+    case 'crmAzAdd': {
+      const t = $('#crmAzTesto').value.trim(); if (!t) { toast('Scrivi la prossima azione'); $('#crmAzTesto').focus(); break; }
+      cambiaCliente(id, c => ({ ...c, azioni: [...(c.azioni || []), { id: nuovoId(), testo: t, data: $('#crmAzData').value || '', creata: TODAY }] })); toast('Azione aggiunta: te la ricordo nel «Da fare»'); break;
+    }
+    case 'crmAzFatto': cambiaCliente(id, c => ({ ...c, azioni: (c.azioni || []).map(z => z.id === arg ? { ...z, fatto: true, fattoIl: TODAY } : z) })); toast('Fatto'); break;
+    case 'crmAzRiapri': cambiaCliente(id, c => ({ ...c, azioni: (c.azioni || []).map(z => z.id === arg ? { ...z, fatto: false, fattoIl: '' } : z) })); break;
+    case 'crmAzDel': cambiaCliente(id, c => ({ ...c, azioni: (c.azioni || []).filter(z => z.id !== arg) })); break;
+    case 'cliStato': UI.cliStato = UI.cliStato === arg && arg !== 'tutti' ? 'tutti' : arg; UI.cliApri = null; render(); break;
     case 'importaCli': { const n = importaClienti(); render(); toast(`${n} ${n === 1 ? 'scheda creata' : 'schede create'}`); break; }
     case 'cliTipo': UI.cliTipo = arg; render(); break;
-    case 'cliOrd': UI.cliOrd = UI.cliOrd === 'nome' ? 'recenti' : 'nome'; render(); break;
+    case 'cliOrd': UI.cliOrd = arg || (UI.cliOrd === 'nome' ? 'recenti' : 'nome'); render(); break;
     case 'cliPrev': { const c = cliCtx; if (!c) break; sheetPrev(null); $('#f_cnome').value = c.nome; compilaDaRubrica(c.nome); break; }
     case 'cliLav': { const c = cliCtx; if (!c) break; sheetLav(null, { cliente: c.nome }); break; }
     case 'cliInt': { const c = cliCtx; if (!c) break; sheetInt(null); $('#f_cliente').value = c.nome; compilaDaRubrica(c.nome); aggiornaCliInfo(); break; }

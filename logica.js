@@ -68,6 +68,11 @@ export function promemoria(S, today = oggi(), momento = 'app') {
       if (!x.scadenza) continue; const n = daysBetween(today, x.scadenza);
       if (n <= 30) out.push({ lvl: n < 0 ? 'bad' : n <= 7 ? 'warn' : 'in', txt: `${x.titolo || 'Documento'} ${n < 0 ? `scaduto da ${-n} giorni` : n === 0 ? 'scade oggi' : `scade tra ${n} giorni`}`, sub: 'documento per i rivenditori: caricane uno aggiornato', act: 'tab', arg: 'documenti' });
     }
+    // clienti: le prossime azioni del CRM arrivate a scadenza
+    for (const c of S.clienti || []) for (const z of c.azioni || []) {
+      if (z.fatto || !z.data || z.data > today) continue; const n = daysBetween(z.data, today);
+      out.push({ lvl: n > 0 ? 'bad' : 'warn', txt: `${c.nome}: ${z.testo || 'da ricontattare'}`, sub: n > 0 ? `azione cliente in ritardo di ${n} ${n === 1 ? 'giorno' : 'giorni'}` : 'azione cliente per oggi', act: 'crmApri', arg: c.id });
+    }
     if (N.furgone) {
       for (const [k, lab] of SCAD) {
         const d = f[k]; if (!d) continue;

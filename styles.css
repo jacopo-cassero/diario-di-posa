@@ -280,7 +280,7 @@ a.btn.primary{color:var(--tape-ink)}
 .hist .hd{color:var(--muted);font-size:.8rem}
 .hist .hm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hist .hr{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.tabs-in{grid-template-columns:repeat(7,1fr)}
+.tabs-in{grid-template-columns:repeat(6,1fr)}
 .tab{font-size:.6rem}
 .tab svg{width:21px;height:21px}
 .clipick{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:6px}
@@ -546,3 +546,55 @@ canvas.pad{cursor:pointer}
 .difflist li{padding-left:10px;border-left:3px solid var(--muted);overflow-wrap:anywhere}
 .difflist li.piu{border-left-color:var(--ok)}.difflist li.meno{border-left-color:var(--bad)}
 .card.tap{cursor:pointer}
+.tab{position:relative}
+.tabbadge{position:absolute;top:4px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--bad,#c0392b);color:#fff;font-size:.66rem;line-height:17px;font-weight:700;text-align:center}
+.visita{border-left:3px solid var(--warn);background:var(--warn-bg);padding:6px 10px;border-radius:6px}
+/* cartelle */
+.card.folderc{display:flex;align-items:center;gap:12px;text-align:left;width:100%;cursor:pointer}
+.card.folderc>svg{width:26px;height:26px;flex:none;stroke:var(--accent,#d9a400);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.card.folderc .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.card.folderc .go{color:var(--muted);font-size:1.3rem}
+.crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;color:var(--muted)}
+details.cartella{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:var(--card,#fff)}
+details.cartella>summary{display:flex;align-items:center;gap:8px;list-style:none}
+details.cartella>summary::-webkit-details-marker{display:none}
+details.cartella[open]>summary{margin-bottom:10px}
+/* CRM clienti */
+.crmkpi .kpi{text-align:left;font:inherit;color:inherit;cursor:pointer}
+.crmkpi div.kpi{cursor:default}
+.avatar{width:42px;height:42px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:700;font-size:.95rem;letter-spacing:.02em;background:var(--line);color:var(--ink,#222)}
+.avatar.t-rivenditore{background:#dbe8f7;color:#1d4f86}.avatar.t-impresa{background:#fbe8c8;color:#8a5a00}.avatar.t-finale{background:#e3efe3;color:#2f6b34}
+.crmtop{display:flex;align-items:center;gap:12px}
+.crmtop .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.crmtop .t{font-weight:700}
+.crmtop.big .avatar{width:56px;height:56px;font-size:1.2rem}
+.crmtop.big h2{margin:0}
+.crmhead{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.crmquick{flex-wrap:wrap}
+.crmtabs{margin-bottom:12px}
+.crmcard{display:flex;flex-direction:column;gap:6px}
+.azrow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.azrow:last-of-type{border-bottom:0}
+.azrow .mid{flex:1;min-width:0;text-align:left}
+.azrow.late .mid{color:var(--bad)}
+.azcheck{width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);background:none;flex:none;cursor:pointer}
+.azcheck:hover{border-color:var(--ok);background:var(--ok-bg,#e3efe3)}
+.crmazadd{flex-wrap:nowrap}
+.crmazadd input[type=text]{flex:1;min-width:0}
+.crmazadd input[type=date]{width:auto}
+.crmoggi{border-left:4px solid var(--warn)}
+.small.bad,.bad.small{color:var(--bad)}
+.timeline{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--line);margin-left:12px}
+.tl{display:flex;gap:10px;align-items:flex-start;padding:8px 0 8px 0;position:relative;cursor:pointer}
+.tl.man{cursor:default}
+.tl .tli{width:26px;height:26px;border-radius:50%;background:var(--card,#fff);border:2px solid var(--line);display:grid;place-items:center;margin-left:-14px;flex:none}
+.tl.man .tli{border-color:var(--accent,#d9a400)}
+.tl .tli svg{width:14px;height:14px}
+.tl .mid{flex:1;min-width:0}
+.hist.futuro .hd{color:var(--accent,#b88a00);font-weight:700}
+.crmdati{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+.crmdati dt{color:var(--muted);font-size:.85rem}.crmdati dd{margin:0;overflow-wrap:anywhere}
+
+.iconbtn.sm{width:30px;height:30px;font-size:1rem;flex:none}
+.iconbtn.sm.armed{width:auto;padding:0 8px;font-size:.75rem;color:var(--bad)}
+.tl .tli svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
