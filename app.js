@@ -1434,6 +1434,8 @@ function aggiornaStimaMat(righe) {
 }
 const LIST = () => (S.listino && Array.isArray(S.listino.voci) ? { ...LISTINO_BASE, ...S.listino } : LISTINO_BASE);
 const AZ = () => ({ ...AZIENDA_BASE, ...(S.azienda || {}) });
+/** Etichetta del totale di posa e interventi: per chi è forfettario il prezzo è già quello finale. */
+const lblTotLav = () => ['fo', 'rc'].includes(String(AZ().ivaPredefinita)) ? 'Totale' : 'Totale (IVA esclusa)';
 const IMG = {};
 async function caricaImmagini() {
   for (const [k, f] of [['logo', 'icone/logo-cassero.jpg'], ['posaclima', 'icone/badge-posaclima.jpg'], ['dekra', 'icone/badge-dekra.jpg']]) {
@@ -3132,14 +3134,14 @@ function aggiornaTotali() {
   if (kmP > 0) h += `<div class="tl"><span>Trasferta ${num(kmP, 1)} km × ${eur(ekmP)}</span><span class="price">${eur(kmP * ekmP)}</span></div>`;
   if (t.urgenzaPct) h += `<div class="tl"><span>Totale voci</span><span class="price">${eur(t.imponibileRighe)}</span></div><div class="tl"><span>Urgenza ${num(t.urgenzaPct)}%</span><span class="price">+${eur(t.urgenza)}</span></div>`;
   if (kind === 'prev' && t.ivaPct > 0) h += `<div class="tl"><span>Imponibile</span><span class="price">${eur(t.imponibile)}</span></div><div class="tl"><span>${esc(t.ivaLabel)}</span><span class="price">${eur(t.iva)}</span></div>`;
-  h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : 'Totale (IVA esclusa)'}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
+  h += `<div class="tl big"><span>${kind === 'prev' ? (t.ivaPct > 0 ? 'Totale IVA compresa' : 'Totale') : lblTotLav()}</span><span class="price">${eur(kind === 'prev' ? t.totale : t.imponibile)}</span></div>`;
   $('#totBox').innerHTML = righe.length || kmP > 0 ? h : '<div class="small muted">Scegli le voci dal listino: il prezzo si calcola da solo, al pezzo o a ore.</div>';
   const imp = kind === 'lav' ? $('#f_importo') : kind === 'int' ? $('#f_costo') : null;
   const gg = kind === 'lav' ? giorniForm() : 1;
   const trasf = Math.round(n2($('#f_km')?.value) * n2($('#f_euroKm')?.value) * gg * 100) / 100;
   let target = t.imponibile + trasf, conVoci = righe.length > 0 || trasf > 0;
   if (kind !== 'prev' && trasf > 0) {
-    $('#totBox').innerHTML = (righe.length ? h.replace('Totale (IVA esclusa)', t.urgenzaPct ? 'Voci con urgenza' : 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km${gg > 1 ? ` × ${gg} giorni` : ''} × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>Totale (IVA esclusa)</span><span class="price">${eur(target)}</span></div>`;
+    $('#totBox').innerHTML = (righe.length ? h.replace(lblTotLav(), t.urgenzaPct ? 'Voci con urgenza' : 'Totale voci') : '') + `<div class="tl"><span>Trasferta ${num(n2($('#f_km').value), 1)} km${gg > 1 ? ` × ${gg} giorni` : ''} × ${eur(n2($('#f_euroKm').value))}</span><span class="price">${eur(trasf)}</span></div><div class="tl big"><span>${lblTotLav()}</span><span class="price">${eur(target)}</span></div>`;
   }
   if (kind === 'lav' && $('#f_calcolo')?.value === 'ore') {
     const urgK = $('#f_urgApp')?.checked ? 1 + n2(LIST().urgenzaPct) / 100 : 1;
@@ -3797,7 +3799,7 @@ async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica
   const urg = !L && x.urgenza && x.urgenza !== 'normale' ? (URG.find(u => u[0] === x.urgenza) || [])[1] : '';
   const r = {
     tipo: L ? 'posa' : 'intervento', data: L ? x.data : x.dataProg, dataFine: L ? x.dataFine : '', stato: st,
-    cliente: { nome: x.cliente || '', telefono: x.telefono || '' }, riferimento: rifDi(x), cantiere: x.indirizzo || '',
+    cliente: { nome: x.cliente || '', telefono: x.telefono || '' }, riferimento: rifDi(x), cantiere: x.indirizzo || '', iva: x.iva ?? AZ().ivaPredefinita,
     posaDel: posa ? `Cantiere della posa del ${fmtD(posa.data, { day: 'numeric', month: 'long', year: 'numeric' })}${posa.installato ? ': ' + posa.installato : ''}` : '',
     richiesta: L ? (x.installato || '') : (x.descrizione || ''), dataRichiesta: L ? '' : x.data, urgenza: urg,
     righe: x.righe || [], materiali: (x.materiali || []).map(m => ({ ...m, unita: unitaMat(m.nome) })), note: x.note || '', sospesi: x.sospesi || [],
@@ -3883,7 +3885,7 @@ function sheetListino() {
   const L = LIST();
   const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
   openSheet('Listino prezzi', `
-    <div class="small muted">Prezzi IVA esclusa. Lascia vuoto il prezzo delle voci "da concordare". Le modifiche valgono per i nuovi preventivi e lavori: quelli già salvati non cambiano.</div>
+    <div class="small muted">${AZ().ivaPredefinita === 'fo' ? 'Prezzi finali, senza IVA (forfettario)' : 'Prezzi IVA esclusa'}. Lascia vuoto il prezzo delle voci "da concordare". Le modifiche valgono per i nuovi preventivi e lavori: quelli già salvati non cambiano.</div>
     <div class="g2">${F('Anno del listino', inp('anno', L.anno, 'number'))}${F('Urgenza %', inp('urgenzaPct', L.urgenzaPct, 'number'))}</div>
     <div class="g2">${F('Blindati €/pz in più', inp('maggBlindato', L.maggBlindato, 'number'))}${F('Posa in luce €/pz in più', inp('maggLuce', L.maggLuce, 'number'))}</div>
     ${F('Trasferta € al km (pose e interventi)', inp('euroKmL', euroKm(), 'number'))}

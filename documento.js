@@ -263,7 +263,7 @@ export function creaListino({ listino = LISTINO_BASE, azienda = AZIENDA_BASE, im
   let y = TOP;
   pdf.text(X0, y + 4, `LISTINO PREZZI POSA ${L.anno || ''}`.trim(), { size: 17, font: 'bold' });
   pdf.rect(X0, y + 7, 22, 1.1, { fill: C.arancio });
-  pdf.text(X1, y + 1, 'Prezzi IVA esclusa', { size: 9.5, align: 'right', color: C.grigio });
+  pdf.text(X1, y + 1, az.ivaPredefinita === 'fo' ? 'Prezzi finali · senza IVA (forfettario)' : 'Prezzi IVA esclusa', { size: 9.5, align: 'right', color: C.grigio });
   y += 14;
   const UL = { pz: 'a pezzo', ora: 'a ora', corpo: 'a corpo' };
   const col = { unita: 150, prezzo: X1 - 3 };
@@ -398,7 +398,7 @@ export function creaRapporto({ r, azienda = AZIENDA_BASE, listino = LISTINO_BASE
   }
 
   // Lavori eseguiti (voci con note)
-  const T = totali({ righe: r.righe || [] }, L);
+  const T = totali({ righe: r.righe || [], iva: r.iva ?? az.ivaPredefinita ?? '22' }, L);
   const voci = T.righe.filter(x => prezzi || !['sconto', 'arrot'].includes(x.voce));
   if (voci.length) {
     sezione('LAVORI ESEGUITI');
@@ -425,7 +425,8 @@ export function creaRapporto({ r, azienda = AZIENDA_BASE, listino = LISTINO_BASE
       if (prezzi) pdf.text(col.importo, by, v.prezzo === '' || v.prezzo == null ? '—' : eur(totaleRiga(v, L)), { size: 8.8, align: 'right', font: 'bold' });
       y += h;
     });
-    if (prezzi) { y += 2; spazio(7); pdf.text(X1 - 2, y + 3.5, `Totale lavori ${eur(T.imponibile)}${T.ivaPct > 0 ? ' + IVA' : ''}`, { size: 9.5, font: 'bold', align: 'right' }); y += 6; }
+    if (prezzi) { y += 2; spazio(7); pdf.text(X1 - 2, y + 3.5, `Totale lavori ${eur(T.imponibile)}${T.ivaPct > 0 ? ' + IVA' : ''}`, { size: 9.5, font: 'bold', align: 'right' }); y += 6;
+      if (T.ivaPct === 0 && T.ivaNota) { for (const l of pdf.wrap(T.ivaNota, LARG - 4, 7.4, 'italic')) { spazio(4); pdf.text(X1 - 2, y + 2.5, l, { size: 7.4, font: 'italic', color: C.grigio, align: 'right' }); y += 3.4; } } }
     y += 3;
   }
 
