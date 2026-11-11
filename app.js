@@ -1766,7 +1766,7 @@ const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', cons
 function rCons() {
   let h = `<div class="row between"><h2>Consuntivi</h2></div>`;
   {
-    const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
+    const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importoCons ?? x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
     h += `<div class="small muted">Ogni lavoro passa per cinque tappe: consuntivo da fare, da inviare, da fatturare, da incassare, incassato. Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
     AMM.forEach(([k, l, c]) => {
       let L = all.filter(x => (x.amm || 'da_cons') === k);
@@ -1779,8 +1779,8 @@ function rCons() {
       const testa = `<div class="row between"><h3>${k === 'pag' ? 'Incassati (ultimi 2 mesi)' : l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>`;
       if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}</details>`; return; }
       h += `<section class="stack">${testa}
-      ${voci.map(v => v.h || ((x) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
-        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="cons" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
+      ${voci.map(v => v.h || ((x) => `<div class="card"><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.consRap ? ` · consuntivo con il rapporto del ${fmtD(x.consRap, { day: 'numeric', month: 'short' })}` : x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
+        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k === 'inv' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
     });
   }
   return h;
@@ -3770,13 +3770,15 @@ async function sheetRapporto(kind, id) {
   const rivs = store.st.mode === 'demo' ? [] : rivDiLavoro(x);
   const foto = (x.allegati || []).filter(eImmagine), altri = (x.allegati || []).filter(f => !eImmagine(f));
   openSheet('Rapporto di cantiere', `<div class="small">Un PDF con tutto quello che hai segnato su questo ${kind === 'lavori' ? 'cantiere' : 'intervento'}: richiesta, lavori eseguiti con le note delle voci, materiale, note, cose da completare, moduli${foto.length ? ' e foto' : ''}. Da mandare al rivenditore.</div>
-    <label class="check"><input type="checkbox" name="prezzi"> Includi i prezzi delle voci</label>
+    <label class="check"><input type="checkbox" name="prezzi" ${x.consRap ? 'checked' : ''}> Includi i prezzi delle voci</label>
+    ${GESTORE() ? `<label class="check"><input type="checkbox" name="cons" ${x.consRap ? 'checked' : ''}> Usalo come consuntivo (i prezzi vengono inclusi)</label>
+    <div class="small muted" style="margin-top:-6px">Il lavoro passa nella pagina Consuntivi con il totale del rapporto: da lì segui se è da fatturare, da incassare o incassato.${x.consRap ? ` Già usato come consuntivo il ${fmtD(x.consRap, { day: 'numeric', month: 'long' })}.` : ''}</div>` : ''}
     ${foto.length ? `<label class="check"><input type="checkbox" name="foto" checked> Includi le foto (${foto.length})</label>` : ''}
     ${altri.length ? `<div class="small muted">Gli altri allegati (${altri.map(f => esc(f.nome)).join(', ')}) sono elencati nel rapporto: mandali insieme al PDF se servono.</div>` : ''}
-    ${rivs.map(m => `<label class="check"><input type="checkbox" name="pubblica" value="${esc(m.user_id)}" checked> Metti il rapporto nell'area riservata di <b>${esc(m.azienda || m.nome || 'rivenditore')}</b></label>`).join('')}
+    ${(() => { const chiavi = new Set(rivs.map(m => chiaveGruppo(m))); return gruppiRiv().filter(g => chiavi.has(g.key)); })().map(g => `<label class="check"><input type="checkbox" name="pubblica" value="${esc(g.primo)}" checked> <span>Metti il rapporto nella cartella di <b>${esc(g.nome)}</b>${g.membri.length > 1 ? ` <span class="muted">(${g.membri.length} accessi)</span>` : ''}</span></label>`).join('')}
     ${rivs.length ? `<div class="small muted">Lo trova in «Documenti» del suo accesso. Se lo ricrei, il rapporto vecchio viene sostituito.</div>` : x.rapportoPubblicato ? '' : ''}
     ${x.rapportoPubblicato ? `<div class="small muted">Ultimo rapporto pubblicato il ${fmtD(x.rapportoPubblicato, { day: 'numeric', month: 'long' })}.</div>` : ''}`,
-  async fd => { const o = { prezzi: !!fd.get('prezzi'), foto: !!fd.get('foto'), pubblica: fd.getAll('pubblica') }; setTimeout(() => creaRapportoPdf(kind, id, o), 80); }, { saveLabel: 'Crea il rapporto' });
+  async fd => { const o = { prezzi: !!fd.get('prezzi') || !!fd.get('cons'), cons: !!fd.get('cons'), foto: !!fd.get('foto'), pubblica: fd.getAll('pubblica') }; setTimeout(() => creaRapportoPdf(kind, id, o), 80); }, { saveLabel: 'Crea il rapporto' });
 }
 async function fotoJpeg(f) {
   const u = await store.fileUrl(f.path); if (!u) return null;
@@ -3788,7 +3790,7 @@ async function fotoJpeg(f) {
   const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
   return { bytes: new Uint8Array(await out.arrayBuffer()), nome: f.nome };
 }
-async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica = [] } = {}) {
+async function creaRapportoPdf(kind, id, { prezzi = false, cons = false, foto = true, pubblica = [] } = {}) {
   const x = S[kind]?.find(r => r.id === id); if (!x) return;
   const L = kind === 'lavori';
   toast('Preparo il rapporto…');
@@ -3813,6 +3815,21 @@ async function creaRapportoPdf(kind, id, { prezzi = false, foto = true, pubblica
   const nome = `Rapporto ${r.data ? dIt(r.data) + ' ' : ''}${x.cliente || ''}${r.riferimento ? ' ' + r.riferimento : ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
   mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`, data: r.data, lavoro_id: x.id, kind });
   if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r);
+  if (cons) rapportoComeCons(kind, x, r, pubblica.length > 0);
+}
+/** Il rapporto con i prezzi fa da consuntivo: il lavoro entra (o avanza) nella pagina Consuntivi con il totale del rapporto. */
+function rapportoComeCons(kind, x, r, giaInviato) {
+  const tot = totali({ righe: r.righe || [], iva: r.iva }, LIST()).imponibile, base = n2(kind === 'lavori' ? x.importo : x.costo);
+  const prima = x.amm || 'da_cons';
+  const amm = prima === 'da_cons' ? (giaInviato ? 'cons' : 'inv') : prima === 'inv' && giaInviato ? 'cons' : prima;
+  const d = { ...stripId(x), amm, consRap: TODAY, iva: r.iva };
+  if ((r.righe || []).length && Math.abs(tot - base) > 0.009) d.importoCons = tot; else if (!x.consAgg?.sconto && !x.consAgg?.totale) delete d.importoCons;
+  if (!(tot > 0 || base > 0)) { toast('Il rapporto non ha prezzi: aggiungi le voci con il prezzo per usarlo come consuntivo'); return; }
+  store.put(kind, x.id, d);
+  setTimeout(() => {
+    const t = `Consuntivo: ${eur(d.importoCons ?? base)} · ${ammOf(amm)[1].toLowerCase()}`;
+    $('#sheet .pdfready')?.insertAdjacentHTML('afterend', `<div class="notice small" id="rapConsBox"><b>${esc(t)}</b>${amm === 'inv' ? `<div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="rapConsInviato" data-arg="${kind}" data-id="${esc(x.id)}">Segna come inviato al cliente</button></div>` : '<div class="small muted">Lo trovi nella pagina Consuntivi.</div>'}</div>`);
+  }, 50);
 }
 /**
  * Mette un PDF (non modificabile) nell'area riservata dei rivenditori: «I tuoi documenti».
@@ -4177,6 +4194,8 @@ document.addEventListener('click', async e => {
     case 'rinnova': sheetRinnova(arg); break;
     case 'cons': sheetCons(arg, id); break;
     case 'amm': advance(arg, id); render(); break;
+    case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
+    case 'rapCons': sheetRapporto(arg, id); break;
     case 'dayFiltro': UI.dayFiltro = arg; try { localStorage.setItem('ddp:dayFiltro', arg); } catch {} render(); break;
     case 'posaFatta': case 'posaRiapri': { const l = S.lavori.find(x => x.id === id); if (!l) break; const g = new Set(l.giorniFatti || []); if (a === 'posaFatta') g.add(UI.day); else g.delete(UI.day); store.put('lavori', id, { ...stripId(l), giorniFatti: [...g].sort() }); toast(a === 'posaFatta' ? (UI.dayFiltro === 'dafare' ? 'Posa fatta: la trovi in «Tutto»' : 'Posa segnata come fatta') : 'Posa riaperta'); break; }
     case 'intFatto': case 'intRiapri': { const i = S.interventi.find(x => x.id === id); if (!i) break; store.put('interventi', id, { ...stripId(i), stato: a === 'intFatto' ? 'completato' : (i.dataProg ? 'programmato' : 'aperto') }); toast(a === 'intFatto' ? (UI.tab === 'cal' && UI.dayFiltro === 'dafare' ? 'Intervento completato: lo trovi in «Tutto»' : 'Intervento completato') : 'Intervento riaperto'); break; }
