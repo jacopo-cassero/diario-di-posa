@@ -335,8 +335,9 @@ async function caricaRiv(forza) {
 }
 function statoGiorno(k) {
   const A = store.st.accesso, dow = pd(k).getDay();
-  const lav = (RIV.lavori || []).find(l => l.data && k >= l.data && k <= (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data));
-  if (lav) return ['lav', `Tuo lavoro · ${lav.kind === 'lavori' ? 'posa' : 'intervento'}`];
+  const LL = (RIV.lavori || []).filter(l => l.data && k >= l.data && k <= (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data));
+  if (LL.length) { const lav = LL[0], tipo = lav.kind === 'lavori' ? 'posa' : 'intervento', rif = String(lav.riferimento || '').trim();
+    return ['lav', `Tuo lavoro · ${tipo}${rif ? ' · ' + rif : ''}${LL.length > 1 ? ` (+${LL.length - 1})` : ''}`, (rif || (lav.kind === 'lavori' ? 'Posa' : 'Interv.')) + (LL.length > 1 ? ` +${LL.length - 1}` : '')]; }
   const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
   if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
   if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
@@ -354,9 +355,9 @@ function rRivenditore() {
   let cells = ['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(d => `<div class="dow">${d}</div>`).join('');
   for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
   for (let d = 1; d <= dim; d++) {
-    const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l] = statoGiorno(k);
+    const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l, rifG] = statoGiorno(k);
     const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
-    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl">${s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
+    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
   }
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
