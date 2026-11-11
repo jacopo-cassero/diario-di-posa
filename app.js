@@ -3055,10 +3055,23 @@ const stripId = o => { const { id, ...r } = o; return r; };
 /* movimento */
 /* ---------- voci e prezzi dal listino ---------- */
 const UNITA_OPT = [['pz', 'pezzo'], ['ora', 'ore'], ['corpo', 'corpo']];
-function opzioniListino() {
-  const L = LIST(); const gruppi = [...new Set(L.voci.map(v => v.gruppo))];
-  return gruppi.map(g => `<optgroup label="${esc(g)}">${L.voci.filter(v => v.gruppo === g).map(v => `<option value="${esc(v.id)}">${esc(v.nome)}${v.variante ? ' – ' + esc(v.variante) : ''} · ${v.prezzo == null ? 'da concordare' : eur(v.prezzo) + (v.unita === 'ora' ? '/ora' : v.unita === 'pz' ? '/pz' : '')}</option>`).join('')}</optgroup>`).join('');
+/* ---------- voci del listino divise in cartelle (preventivo, posa, intervento) ---------- */
+const prezzoVoce = v => v.prezzo == null ? 'da concordare' : eur(v.prezzo) + (v.unita === 'ora' ? '/ora' : v.unita === 'pz' ? '/pz' : v.unita === 'mq' ? '/m²' : v.unita === 'ml' ? '/m' : '');
+const cartelleListino = () => { const L = LIST(); return [...new Set(L.voci.map(v => v.gruppo || 'Altre voci'))].map(g => [g, L.voci.filter(v => (v.gruppo || 'Altre voci') === g)]); };
+function listPickHtml() {
+  const box = $('#listPick'); if (!box) return;
+  const C = cartelleListino(), q = normNome(UI.listQ || ''), gi = UI.listG;
+  const usate = new Map(); leggiRighe().forEach(r => r.voce && usate.set(r.voce, (usate.get(r.voce) || 0) + 1));
+  const voce = v => `<button type="button" class="modchoice" data-act="listVoce" data-arg="${esc(v.id)}"><span class="plus">+</span><span><b>${esc(v.nome)}${v.variante ? ' – ' + esc(v.variante) : ''}</b><small>${prezzoVoce(v)}${q && gi == null ? ' · ' + esc(v.gruppo || 'Altre voci') : ''}</small></span>${usate.get(v.id) ? `<span class="chip ok">✓ ${usate.get(v.id)}</span>` : ''}</button>`;
+  let h = `<div class="row between"><b class="small">${gi != null && C[gi] ? `<button type="button" class="linkbtn" data-act="listSu">‹ Cartelle</button> · ${esc(C[gi][0])}` : 'Scegli la cartella'}</b><button type="button" class="linkbtn small" data-act="listApri">Chiudi</button></div>
+    <input id="listCerca" type="search" placeholder="Cerca una voce in tutto il listino…" autocomplete="off" value="${esc(UI.listQ || '')}">`;
+  if (q) { const T = C.flatMap(([, V]) => V).filter(v => normNome(`${v.nome} ${v.variante || ''} ${v.gruppo || ''}`).includes(q)); h += T.map(voce).join('') || '<div class="small muted">Nessuna voce trovata.</div>'; }
+  else if (gi != null && C[gi]) h += C[gi][1].map(voce).join('');
+  else h += C.map(([g, V], i) => `<button type="button" class="card folderc" data-act="listG" data-arg="${i}">${svg('folder')}<span class="mid"><b>${esc(g)}</b><span class="small muted">${esc(V.slice(0, 3).map(v => v.nome).join(', '))}${V.length > 3 ? '…' : ''}</span></span><span class="chip">${V.length}</span><span class="go">›</span></button>`).join('') || '<div class="small muted">Il listino è vuoto: aggiungi le voci da Impostazioni › Listino.</div>';
+  box.innerHTML = h;
 }
+document.addEventListener('keydown', e => { if (e.target.id === 'listCerca' && e.key === 'Enter') e.preventDefault(); });
+document.addEventListener('input', e => { if (e.target.id !== 'listCerca') return; UI.listQ = e.target.value; const pos = e.target.selectionStart; listPickHtml(); const n = $('#listCerca'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} } });
 function rigaHtml(r) {
   const L = LIST();
   if (r.voce === 'sconto') return `<div class="riga sconto" data-voce="sconto">
@@ -3089,7 +3102,8 @@ function righeBox(righe, kind, { urgenza = false, iva = null } = {}) {
   return `<div class="fieldset" id="righeBox" data-kind="${kind}">
     <span class="fs-t">Voci e prezzi dal listino</span>
     <div class="righe" id="righe">${(righe || []).map(rigaHtml).join('')}</div>
-    <div class="row"><select id="addVoce" class="btn sm addvoce" aria-label="Aggiungi voce dal listino"><option value="">+ Aggiungi dal listino…</option>${opzioniListino()}</select><button type="button" class="btn sm" data-act="addLibera">+ Voce libera</button><button type="button" class="btn sm" data-act="addSconto">+ Sconto</button></div>
+    <div class="listpick stack" id="listPick" hidden></div>
+    <div class="row"><button type="button" class="btn sm primary" data-act="listApri" aria-expanded="false">+ Aggiungi dal listino</button><button type="button" class="btn sm" data-act="addLibera">+ Voce libera</button><button type="button" class="btn sm" data-act="addSconto">+ Sconto</button></div>
     ${kind !== 'lav' ? `<label class="check"><input type="checkbox" id="f_urgApp" name="urgApp" ${urgenza ? 'checked' : ''}> Maggiorazione urgenza ${num(L.urgenzaPct)}%</label>` : ''}
     ${kind === 'prev' ? F('IVA', sel('iva', IVA.map(i => [i[0], i[1]]), String(iva ?? AZ().ivaPredefinita))) : ''}
     <div class="totbox" id="totBox"></div>
@@ -4196,6 +4210,10 @@ document.addEventListener('click', async e => {
     case 'amm': advance(arg, id); render(); break;
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
+    case 'listApri': { const box = $('#listPick'); if (!box) break; const apri = box.hidden; box.hidden = !apri; $('[data-act="listApri"][aria-expanded]')?.setAttribute('aria-expanded', String(apri)); if (apri) { UI.listQ = ''; listPickHtml(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } break; }
+    case 'listG': UI.listG = +arg; UI.listQ = ''; listPickHtml(); $('#listPick')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); break;
+    case 'listSu': UI.listG = null; UI.listQ = ''; listPickHtml(); break;
+    case 'listVoce': { aggiungiVoce(arg); const v = LIST().voci.find(x => x.id === arg); toast(`Aggiunta: ${v?.nome || 'voce'}`); listPickHtml(); break; }
     case 'consTap': if (e.target.closest('select, option, input, a')) break; if (b.dataset.rap) sheetRapporto(arg, id); else sheetCons(arg, id); break;
     case 'dayFiltro': UI.dayFiltro = arg; try { localStorage.setItem('ddp:dayFiltro', arg); } catch {} render(); break;
     case 'posaFatta': case 'posaRiapri': { const l = S.lavori.find(x => x.id === id); if (!l) break; const g = new Set(l.giorniFatti || []); if (a === 'posaFatta') g.add(UI.day); else g.delete(UI.day); store.put('lavori', id, { ...stripId(l), giorniFatti: [...g].sort() }); toast(a === 'posaFatta' ? (UI.dayFiltro === 'dafare' ? 'Posa fatta: la trovi in «Tutto»' : 'Posa segnata come fatta') : 'Posa riaperta'); break; }
