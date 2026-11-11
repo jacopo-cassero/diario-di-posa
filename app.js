@@ -4170,11 +4170,14 @@ document.addEventListener('click', async e => {
       const x = S.interventi.find(r => r.id === id); if (!x || !x.dataProg) break;
       const prima = x.dataProg;
       openSheet('Riprogramma l\'intervento', `<div class="small">${esc(x.cliente || '')}${x.descrizione ? ' · ' + esc(x.descrizione) : ''}</div>
-        <div class="small muted">Il passaggio del <b>${fmtD(prima, { weekday: 'long', day: 'numeric', month: 'long' })}</b> resta segnato in calendario come «lavoro non finito», e l'intervento compare anche sulla nuova data.</div>
+        <div class="small muted">Il passaggio del <b>${fmtD(prima, { weekday: 'long', day: 'numeric', month: 'long' })}</b> resta segnato in calendario come «lavoro non finito».</div>
         ${F('Cosa resta da fare (facoltativo)', `<textarea name="rnota" id="f_rnota" rows="2" placeholder="Es. manca la guarnizione, da ordinare"></textarea>`)}
-        <div class="g2">${F('Nuova data', inp('rdata', piuGiorni(prima > TODAY ? prima : TODAY, 1), 'date', 'required'))}</div>${campoOrario(x, 'int')}
-        ${tog('rsenza', 'Data ancora da decidere', false, 'resta in «Da programmare»')}`, async fd => {
-        const senza = !!fd.get('rsenza'), nd = senza ? '' : fd.get('rdata');
+        <div class="fs-t">Quando ci torni?</div>
+        <div class="seg riprogseg" role="group" aria-label="Quando ci torni"><button type="button" data-act="riprogModo" data-arg="data" aria-pressed="true">So già la data</button><button type="button" data-act="riprogModo" data-arg="senza" aria-pressed="false">Da programmare</button></div>
+        <input type="hidden" name="rmodo" id="f_rmodo" value="data">
+        <div id="rDataBox"><div class="g2">${F('Nuova data', inp('rdata', piuGiorni(prima > TODAY ? prima : TODAY, 1), 'date'))}</div>${campoOrario(x, 'int')}</div>
+        <div id="rSenzaBox" class="small muted" hidden>L'intervento torna tra quelli <b>da programmare</b> (per esempio se aspetti il materiale). Quando sai la data lo programmi come gli altri.</div>`, async fd => {
+        const senza = fd.get('rmodo') === 'senza', nd = senza ? '' : fd.get('rdata');
         if (!senza && (!nd || nd <= prima)) throw Object.assign(new Error('data'), { userMsg: 'Scegli una data dopo il ' + fmtD(prima, { day: 'numeric', month: 'short' }) });
         const nota = String(fd.get('rnota') || '').trim();
         const o = orarioDi(x);
@@ -4187,6 +4190,7 @@ document.addEventListener('click', async e => {
       }, { saveLabel: 'Riprogramma' });
       break;
     }
+    case 'riprogModo': { const senza = arg === 'senza'; document.querySelectorAll('[data-act="riprogModo"]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.arg === arg))); $('#f_rmodo').value = arg; $('#rDataBox').hidden = senza; $('#rSenzaBox').hidden = !senza; const sb = $('#saveBtn'); if (sb) { sb.textContent = senza ? 'Metti da programmare' : 'Riprogramma'; sb.dataset.l = sb.textContent; } break; }
     case 'backupScarica': scaricaFile(arg, arg.split('/').pop()); break;
     case 'backupOra': {
       // copia locale di tutto quello che l'app ha in memoria (gli stessi dati del database)
