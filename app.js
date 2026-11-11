@@ -3256,7 +3256,7 @@ function sheetPrev(p) {
 }
 /* ---------- collegare preventivi e lavori del calendario ---------- */
 // il collegamento vale da entrambe le parti: dal preventivo (lavoroId) o dal lavoro (preventivoId)
-const lavoroDiPrev = p => !p ? null : (p.lavoroId ? (S[p.lavoroKind || 'lavori'] || []).find(x => x.id === p.lavoroId) || S.lavori.find(x => x.id === p.lavoroId) || S.interventi.find(x => x.id === p.lavoroId) : null) || S.lavori.find(x => x.preventivoId === p.id) || S.interventi.find(x => x.preventivoId === p.id) || null;
+const lavoroDiPrev = p => !p ? null : (p.lavoroId ? (S[p.lavoroKind || 'lavori'] || []).find(x => x.id === p.lavoroId) || S.lavori.find(x => x.id === p.lavoroId) || S.interventi.find(x => x.id === p.lavoroId) : null) || (p.id ? S.lavori.find(x => x.preventivoId === p.id) || S.interventi.find(x => x.preventivoId === p.id) : null) || null;
 const kindDi = x => S.lavori.includes(x) ? 'lavori' : 'interventi';
 const descrLavoro = (x, k) => `${k === 'lavori' ? 'Posa' : 'Intervento'} · ${fmtD(k === 'lavori' ? x.data : (x.dataProg || x.data), { weekday: 'short', day: 'numeric', month: 'short' })}${k === 'lavori' && x.dataFine && x.dataFine > x.data ? ' – ' + fmtD(x.dataFine, { day: 'numeric', month: 'short' }) : ''} · ${x.cliente || ''}${x.indirizzo ? ' · ' + x.indirizzo : ''}`;
 function boxCollegaPrev(p, isNew) {
