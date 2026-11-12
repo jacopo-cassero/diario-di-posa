@@ -615,3 +615,10 @@ details.cartella[open]>summary{margin-bottom:10px}
 .listpick .card.folderc .mid{text-align:left}
 .listpick #listCerca{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink,inherit);font:inherit}
 .listpick .card.folderc .mid .small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* foto e documenti del cantiere */
+.doclist{gap:6px}
+.docrow{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.docrow .linkbtn,.docrow>span{display:flex;align-items:center;gap:6px;min-width:0;text-align:left;overflow-wrap:anywhere}
+.docrow svg.i{width:18px;height:18px;flex:none}
+.docrow .iconbtn.armed{width:auto;padding:0 8px;font-size:.8rem;color:var(--bad,#b3261e)}

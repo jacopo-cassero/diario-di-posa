@@ -234,6 +234,7 @@ function cardPren(p, azioni) {
     ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
     ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
     ${schedaTesto(p) ? `<details class="small" ${azioni ? 'open' : ''}><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>` : '<div class="small muted">Nessun dettaglio del cantiere.</div>'}
+    ${p.rivenditore ? fileCantHtml([[p.rivenditore, p.id]], { titolo: 'Foto e documenti del rivenditore' }) : ''}
     ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.stato === 'confermata' ? `<div class="row">${p.lavoro_id ? `<button class="btn sm" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}<button class="btn sm ghost" data-act="prenAnnulla" data-id="${p.id}" type="button">Annulla la data</button></div>` : ''}</div>`;
 }
 const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
@@ -440,12 +441,13 @@ function sheetLavRiv(l, modifica = false) {
   const mappa = l.indirizzo ? `https://maps.google.com/?q=${encodeURIComponent(l.indirizzo)}` : '';
   if (modifica && puo) {
     openSheet(`Correggi ${nome.toLowerCase()}`, `
-      <div class="small muted">${esc(quando)}${ora ? ' · ' + esc(ora) : ''}. Correggi i dati del cliente: l'installatore riceve l'avviso e vede che cosa hai cambiato. Per spostare la data chiamalo.</div>
+      <div class="small muted">${esc(quando)}${ora ? ' · ' + esc(ora) : ''}. Correggi i dati del cliente e le note: l'installatore riceve l'avviso e vede che cosa hai cambiato. Per spostare la data chiamalo.</div>
       ${F('Cliente finale', inp('lr_rif', l.riferimento || '', 'text', 'placeholder="Es. Sig. Rossi"'))}
       ${F('Indirizzo del cantiere', inp('lr_ind', l.indirizzo || '', 'text', 'placeholder="Comune e indirizzo"'))}
-      ${F('Telefono del cliente', inp('lr_tel', l.telefono || '', 'tel', 'placeholder="Facoltativo"'))}`,
+      ${F('Telefono del cliente', inp('lr_tel', l.telefono || '', 'tel', 'placeholder="Facoltativo"'))}
+      ${'noteRiv' in l ? F('Note per l\'installazione', `<textarea name="lr_note" id="f_lr_note" rows="4" maxlength="2000" placeholder="Es. citofono Rossi, scarico dal cortile, vetri già in cantiere">${esc(l.noteRiv || '')}</textarea>`) : ''}`,
     async fd => {
-      const dati = { riferimento: String(fd.get('lr_rif') || '').trim(), indirizzo: String(fd.get('lr_ind') || '').trim(), telefono: String(fd.get('lr_tel') || '').trim() };
+      const dati = { riferimento: String(fd.get('lr_rif') || '').trim(), indirizzo: String(fd.get('lr_ind') || '').trim(), telefono: String(fd.get('lr_tel') || '').trim(), ...('noteRiv' in l ? { noteRiv: String(fd.get('lr_note') || '').trim() } : {}) };
       if (!dati.indirizzo) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi l\'indirizzo del cantiere' });
       let esito;
       try { esito = await store.rpc('modifica_lavoro_rivenditore', { tipo: l.kind, lavoro: l.id, dati }); }
@@ -468,8 +470,10 @@ function sheetLavRiv(l, modifica = false) {
       ${(l.voci || []).length || l.cosa ? `<div class="fieldset"><span class="fs-t">${l.kind === 'lavori' ? 'Cosa si posa' : 'Cosa si fa'}</span>
         ${(l.voci || []).length ? `<ul class="small">${l.voci.map(v => `<li>${v.qta != null && v.qta !== '' ? esc(num(n2(v.qta))) + (v.unita && v.unita !== 'pz' ? ' ' + esc(v.unita) : '') + ' × ' : ''}${esc(v.descr || '')}</li>`).join('')}</ul>` : ''}
         ${l.cosa ? `<div class="small prewrap">${esc(l.cosa)}</div>` : ''}</div>` : ''}
+      ${l.noteRiv ? `<div class="fieldset"><span class="fs-t">Le tue note per l'installazione</span><div class="small prewrap">${esc(l.noteRiv)}</div></div>` : ''}
+      ${fileCantHtml([[store.uid(), chiaveCantRiv(l)]], { agg: l.stato === 'annullato' ? '' : chiaveCantRiv(l), tipo: l.kind, lavoro: l.id })}
       ${(l.sospesi || []).length ? `<div class="sospcard"><b>Da completare</b><ul>${l.sospesi.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
-      ${puo ? `<button class="btn" data-act="rivLavMod" data-id="${esc(l.id)}" data-arg="${esc(l.kind)}" type="button">Correggi cliente, indirizzo o telefono</button>`
+      ${puo ? `<button class="btn" data-act="rivLavMod" data-id="${esc(l.id)}" data-arg="${esc(l.kind)}" type="button">${'noteRiv' in l ? 'Correggi cliente, indirizzo, telefono e note' : 'Correggi cliente, indirizzo o telefono'}</button>`
         : lavDaFare(l) ? '' : '<div class="small muted">Lavoro già fatto: per correzioni chiama l\'installatore.</div>'}
     </div>`, null);
 }
@@ -499,6 +503,7 @@ function cardMiaPren(p) {
 }
 function sheetPrenota() {
   const da = RIV.da, a = RIV.a || RIV.da;
+  svuotaRvFoto(); rvMax = MAX_FOTO_CANT; pDocs = [];
   openSheet('Prenota', `
     <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · le giornate restano bloccate per te finché non confermo.</div>
     <div class="small muted">Compila quello che sai: nessun campo è obbligatorio, il resto ce lo diciamo a voce.</div>
@@ -518,14 +523,28 @@ function sheetPrenota() {
       ${F('Misure e dettagli', `<textarea id="f_pmisure" name="pmisure" rows="2" placeholder="Misure, colori, tipo di posa, controtelai…"></textarea>`)}
     </div>
     ${F('Lavoro da fare', `<textarea id="f_pdescr" name="pdescr" rows="3" placeholder="Cosa c'è da fare, cosa togliere, finiture…"></textarea>`)}
-    ${F('Note per l\'installatore', `<textarea id="f_pnote" name="pnote" rows="2"></textarea>`)}`,
+    ${F('Note per l\'installazione', `<textarea id="f_pnote" name="pnote" rows="3" placeholder="Tutto quello che mi serve sapere per la posa"></textarea>`)}
+    <div class="fieldset"><div class="row between"><span class="fs-t">Foto del cantiere</span><span class="small muted" id="rvFotoN"></span></div>
+      <div class="thumbs" id="rvThumbs"></div>
+      <label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label></div>
+    <div class="fieldset"><span class="fs-t">Documenti per la posa</span>
+      <div class="small muted">Documenti di trasporto, rilievo misure, progetti, schede tecniche… (PDF, foto, Word, Excel; al massimo ${MAX_MB_DOC} MB l'uno)</div>
+      <div class="stack doclist" id="pDocList"></div>
+      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi documenti<input type="file" id="pDocIn" accept="${ACCETTA_DOC}" multiple hidden></label></div>`,
   async fd => {
+    await rvPronte;
     const scheda = Object.fromEntries(SCHEDA.map(([k]) => [k, String(fd.get('ps_' + k) || '').trim()]).filter(([, v]) => v));
     const mt = fd.getAll('pm_tipo'), mq = fd.getAll('pm_qta'), mn = fd.getAll('pm_note');
     scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
     scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim(); scheda.note = String(fd.get('pnote') || '').trim();
-    await store.rpc('prenota', { da, a, tipo: fd.get('ptipo'), cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
-    RIV.da = RIV.a = ''; toast('Prenotazione inviata: ti confermo appena possibile');
+    const nuova = await store.rpc('prenota', { da, a, tipo: fd.get('ptipo'), cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
+    RIV.da = RIV.a = '';
+    const foto = [...rvFoto], docs = [...pDocs]; let msg = 'Prenotazione inviata: ti confermo appena possibile';
+    if (foto.length + docs.length) {
+      const perse = typeof nuova === 'string' && nuova ? await caricaFileCant(nuova, foto, docs) : foto.length + docs.length;
+      msg = perse ? `Prenotazione inviata, ma ${perse} file non sono stati caricati: aggiungili dal lavoro quando è confermato` : `Prenotazione inviata con ${foto.length + docs.length} file: ti confermo appena possibile`;
+    }
+    svuotaRvFoto(); pDocs = []; toast(msg);
     await caricaRiv(true);
   }, { saveLabel: 'Invia prenotazione' });
 }
@@ -925,10 +944,16 @@ function sheetPrevRiv(r = null) {
   if (r && !!r.tiro !== ((r.piano || 'Piano terra') !== 'Piano terra' && r.ascensore !== 'Sì')) $('#f_rv_tiro').dataset.toccato = '1';
 }
 /** Nella scheda di posa o intervento: che cosa ha corretto il rivenditore. */
+/** Nella scheda di un mio lavoro: note, foto e documenti che il rivenditore ha aggiunto. */
+function dalRivHtml(kind, x) {
+  const src = sorgentiCant(kind, x), f = x.fileRiv;
+  return `${x.noteRiv ? `<div class="notice small"><b>Note del rivenditore per l'installazione</b><div class="prewrap">${esc(x.noteRiv)}</div></div>` : ''}
+    ${fileCantHtml(src, { titolo: `Dal rivenditore: foto e documenti${f?.quando ? ` · ultimi aggiunti ${quandoMod(f.quando)}` : ''}` })}`;
+}
 function modRivHtml(x, kind) {
   const m = x?.modRiv; if (!m || !x.id) return '';
   const p = m.prima || {}, t = v => String(v ?? '').trim();
-  const L = [['riferimento', 'Cliente finale'], ['indirizzo', 'Indirizzo'], ['telefono', 'Telefono']].filter(([k]) => t(p[k]) !== t(k === 'riferimento' ? x.riferimento ?? x.clienteFinale : x[k]))
+  const L = [['riferimento', 'Cliente finale'], ['indirizzo', 'Indirizzo'], ['telefono', 'Telefono'], ['noteRiv', 'Note per l\'installazione']].filter(([k]) => t(p[k]) !== t(k === 'riferimento' ? x.riferimento ?? x.clienteFinale : x[k]))
     .map(([k, n]) => { const ora = t(k === 'riferimento' ? x.riferimento ?? x.clienteFinale : x[k]), prima = t(p[k]); return `<li class="cambia">${esc(n)}: ${esc(ora || '(tolto)')}${prima ? ` (prima: ${esc(prima)})` : ''}</li>`; });
   if (!L.length) return '';
   return `<div class="modrich stack"><div class="small"><b>Modificato da ${esc(m.chi || 'il rivenditore')}</b>${m.quando ? ' · ' + quandoMod(m.quando) : ''}</div>
@@ -1012,6 +1037,88 @@ async function hydrateFotoRich(root) {
     box.innerHTML = fotoRichDentro(id, L, !!box.dataset.agg); hydrateFiles(box);
   }));
 }
+/* ---------- foto e documenti del cantiere caricati dal rivenditore ----------
+   Nella cartella del rivenditore: <riv>/cantieri/<chiave>/f-<k>.jpg e t-<k>.jpg (foto e miniatura), d-<k>-<nome> (documenti).
+   La chiave è l'id della prenotazione, oppure <tipo>-<id> per i lavori segnati dall'installatore. */
+const MAX_FOTO_CANT = 30, MAX_DOC_CANT = 20, MAX_MB_DOC = 25;
+const ACCETTA_DOC = '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt,.csv,.rtf,.dwg,.dxf,.zip,.heic,image/*,application/pdf';
+const FCANT = new Map();   // "riv|chiave" → { t, foto: [{ k, path, mini }], doc: [{ path, nome }] }
+const chiaveCantRiv = l => l.prenotazioneId || (RIV.mie || []).find(p => p.lavoro_id === l.id)?.id || `${l.kind}-${l.id}`;
+/** Da quali cartelle leggo i file di un mio lavoro: la prenotazione da cui è nato e i rivenditori dello stesso cliente. */
+function sorgentiCant(kind, x) {
+  if (!x?.id || !ACC.membri.some(m => m.ruolo === 'rivenditore')) return [];
+  const pren = x.prenotazioneId ? ACC.pren.find(p => p.id === x.prenotazioneId) : ACC.pren.find(p => p.lavoro_id === x.id);
+  const chiavi = [...new Set([x.prenotazioneId || pren?.id, `${kind}-${x.id}`].filter(Boolean))];
+  const riv = ACC.membri.filter(m => m.ruolo === 'rivenditore' && (m.user_id === pren?.rivenditore || stessoCliente(x.cliente, x.clienteId, m.cliente_nome || m.azienda || m.nome, m.cliente_id)));
+  return riv.flatMap(m => chiavi.map(c => [m.user_id, c]));
+}
+async function leggiCant(riv, chiave) {
+  const per = new Map(), doc = [];
+  for (const f of await store.elencoFile(`${riv}/cantieri/${chiave}`)) {
+    const d = f.nome.match(/^d-[a-z0-9]+-(.+)$/i); if (d) { doc.push({ path: f.path, nome: d[1] }); continue; }
+    const m = f.nome.match(/^([ft])-(.+)\.jpe?g$/i); if (!m) continue;
+    const o = per.get(m[2]) || { k: m[2] }; o[m[1].toLowerCase() === 'f' ? 'path' : 'mini'] = f.path; per.set(m[2], o);
+  }
+  const v = { t: Date.now(), foto: [...per.values()].filter(o => o.path).sort((a, b) => a.k.localeCompare(b.k)), doc: doc.sort((a, b) => a.path.localeCompare(b.path)) };
+  FCANT.set(riv + '|' + chiave, v); return v;
+}
+const nomeFileSicuro = n => String(n || 'documento').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(-80) || 'documento';
+/** Riquadro «Foto e documenti del cantiere». src: [[rivenditore, chiave], …]; agg: la chiave in cui il rivenditore aggiunge. */
+function fileCantHtml(src, { agg = '', tipo = '', lavoro = '', titolo = 'Foto e documenti del cantiere', vuoto = '' } = {}) {
+  if (!src.length || store.st.mode === 'demo') return '';
+  return `<div class="fieldset filecant" data-src="${esc(JSON.stringify(src))}" data-agg="${esc(agg)}" data-tipo="${esc(tipo)}" data-lav="${esc(lavoro)}" data-vuoto="${esc(vuoto)}"><span class="fs-t">${esc(titolo)}</span><div class="fcbody small muted">Carico…</div></div>`;
+}
+function fileCantDentro(box, foto, doc) {
+  const agg = box.dataset.agg, mio = !!agg;
+  return `${foto.length ? `<div class="small muted">Foto (${foto.length})</div><div class="thumbs">${foto.map((f, i) => `<button type="button" class="thumbbtn" data-act="fcFoto" data-arg="${i}" aria-label="Apri la foto ${i + 1} di ${foto.length}"><img data-file="${esc(f.mini || f.path)}" alt=""></button>`).join('')}</div>` : ''}
+    ${doc.length ? `<div class="small muted">Documenti (${doc.length})</div><div class="stack doclist">${doc.map(d => `<div class="docrow"><button type="button" class="linkbtn" data-act="fcDoc" data-arg="${esc(d.path)}" data-nome="${esc(d.nome)}">${svg('doc', 'i')} ${esc(d.nome)}</button>${mio || GESTORE() ? `<button type="button" class="iconbtn sm" data-act="fcDocTogli" data-arg="${esc(d.path)}" aria-label="Elimina ${esc(d.nome)}">×</button>` : ''}</div>`).join('')}</div>` : ''}
+    ${!foto.length && !doc.length ? `<div class="small muted">${esc(box.dataset.vuoto || (mio ? 'Aggiungi le foto del cantiere e i documenti utili per la posa: documenti di trasporto, rilievo misure, progetti…' : 'Nessuna foto o documento.'))}</div>` : ''}
+    ${mio ? `<div class="row">${foto.length < MAX_FOTO_CANT ? `<label class="btn sm">${svg('cam', 'i')} Aggiungi foto<input type="file" class="fcFotoIn" accept="image/*" multiple hidden></label>` : ''}${doc.length < MAX_DOC_CANT ? `<label class="btn sm">${svg('doc', 'i')} Aggiungi documenti<input type="file" class="fcDocIn" accept="${ACCETTA_DOC}" multiple hidden></label>` : ''}</div>` : ''}`;
+}
+async function hydrateFileCant(root, forza = false) {
+  await Promise.all([...root.querySelectorAll('.filecant[data-src]')].map(async box => {
+    let src; try { src = JSON.parse(box.dataset.src); } catch { return; }
+    let R; try { R = await Promise.all(src.map(([r, c]) => { const v = FCANT.get(r + '|' + c); return !forza && v && Date.now() - v.t < 60000 ? v : leggiCant(r, c); })); } catch (e) { console.warn(e); R = []; }
+    if (!box.isConnected) return;
+    box._foto = R.flatMap(v => v.foto); const doc = R.flatMap(v => v.doc);
+    box.querySelector('.fcbody').outerHTML = `<div class="fcbody stack">${fileCantDentro(box, box._foto, doc)}</div>`;
+    if (!box._foto.length && !doc.length && !box.dataset.agg && !box.dataset.vuoto) box.hidden = true;
+    hydrateFiles(box);
+  }));
+}
+/** Carica foto e documenti nella cartella del cantiere. Restituisce quanti non sono partiti. */
+async function caricaFileCant(chiave, foto = [], docs = []) {
+  let perse = 0; const base = Date.now().toString(36), tot = foto.length + docs.length; let n = 0;
+  for (let i = 0; i < foto.length; i++) {
+    toast(`Carico ${++n} di ${tot}…`); const k = `${base}${String(i).padStart(2, '0')}`;
+    try { await store.caricaInCartella(`cantieri/${chiave}`, `f-${k}.jpg`, foto[i].blob); await store.caricaInCartella(`cantieri/${chiave}`, `t-${k}.jpg`, foto[i].mini).catch(() => {}); }
+    catch (e) { console.warn(e); perse++; }
+  }
+  for (let i = 0; i < docs.length; i++) {
+    toast(`Carico ${++n} di ${tot}…`);
+    try { await store.caricaInCartella(`cantieri/${chiave}`, `d-${base}${i}-${nomeFileSicuro(docs[i].name)}`, docs[i]); }
+    catch (e) { console.warn(e); perse++; }
+  }
+  for (const k of [...FCANT.keys()]) if (k.endsWith('|' + chiave)) FCANT.delete(k);
+  return perse;
+}
+const docTroppoGrandi = fs => { const ok = fs.filter(f => f.size <= MAX_MB_DOC * 1048576); if (ok.length < fs.length) toast(`Ogni documento può essere al massimo di ${MAX_MB_DOC} MB`); return ok; };
+/** Il rivenditore aggiunge file a un lavoro già in calendario. */
+async function aggiungiFileCant(box, foto, docs) {
+  const chiave = box.dataset.agg; if (!chiave) return;
+  const perse = await caricaFileCant(chiave, foto, docs);
+  const ok = foto.length + docs.length - perse;
+  toast(perse ? `${perse} file non caricati: riprova` : `${ok === 1 ? 'Caricato' : `Caricati ${ok} file`}: l'installatore li vede nel lavoro`);
+  if (ok && box.dataset.lav) store.rpc('segnala_file_lavoro', { tipo: box.dataset.tipo, lavoro: box.dataset.lav, foto: Math.max(0, foto.length - perse), documenti: docs.length }).catch(() => {});
+  hydrateFileCant(box.parentElement || document, true);
+}
+// documenti scelti nel modulo della prenotazione, prima dell'invio
+let pDocs = [];
+function disegnaPDocs() {
+  const box = $('#pDocList'); if (!box) return;
+  box.innerHTML = pDocs.map((f, i) => `<div class="docrow"><span>${svg('doc', 'i')} ${esc(f.name)}</span><button type="button" class="iconbtn sm" data-act="pDocRm" data-arg="${i}" aria-label="Togli ${esc(f.name)}">×</button></div>`).join('');
+  const piu = $('#pDocPiu'); if (piu) piu.hidden = pDocs.length >= MAX_DOC_CANT;
+}
 /** Riduce una foto: quella da guardare (1800 px) e la miniatura (320 px). */
 async function preparaFoto(file) {
   let src, w, h;
@@ -1063,7 +1170,7 @@ function disegnaRvFoto() {
 async function scegliFoto(files, quante) {
   const out = []; let scartate = 0;
   for (const f of files.slice(0, Math.max(0, quante))) { try { out.push(await preparaFoto(f)); } catch { scartate++; } }
-  if (files.length > quante) toast(`Al massimo ${MAX_FOTO_RICH} foto per richiesta`);
+  if (files.length > quante) toast(quante > 0 ? `Ho preso le prime ${quante} foto: di più non ci stanno` : 'Hai già messo tutte le foto possibili');
   else if (scartate) toast(scartate === 1 ? 'Una foto non si riesce a leggere' : `${scartate} foto non si riescono a leggere`);
   return out;
 }
@@ -1213,6 +1320,15 @@ document.addEventListener('change', e => {
   if (t.closest && t.closest('#rvRighe')) aggiornaStimaRiv();
   if (t.id === 'listinoPdfIn') { const f = t.files && t.files[0]; t.value = ''; if (f) caricaListinoPdf(f); }
   if (t.id === 'rvFotoIn') { const fs = [...(t.files || [])]; t.value = ''; if (fs.length) aggiungiRvFoto(fs); }
+  if (t.id === 'pDocIn') { const fs = docTroppoGrandi([...(t.files || [])]); t.value = ''; pDocs.push(...fs.slice(0, MAX_DOC_CANT - pDocs.length)); disegnaPDocs(); }
+  if (t.classList?.contains('fcFotoIn') || t.classList?.contains('fcDocIn')) {
+    const box = t.closest('.filecant'), fs = [...(t.files || [])], foto = t.classList.contains('fcFotoIn'); t.value = '';
+    if (box && fs.length) (async () => {
+      const gia = box._foto?.length || 0;
+      if (foto) { toast('Preparo le foto…'); const L = await scegliFoto(fs, MAX_FOTO_CANT - gia); if (L.length) await aggiungiFileCant(box, L, []); L.forEach(f => URL.revokeObjectURL(f.url)); }
+      else { const D = docTroppoGrandi(fs); if (D.length) await aggiungiFileCant(box, [], D); }
+    })().catch(e => { console.warn(e); toast(e.userMsg || 'Caricamento non riuscito, riprova'); });
+  }
   if (t.classList?.contains('rvFotoPiu')) { const fs = [...(t.files || [])], rid = t.dataset.id; t.value = ''; if (fs.length) aggiungiFotoRich(rid, fs); }
   if (t.id === 'f_accListino') salvaImp({ accessi: { ...(S.impostazioni?.accessi || {}), listino: t.checked } });
 });
@@ -1223,6 +1339,18 @@ document.addEventListener('click', async e => {
     case 'richSeg': UI.richSeg = b.dataset.arg; render(); break;
     case 'richFiltro': UI.richFiltro = b.dataset.arg; render(); break;
     case 'richAggiorna': FOTO_RICH.clear(); await caricaAccessi(true); toast('Aggiornato'); break;
+    case 'pDocRm': pDocs.splice(+b.dataset.arg, 1); disegnaPDocs(); break;
+    case 'fcFoto': {
+      const box = b.closest('.filecant'), L = box?._foto || []; if (!L.length) break;
+      const puo = !!box.dataset.agg || GESTORE();
+      apriFoto(L, +b.dataset.arg || 0, { togli: puo ? async f => { await Promise.all([f.path, f.mini].filter(Boolean).map(x => store.removeFile(x).catch(() => {}))); FCANT.clear(); toast('Foto eliminata'); hydrateFileCant(document, true); } : null });
+      break;
+    }
+    case 'fcDoc': scaricaFile(b.dataset.arg, b.dataset.nome); break;
+    case 'fcDocTogli': {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Elimina?'; break; }
+      await store.removeFile(b.dataset.arg).catch(() => {}); FCANT.clear(); toast('Documento eliminato'); hydrateFileCant(document, true); break;
+    }
     case 'rvFotoRm': { const f = rvFoto.splice(+b.dataset.arg, 1)[0]; if (f) URL.revokeObjectURL(f.url); disegnaRvFoto(); break; }
     case 'fotoRichApri': {
       const L = FOTO_RICH.get(id)?.L || []; if (!L.length) break;
@@ -1521,7 +1649,7 @@ function render() {
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
   h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
-  hydrateFiles($('#main')); hydrateFotoRich($('#main')); if (UI.tab === "set") caricaBackup();
+  hydrateFiles($('#main')); hydrateFotoRich($('#main')); hydrateFileCant($('#main')); if (UI.tab === "set") caricaBackup();
 }
 async function hydrateFiles(root) {
   for (const img of root.querySelectorAll('img[data-file]')) {
@@ -2728,7 +2856,7 @@ function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra
   $('#sheet').hidden = false;
   aggiornaCliInfo();
   $('#sheetBody').scrollTop = 0;
-  hydrateFiles($('#sheetBody')); hydrateFotoRich($('#sheetBody'));
+  hydrateFiles($('#sheetBody')); hydrateFotoRich($('#sheetBody')); hydrateFileCant($('#sheetBody'));
 }
 function closeSheet() { $('#sheet').hidden = true; onSubmit = null; sheetDel = null; }
 $('#sheetForm').addEventListener('submit', async e => {
@@ -2843,7 +2971,7 @@ function sheetLav(l, prefill) {
   const tariffa = righeOre[0] ? n2(righeOre[0].prezzo) : tariffaOraria();
   const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
-    ${modRivHtml(l, 'lavori')}
+    ${modRivHtml(l, 'lavori')}${isNew ? '' : dalRivHtml('lavori', l)}
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     ${F('Riferimento', inp('riferimento', l.riferimento ?? l.clienteFinale, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
@@ -2940,7 +3068,7 @@ function sheetInt(i, day, prefill) {
   const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
-    ${modRivHtml(i, 'interventi')}
+    ${modRivHtml(i, 'interventi')}${isNew ? '' : dalRivHtml('interventi', i)}
     ${campoCliente('cliente', 'Cliente', i.cliente)}
     ${F('Riferimento', inp('riferimento', i.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>
