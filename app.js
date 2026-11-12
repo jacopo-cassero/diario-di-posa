@@ -248,9 +248,12 @@ function sheetDaiAccesso(r = {}) {
     const email = String(fd.get('aemail')).trim().toLowerCase(), pw = String(fd.get('apw')).trim(), ruolo = fd.get('aruolo');
     if (pw.length < 8) throw Object.assign(new Error('pw'), { userMsg: 'La password provvisoria deve avere almeno 8 caratteri' });
     const acc = await store.creaAccount(email, pw);
-    await store.rpc('aggiungi_membro', { email, ruolo, nome: String(fd.get('anome')).trim(), azienda: String(fd.get('aazienda')).trim(), telefono: String(fd.get('atel')).trim(), provvisoria: !acc.esistente, richiesta: r.id || null });
+    const nuovoId = await store.rpc('aggiungi_membro', { email, ruolo, nome: String(fd.get('anome')).trim(), azienda: String(fd.get('aazienda')).trim(), telefono: String(fd.get('atel')).trim(), provvisoria: !acc.esistente, richiesta: r.id || null });
+    // l'account c'era già (per esempio creato prima e mai usato): se è solo un accesso alla tua app gli do questa password nuova
+    let pwNuova = !acc.esistente;
+    if (acc.esistente && !r.id && nuovoId) { try { await store.rpc('nuova_password_membro', { utente: nuovoId, pw }); pwNuova = true; } catch (e) { console.warn(e); } }
     await caricaAccessi(true);
-    setTimeout(() => sheetCredenziali({ nome: String(fd.get('anome')).trim(), email, pw: acc.esistente ? '' : pw, ruolo, tel: String(fd.get('atel')).trim(), conferma: acc.conferma }), 50);
+    setTimeout(() => sheetCredenziali({ nome: String(fd.get('anome')).trim(), email, pw: pwNuova ? pw : '', ruolo, tel: String(fd.get('atel')).trim(), conferma: acc.conferma }), 50);
   }, { saveLabel: 'Crea accesso' });
 }
 function sheetCredenziali(c) {
@@ -259,7 +262,7 @@ function sheetCredenziali(c) {
     c.conferma ? `2. Ti arriva un'email per confermare l'indirizzo: apri il link che contiene.` : '',
     `${c.conferma ? '3' : '2'}. Accedi con:`, `   Email: ${c.email}`, c.pw ? `   Password provvisoria: ${c.pw}` : `   la password che usi già con questa email`,
     c.pw ? `Al primo accesso ti chiede di sceglierne una tua. Poi resti collegato.` : ''].filter(x => x !== '').join('\n');
-  openSheet('Accesso creato', `<div class="notice small">${c.pw ? 'Manda questo messaggio alla persona: contiene la password provvisoria.' : 'Questa email aveva già un account: entra con la password che usa già.'}</div>
+  openSheet(c.nuova ? 'Password nuova' : 'Accesso creato', `<div class="notice small">${c.nuova ? 'Password provvisoria cambiata: la vecchia non funziona più. Manda questo messaggio alla persona.' : c.pw ? 'Manda questo messaggio alla persona: contiene la password provvisoria.' : 'Questa email aveva già un account: entra con la password che usa già.'}</div>
     <pre class="cred" id="credTxt">${esc(t)}</pre>
     <div class="row">${navigator.share ? `<button type="button" class="btn primary" data-act="credShare">Invia…</button>` : ''}${c.tel ? `<a class="btn" href="https://wa.me/${telWa(c.tel)}?text=${encodeURIComponent(t)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}<a class="btn" href="mailto:${esc(c.email)}?subject=${encodeURIComponent('Accesso al Diario di Posa')}&body=${encodeURIComponent(t)}">Email</a><button type="button" class="btn" data-act="credCopia">Copia</button></div>`, null);
 }
@@ -276,7 +279,41 @@ function sheetMembro(m) {
     const { error } = await store.tabella('membri').update(agg).eq('user_id', m.user_id);
     if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a salvare' });
     toast('Accesso aggiornato'); caricaAccessi(true);
-  }, { del: async () => { const { error } = await store.tabella('membri').delete().eq('user_id', m.user_id); if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a togliere l\'accesso' }); toast('Accesso tolto'); caricaAccessi(true); } });
+  }, { del: () => eliminaMembro(m) });
+  $('#sheetBody').insertAdjacentHTML('beforeend', `<div class="fieldset"><span class="fs-t">Password</span><div class="small muted">Se ha perso il messaggio con la password provvisoria, o non riesce a entrare, gliene do una nuova (la vecchia smette di funzionare).</div><div class="row" style="margin-top:8px"><button type="button" class="btn sm" data-act="membroPw" data-id="${esc(m.user_id)}">Nuova password provvisoria</button></div></div><div class="small muted">«Elimina» cancella la persona con il suo account, le sue richieste, le prenotazioni e i documenti della sua cartella (se la sua azienda ha altri accessi, i documenti passano a loro). Lavori, preventivi e consuntivi nel tuo calendario restano. Se poi la ricrei, riceve una password provvisoria nuova.</div>`);
+}
+/** Elimina davvero un accesso: documenti spostati sugli altri accessi della stessa azienda (o tolti), poi accesso e account. */
+async function eliminaMembro(m) {
+  const altri = m.ruolo === 'rivenditore' ? ACC.membri.filter(x => x.user_id !== m.user_id && x.ruolo === 'rivenditore' && chiaveGruppo(x) === chiaveGruppo(m)) : [];
+  const dest = altri.find(x => x.stato === 'attivo') || altri[0];
+  const { data: docs } = await store.tabella('documenti_cliente').select('*').eq('rivenditore', m.user_id);
+  for (const d of docs || []) {
+    if (dest) {
+      const np = d.path.replace(`/rivenditori/${m.user_id}/`, `/rivenditori/${dest.user_id}/`);
+      const nid = d.id.endsWith('-' + m.user_id) ? d.id.slice(0, -m.user_id.length) + dest.user_id : `${d.id}-${dest.user_id.slice(0, 8)}`;
+      if (np !== d.path && !(await store.moveFile(d.path, np))) store.removeFile(d.path).catch(() => {});
+      const { error } = await store.tabella('documenti_cliente').upsert({ ...d, id: nid, rivenditore: dest.user_id, path: np });
+      if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a spostare i documenti della sua cartella: non ho eliminato niente, riprova' });
+      if (nid !== d.id) await store.tabella('documenti_cliente').delete().eq('id', d.id);
+    } else store.removeFile(d.path).catch(() => {});
+  }
+  let solo = false;
+  try { solo = await store.rpc('elimina_membro', { utente: m.user_id }); }
+  catch (e) {
+    if (!/elimina_membro|could not find|schema cache|does not exist/i.test(e.message || '')) throw e;
+    const { error } = await store.tabella('membri').delete().eq('user_id', m.user_id);
+    if (error) throw Object.assign(error, { userMsg: 'Non sono riuscito a togliere l\'accesso' });
+    toast('Accesso tolto. Per cancellare anche il suo account lancia lo script elimina_accesso.sql'); RAPP.lista = null; caricaAccessi(true); return;
+  }
+  toast(solo ? 'Eliminato con il suo account: se lo ricrei avrà una password nuova' : 'Accesso eliminato');
+  RAPP.lista = null; caricaAccessi(true);
+}
+/** Password provvisoria nuova per una persona (per esempio se il messaggio non gli è mai arrivato). */
+async function nuovaPwMembro(m) {
+  const pw = pwProvvisoria();
+  await store.rpc('nuova_password_membro', { utente: m.user_id, pw });
+  caricaAccessi(true);
+  setTimeout(() => sheetCredenziali({ nome: m.nome || '', email: m.email, pw, ruolo: m.ruolo, tel: m.telefono || '', conferma: false, nuova: true }), 50);
 }
 async function confermaPren(p) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore) || {};
@@ -1293,6 +1330,14 @@ document.addEventListener('click', async e => {
     case 'accNuovo': sheetDaiAccesso({}); break;
     case 'accDai': { const r = ACC.richieste.find(x => x.id === id); if (r) sheetDaiAccesso(r); break; }
     case 'accRifiuta': { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per rifiutare'; break; } const { error } = await store.tabella('richieste_accesso').update({ stato: 'rifiutata' }).eq('id', id); toast(error ? 'Non riuscito' : 'Richiesta rifiutata'); caricaAccessi(true); break; }
+    case 'membroPw': {
+      const m = ACC.membri.find(x => x.user_id === id); if (!m) break;
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo: cambia la password'; break; }
+      b.disabled = true;
+      try { await nuovaPwMembro(m); }
+      catch (e) { b.disabled = false; b.classList.remove('armed'); b.textContent = 'Nuova password provvisoria'; toast(/nuova_password_membro|could not find|schema cache/i.test(e.message || '') ? 'Prima lancia lo script elimina_accesso.sql su Supabase' : e.userMsg || 'Password non cambiata, riprova'); }
+      break;
+    }
     case 'accMembro': { const m = ACC.membri.find(x => x.user_id === id); if (m) sheetMembro(m); break; }
     case 'credCopia': try { await navigator.clipboard.writeText($('#credTxt').textContent); toast('Messaggio copiato'); } catch { toast('Seleziona il testo e copialo'); } break;
     case 'credShare': try { await navigator.share({ text: $('#credTxt').textContent }); } catch {} break;
@@ -4257,7 +4302,7 @@ document.addEventListener('click', async e => {
     case 'share': try { await navigator.share({ text: $('#consTxt').textContent }); } catch {} break;
     case 'del':
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Conferma eliminazione'; break; }
-      try { b.disabled = true; await sheetDel(); closeSheet(); render(); } catch { toast('Non eliminato, riprova'); b.disabled = false; }
+      try { b.disabled = true; await sheetDel(); closeSheet(); render(); } catch (e) { console.warn(e); toast(e?.userMsg || 'Non eliminato, riprova'); b.disabled = false; }
       break;
     case 'seed': seed(); render(); break;
     case 'newCli': sheetCliente(null); break;

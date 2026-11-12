@@ -266,6 +266,13 @@ export function createStore(cfg, onChange) {
       urlCache.set(path, { url: data.signedUrl, exp: Date.now() + 50 * 60e3 });
       return data.signedUrl;
     },
+    /** Sposta un file nella cartella privata; false se non riesce. */
+    async moveFile(da, a) {
+      if (!sb || !da || !a) return false;
+      const { error } = await sb.storage.from('file').move(da, a);
+      if (error) { console.warn(error); return false; }
+      urlCache.delete(da); return true;
+    },
     async removeFile(path) {
       if (!path) return;
       if (path.startsWith('demo:')) { const f = ls.get('ddp:files:demo', {}); delete f[path]; ls.set('ddp:files:demo', f); return; }
