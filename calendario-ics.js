@@ -47,15 +47,15 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       if (x.soloFeriali !== false && !G.giorni.includes(d.getUTCDay()) && k !== x.data && k !== fine) continue;
       giorni.push(k);
     }
-    const o = orarioDi(x);
-    const ini = o ? o[0] : G.inizio, fin = o && o[1] ? o[1] : o ? `${pad(Math.min(+o[0].slice(0, 2) + 2, 23))}${o[0].slice(2)}` : G.fine;
-    giorni.forEach((k, i) => evento(`posa-${x.id}-${k}`, [
+    giorni.forEach((k, i) => { const o = orarioDi(x, k);
+      const ini = o ? o[0] : G.inizio, fin = o && o[1] ? o[1] : o ? `${pad(Math.min(+o[0].slice(0, 2) + 2, 23))}${o[0].slice(2)}` : G.fine;
+      evento(`posa-${x.id}-${k}`, [
       `SUMMARY:${esc(`${x.urgenzaApplicata ? '⚠ ' : ''}Posa · ${x.cliente || 'Cliente'}${(x.riferimento || x.clienteFinale) ? ' · ' + (x.riferimento || x.clienteFinale) : ''}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(k)}T${hm(ini)}`,
       `DTEND;TZID=Europe/Rome:${compatto(k)}T${hm(fin)}`,
       ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
       `DESCRIPTION:${esc([x.installato, x.note, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
-    ]));
+    ]); });
   }
   for (const x of S.interventi || []) {
     if (!x.dataProg || x.stato === 'annullato' || x.dataProg < limite) continue;

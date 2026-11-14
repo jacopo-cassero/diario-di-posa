@@ -622,3 +622,8 @@ details.cartella[open]>summary{margin-bottom:10px}
 .docrow .linkbtn,.docrow>span{display:flex;align-items:center;gap:6px;min-width:0;text-align:left;overflow-wrap:anywhere}
 .docrow svg.i{width:18px;height:18px;flex:none}
 .docrow .iconbtn.armed{width:auto;padding:0 8px;font-size:.8rem;color:var(--bad,#b3261e)}
+
+/* orario diverso giorno per giorno */
+.ogrow{display:grid;grid-template-columns:minmax(78px,1fr) minmax(0,1.2fr) auto minmax(0,1.2fr);gap:8px;align-items:center}
+.ogrow input{min-width:0;width:100%}
+.ogrow input{padding:9px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font:inherit;color:inherit;min-height:42px}

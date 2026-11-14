@@ -1735,7 +1735,7 @@ function sheetEvento(e, giorno) {
 const cliDi = x => (x.clienteId && S.clienti.find(c => c.id === x.clienteId)) || trovaCliente(x.cliente);
 const chipCli = x => { const c = cliDi(x); return c && c.tipo && c.tipo !== 'finale' ? ` <span class="chip ${c.tipo === 'rivenditore' ? 'in' : 'warn'} small">${tipoCliente(c.tipo)}</span>` : ''; };
 const linkCli = x => { const c = cliDi(x); return c ? `<button type="button" class="linkbtn" data-act="editCli" data-id="${c.id}">Scheda cliente</button>` : ''; };
-function lavoroCard(l) {
+function lavoroCard(l, giorno = UI.day) {
   const a = ammOf(l.amm);
   const mats = (l.materiali || []).filter(m => m.nome);
   const cart = S.cartelle.find(c => c.id === l.cartellaId);
@@ -1743,7 +1743,7 @@ function lavoroCard(l) {
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}${rifDi(l) ? `<small class="rif">Rif. ${esc(rifDi(l))}</small>` : ''}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
-    ${badgeOrario(l)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
+    ${badgeOrario(l, giorno)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     ${rigaNoteSospesi(l, 'lavori')}
@@ -1760,7 +1760,7 @@ function lavoroCard(l) {
   </div>`;
 }
 /* ---------- orari ---------- */
-const badgeOrario = x => { const t = testoOrario(x); if (!t) return ''; const o = orarioDi(x); return `<div class="orariob">${svg('clock', 'i')} <b>${x.tuttoGiorno ? 'Tutto il giorno' : esc(t)}</b>${x.tuttoGiorno ? ` <span class="muted">${o[0]}–${o[1]}</span>` : ''}</div>`; };
+const badgeOrario = (x, g) => { const t = testoOrario(x, g); if (!t) return ''; const o = orarioDi(x, g), tg = x.tuttoGiorno && !(g && x.orariGiorni?.[g]); return `<div class="orariob">${svg('clock', 'i')} <b>${tg ? 'Tutto il giorno' : esc(t)}</b>${tg ? ` <span class="muted">${o[0]}–${o[1]}</span>` : ''}${!tg && g && x.orariGiorni?.[g] ? ' <span class="muted">orario di questo giorno</span>' : ''}</div>`; };
 function campoOrario(x, kind) {
   const tg = x.tuttoGiorno ?? (kind === 'lav' && !x.oraInizio);
   const ini = x.oraInizio && !x.tuttoGiorno ? x.oraInizio : kind === 'lav' ? TUTTO_GIORNO[0] : '';
@@ -1768,7 +1768,32 @@ function campoOrario(x, kind) {
   return `<div class="fieldset orario"><span class="fs-t">Orario</span>
     ${tog('tuttoGiorno', 'Tutto il giorno', tg, `dalle ${TUTTO_GIORNO[0]} alle ${TUTTO_GIORNO[1]}: la giornata è impegnata`)}
     <div class="g2" id="orariBox" ${tg ? 'hidden' : ''}>${F('Dalle', inp('oraInizio', ini, 'time'))}${F('Alle', inp('oraFine', fin, 'time'))}</div>
+    ${kind === 'lav' ? `<div id="ogWrap" hidden>${tog('orariDiversi', 'Orario diverso in alcuni giorni', !!Object.keys(x.orariGiorni || {}).length, 'per esempio martedì finisci alle 15 e ci metti un altro lavoro')}<div class="stack" id="ogBox" ${Object.keys(x.orariGiorni || {}).length ? '' : 'hidden'}></div></div>` : ''}
   </div>`;
+}
+/** Righe «giorno per giorno» del cantiere di più giorni: tengono quello che hai già scritto quando cambi le date. */
+let OG_PRIMA = {};
+function disegnaOrariGiorni() {
+  const wrap = $('#ogWrap'), box = $('#ogBox'); if (!wrap || !box) return;
+  const da = $('#f_data')?.value, a = $('#f_dataFine')?.value;
+  const giorni = da && a && a > da ? giorniPosa({ data: da, dataFine: a, soloFeriali: $('#f_soloFeriali') ? $('#f_soloFeriali').checked : true }) : [];
+  wrap.hidden = giorni.length < 2;
+  const tg = $('#f_tuttoGiorno')?.checked, base = [tg ? TUTTO_GIORNO[0] : $('#f_oraInizio')?.value || TUTTO_GIORNO[0], tg ? TUTTO_GIORNO[1] : $('#f_oraFine')?.value || TUTTO_GIORNO[1]];
+  // una riga già toccata resta com'è; una mai cambiata segue l'orario normale
+  const ora = k => { const i = box.querySelector(`[name="og_i_${k}"]`), f = box.querySelector(`[name="og_f_${k}"]`); return i && (i.value !== i.dataset.b || f.value !== f.dataset.b) ? [i.value, f.value] : !i && OG_PRIMA[k] ? [OG_PRIMA[k].oraInizio, OG_PRIMA[k].oraFine || ''] : base; };
+  box.innerHTML = giorni.map(k => { const [i, f] = ora(k); return `<div class="ogrow"><span class="small"><b>${esc(fmtD(k, { weekday: 'short', day: 'numeric', month: 'short' }))}</b></span><input type="time" name="og_i_${k}" value="${esc(i)}" data-b="${esc(base[0])}" aria-label="Dalle, ${esc(fmtD(k, { weekday: 'long', day: 'numeric' }))}"><span class="muted">–</span><input type="time" name="og_f_${k}" value="${esc(f)}" data-b="${esc(base[1])}" aria-label="Alle, ${esc(fmtD(k, { weekday: 'long', day: 'numeric' }))}"></div>`; }).join('');
+}
+/** Legge gli orari giorno per giorno: tiene solo i giorni diversi dall'orario normale. */
+function leggiOrariGiorni(fd, d) {
+  if (!fd.get('orariDiversi')) return {};
+  const base = orarioDi(d) || TUTTO_GIORNO, og = {};
+  for (const g of giorniPosa(d)) {
+    const a = String(fd.get(`og_i_${g}`) || ''), b = String(fd.get(`og_f_${g}`) || '');
+    if (!a) continue;
+    if (b && b <= a) throw Object.assign(new Error('orario'), { userMsg: `${fmtD(g, { weekday: 'long', day: 'numeric' })}: l'ora di fine deve essere dopo quella di inizio` });
+    if (a !== base[0] || (b || '') !== (base[1] || '')) og[g] = { oraInizio: a, oraFine: b };
+  }
+  return og;
 }
 function leggiOrario(fd) {
   if (fd.get('tuttoGiorno')) return { tuttoGiorno: true, oraInizio: TUTTO_GIORNO[0], oraFine: TUTTO_GIORNO[1] };
@@ -1778,12 +1803,15 @@ function leggiOrario(fd) {
 }
 /** Altri lavori nello stesso giorno con orari che si accavallano (per avvisare). */
 function sovrapposti(kind, id, giorni, d) {
-  const o = orarioDi(d); if (!o) return '';
-  const fine = x => { const p = orarioDi(x); return p && (p[1] || `${String(Math.min(+p[0].slice(0, 2) + 2, 23)).padStart(2, '0')}${p[0].slice(2)}`); };
-  const mio = [o[0], fine(d)];
-  const altri = [...S.lavori.filter(x => !(kind === 'lavori' && x.id === id) && giorni.some(g => inPosa(x, g))), ...S.interventi.filter(x => !(kind === 'interventi' && x.id === id) && x.dataProg && giorni.includes(x.dataProg) && x.stato !== 'annullato')];
-  const c = altri.find(x => { const p = orarioDi(x); return p && p[0] < mio[1] && fine(x) > mio[0]; });
-  return c ? `${c.cliente || 'un altro lavoro'} (${testoOrario(c)})` : '';
+  const fine = (x, g) => { const p = orarioDi(x, g); return p && (p[1] || `${String(Math.min(+p[0].slice(0, 2) + 2, 23)).padStart(2, '0')}${p[0].slice(2)}`); };
+  for (const g of giorni) {
+    const o = orarioDi(d, g); if (!o) continue;
+    const mio = [o[0], fine(d, g)];
+    const altri = [...S.lavori.filter(x => !(kind === 'lavori' && x.id === id) && inPosa(x, g)), ...S.interventi.filter(x => !(kind === 'interventi' && x.id === id) && x.dataProg === g && x.stato !== 'annullato')];
+    const c = altri.find(x => { const p = orarioDi(x, g); return p && p[0] < mio[1] && fine(x, g) > mio[0]; });
+    if (c) return `${c.cliente || 'un altro lavoro'} (${giorni.length > 1 ? fmtD(g, { weekday: 'short', day: 'numeric' }) + ' ' : ''}${testoOrario(c, g)})`;
+  }
+  return '';
 }
 /** Riferimento del lavoro (es. il cliente finale del rivenditore). */
 const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
@@ -1827,7 +1855,7 @@ function elencoGiorno(dl, di, de) {
   const nasc = f === 'dafare' ? dl.filter(l => posaFatta(l, k)).length + di.filter(chiusoQui).length : 0;
   const tot = dl.length + di.length;
   const filtri = tot ? `<div class="chips dayfiltri">${FILTRI_GIORNO.map(([v, l]) => { const n = v === 'dafare' ? dl.filter(x => !posaFatta(x, k)).length + di.filter(x => !chiusoQui(x)).length : v === 'tutti' ? tot : v === 'pose' ? dl.length : di.length; return `<button type="button" class="chipf" data-act="dayFiltro" data-arg="${v}" aria-pressed="${f === v}">${l} <span class="num">${n}</span></button>`; }).join('')}</div>` : '';
-  const carte = [...vediL.map(x => [x, lavoroCard]), ...vediI.map(x => [x, i => intCard(i, k)])].sort(([a], [b]) => ((orarioDi(a) || ['99'])[0]).localeCompare((orarioDi(b) || ['99'])[0])).map(([x, fn]) => fn(x)).join('');
+  const carte = [...vediL.map(x => [x, l => lavoroCard(l, k)]), ...vediI.map(x => [x, i => intCard(i, k)])].sort(([a], [b]) => ((orarioDi(a, k) || ['99'])[0]).localeCompare((orarioDi(b, k) || ['99'])[0])).map(([x, fn]) => fn(x)).join('');
   return `${filtri}${(f === 'tutti' || f === 'dafare') ? de.map(eventoCard).join('') : ''}${carte}
     ${!tot && !de.length ? `<div class="empty small">Nessun lavoro segnato in questo giorno.</div>` : ''}
     ${tot && !vediL.length && !vediI.length && f === 'dafare' ? `<div class="empty small">Tutto fatto per oggi 👍</div>` : ''}
@@ -2956,6 +2984,7 @@ function aggiornaGiorni() {
   info.classList.toggle('err', !!(a && a < da));
   const lk = $('#f_km')?.closest('label')?.querySelector('span'); if (lk) lk.textContent = g > 1 ? 'Km al giorno' : 'Trasferta km';
   const lo = $('#f_ore')?.closest('label')?.querySelector('span'); if (lo) lo.textContent = g > 1 ? 'Ore impiegate (totali)' : 'Ore impiegate';
+  disegnaOrariGiorni();
   const fo = $('#f_ore'); if (fo && fo.dataset.auto === '1' && a >= da) fo.value = Math.round(oreGiornata(IMP().giornata) * g * 100) / 100;
 }
 const rigaKm = (km, euro) => ({ voce: 'km', descr: 'Trasferta', unita: 'km', qta: km, prezzo: euro, magg: '' });
@@ -2970,6 +2999,7 @@ function calcoloDi(l) {
 
 function sheetLav(l, prefill) {
   const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', calcolo: 'pezzo', ...(prefill || {}) };
+  OG_PRIMA = { ...(l.orariGiorni || {}) };
   sheetFiles = [...(l.allegati || [])];
   const calcolo = calcoloDi({ ...l, righe: separaKm(l.righe).altre });
   const KM = separaKm(l.righe);
@@ -3037,6 +3067,7 @@ function sheetLav(l, prefill) {
     d.clienteId = assicuraCliente(d.cliente);
     conSquadra('lavori', isNew ? null : l.id, d, fd);
     Object.assign(d, leggiOrario(fd));
+    { const og = leggiOrariGiorni(fd, d); if (Object.keys(og).length) d.orariGiorni = og; }
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
     if (!isNew && (l.data !== d.data || (l.dataFine || '') !== (d.dataFine || ''))) spostaPrenotazioniDi(id, d.data, d.dataFine);
@@ -4582,6 +4613,8 @@ document.addEventListener('change', e => {
   if (t.id === 'f_dataProg' && $('#f_stato')) { const r = $('#togliDataRow'); if (r) r.hidden = !t.value; if (t.value && $('#f_stato').value === 'aperto') $('#f_stato').value = 'programmato'; if (!t.value && $('#f_stato').value === 'programmato') $('#f_stato').value = 'aperto'; }
   if (t.classList?.contains('intChk') && UI.intSel) { const d = $('#intSelData')?.value; UI.intSel[t.checked ? 'add' : 'delete'](t.dataset.id); render(); if (d && $('#intSelData')) $('#intSelData').value = d; return; }
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
+  if (['f_oraInizio', 'f_oraFine', 'f_tuttoGiorno'].includes(t.id)) setTimeout(disegnaOrariGiorni, 0);
+  if (t.id === 'f_orariDiversi') { const bx = $('#ogBox'); if (bx) { bx.hidden = !t.checked; if (t.checked) disegnaOrariGiorni(); } return; }
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
   if (t.id === 'f_oraInizio' && $('#f_oraFine') && !$('#f_oraFine').value && t.value) { const h = Math.min(+t.value.slice(0, 2) + 2, 23); $('#f_oraFine').value = `${String(h).padStart(2, '0')}${t.value.slice(2)}`; }
   if (t.id === 'firmatoIn') { const f = t.files && t.files[0]; t.value = ''; allegaFirmato(f); return; }
