@@ -1272,7 +1272,7 @@ function preventivoDaRichiesta(r) {
 }
 /** Dove va il PDF di un preventivo nell'area del rivenditore: sempre lo stesso file, che si aggiorna a ogni invio. */
 const pubPrev = p => ({ x: { cliente: p.cliente?.nome, clienteId: p.clienteId }, rivId: p.richiestaDi || null, chiave: `prev-${p.id}`, cartella: 'preventivi',
-  titolo: `Preventivo N. ${p.numero || ''} · ${fmtD(p.data, { day: 'numeric', month: 'short', year: 'numeric' })}${p.riferimento ? ' · Rif. ' + p.riferimento : p.cantiere ? ' · ' + p.cantiere : ''}`,
+  titolo: nomeDoc(`Preventivo ${String(p.numero || '').replace('/', '-')}`.trim(), p.riferimento, p.cliente?.nome),
   data: p.data || TODAY, lavoro_id: p.id, kind: 'preventivi' });
 /** Quando salvi il preventivo nato da una richiesta, il rivenditore vede a che punto è; quando lo mandi, trova anche il PDF nella sua area. */
 async function aggiornaRichiestaPrev(d, id) {
@@ -1787,6 +1787,12 @@ function sovrapposti(kind, id, giorni, d) {
 }
 /** Riferimento del lavoro (es. il cliente finale del rivenditore). */
 const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
+/** Nome dei PDF: «Consuntivo - Fam. Rossi», oppure «Fam. Rossi - Consuntivo» (Impostazioni › Dati azienda).
+    Il riferimento è quello del cantiere; se manca, il nome del cliente. */
+function nomeDoc(tipo, rif, cliente) {
+  const r = String(rif || '').trim() || String(cliente || '').trim(), t = String(tipo || 'Documento').trim();
+  return (AZ().nomePdf === 'rif' ? [r, t] : [t, r]).filter(Boolean).join(' - ').replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+}
 /* ---------- preventivo collegato, visibile dal calendario ---------- */
 function vociPrevHtml(p) {
   const L = LIST(), t = totali(p, L), um = r => r.unita === 'ora' ? 'ore' : r.unita === 'km' ? 'km' : r.unita === 'pz' ? 'pz' : '';
@@ -2222,7 +2228,7 @@ function pubModulo(mod, nomeModello) {
   const lav = mod.ref?.id ? (S.lavori.find(x => x.id === mod.ref.id) || S.interventi.find(x => x.id === mod.ref.id)) : null;
   const rif = lav ? rifDi(lav) : '';
   return { x: lav || { cliente: mod.cliente, clienteId: mod.clienteId }, chiave: `mod-${mod.id}`, cartella: 'moduli',
-    titolo: `${mod.titolo || nomeModello || 'Modulo'}${mod.data ? ' · ' + fmtD(mod.data, { day: 'numeric', month: 'short', year: 'numeric' }) : ''}${rif ? ' · Rif. ' + rif : ''}`,
+    titolo: nomeDoc(mod.titolo || nomeModello || 'Modulo', rif, mod.cliente),
     data: mod.data || TODAY, lavoro_id: lav?.id || null, kind: lav ? (S.lavori.includes(lav) ? 'lavori' : 'interventi') : null };
 }
 async function boxPubblica() {
@@ -3999,8 +4005,8 @@ async function creaRapportoPdf(kind, id, { prezzi = false, cons = false, foto = 
   try { bytes = creaRapporto({ r, azienda: AZ(), listino: LIST(), immagini: IMG, foto: fotoB, prezzi }); }
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il rapporto'); return; }
   const dIt = s => String(s || '').split('-').reverse().join('-');
-  const nome = `Rapporto ${r.data ? dIt(r.data) + ' ' : ''}${x.cliente || ''}${r.riferimento ? ' ' + r.riferimento : ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
-  mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`, data: r.data, lavoro_id: x.id, kind });
+  const nome = nomeDoc('Rapporto', r.riferimento, x.cliente) + '.pdf';
+  mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: nomeDoc('Rapporto', r.riferimento, x.cliente), data: r.data, lavoro_id: x.id, kind });
   if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r);
   if (cons) rapportoComeCons(kind, x, r, pubblica.length > 0);
 }
@@ -4052,8 +4058,8 @@ function creaPdfDoc(tipo, doc) {
   if (cr) doc = { ...doc, cliente: { indirizzo: cr.indirizzo, piva: cr.piva, email: cr.email, telefono: cr.telefono, ...Object.fromEntries(Object.entries(doc.cliente || {}).filter(([, v]) => v)) } };
   const bytes = creaDocumento({ tipo, doc, azienda: AZ(), listino: LIST(), immagini: IMG });
   const dIt = s => String(s || '').split('-').reverse().join('-');
-  const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}` : `Consuntivo ${dIt(doc.data)}${doc.dataFine && doc.dataFine !== doc.data ? ' al ' + dIt(doc.dataFine) : ''}`;
-  const nome = `${base} ${doc.cliente?.nome || ''}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+  const base = tipo === 'preventivo' ? `Preventivo ${String(doc.numero || '').replace('/', '-')}`.trim() : 'Consuntivo';
+  const nome = nomeDoc(base, doc.riferimento, doc.cliente?.nome) + '.pdf';
   return { bytes, nome, doc };
 }
 function apriPdf(tipo, doc, indietro) {
@@ -4112,11 +4118,12 @@ function sheetAzienda() {
     <div class="g2">${F('Email', inp('email', a.email, 'email'))}${F('Indirizzo (facoltativo)', inp('indirizzo', a.indirizzo))}</div>
     ${F('IBAN per i pagamenti (facoltativo)', inp('iban', a.iban))}
     <div class="g2">${F('IVA predefinita', sel('ivaPredefinita', IVA.map(i => [i[0], i[1]]), String(a.ivaPredefinita)))}${F('Validità preventivi (giorni)', inp('validitaGiorni', a.validitaGiorni, 'number'))}</div>
+    ${F('Nome dei PDF', sel('nomePdf', [['tipo', 'Documento - Riferimento (es. Consuntivo - Fam. Rossi)'], ['rif', 'Riferimento - Documento (es. Fam. Rossi - Consuntivo)']], a.nomePdf === 'rif' ? 'rif' : 'tipo'))}
     ${F('Avviso imprevisti (solo nei preventivi)', inp('notaImprevisti', a.notaImprevisti))}
     ${F('Termini e condizioni allegati ai preventivi', `<textarea id="f_condTesto" name="condizioni" style="min-height:280px">${esc(a.condizioni)}</textarea>`)}
     <div class="small muted">Separa i punti con una riga vuota: la prima riga di ogni punto è il titolo.</div>`,
   async fd => {
-    const d = {}; ['ragioneSociale', 'piva', 'telefono', 'email', 'indirizzo', 'iban', 'ivaPredefinita', 'notaImprevisti', 'condizioni'].forEach(k => d[k] = String(fd.get(k) || '').trim());
+    const d = {}; ['ragioneSociale', 'piva', 'telefono', 'email', 'indirizzo', 'iban', 'ivaPredefinita', 'nomePdf', 'notaImprevisti', 'condizioni'].forEach(k => d[k] = String(fd.get(k) || '').trim());
     d.validitaGiorni = n2(fd.get('validitaGiorni')) || 30;
     store.put('cfg', 'azienda', d); toast('Dati salvati');
   });
@@ -4448,12 +4455,12 @@ document.addEventListener('click', async e => {
         const form = $('#sheetForm'); if (!form.reportValidity()) break;
         const saved = salvaModuloU(new FormData(form)); const m = modEdit.uff;
         let bytes; try { bytes = creaModuloUfficiale({ mod: saved, modello: m, sfondo: await sfondoModulo(m.id) }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
-        const nome = `${m.nome} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+        const nome = pubModulo(saved, m.nome).titolo + '.pdf';
         mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModuloU(S.moduli.find(x => x.id === saved.id) || DIP.moduli.find(x => x.id === saved.id) || saved, false), pubModulo(saved, m.nome)); break;
       }
       const saved = salvaModulo(new FormData($('#sheetForm')));
       let bytes; try { bytes = creaModulo({ mod: { ...saved, clienteDati: trovaCliente(saved.cliente) || {} }, azienda: AZ(), immagini: IMG }); } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); break; }
-      const nome = `${saved.titolo} ${saved.cliente || ''} ${String(saved.data || '').split('-').reverse().join('-')}`.replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+      const nome = pubModulo(saved, saved.titolo).titolo + '.pdf';
       mostraPdf(bytes, nome, 'Modulo pronto', () => sheetModulo(S.moduli.find(x => x.id === saved.id) || saved, false), pubModulo(saved, saved.titolo)); break;
     }
     case 'siNo': { const h = $('#f_' + b.dataset.for); const v = h.value === arg ? '' : arg; h.value = v; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.arg === v))); break; }
