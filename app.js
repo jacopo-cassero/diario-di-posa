@@ -42,6 +42,7 @@ const ICON = {
   tel: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
   mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>',
   chat: '<path d="M4 4h16v12H8l-4 4z"/>',
+  swap: '<path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   clip2: '<path d="M8 4h8v3H8zM6 5H5v16h14V5h-1M8.5 12l2 2 4-4M8.5 17h7"/>',
 };
 const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true">${ICON[k]}</svg>`;
@@ -3090,6 +3091,7 @@ function sheetLav(l, prefill) {
   const imp = $('#f_importo');
   if (calcolo === 'ore') { imp.dataset.auto = !n2(l.importo) || Math.abs(n2(l.importo) - n2(l.ore) * tariffa * (l.urgenzaApplicata ? 1 + n2(l.urgenzaPct ?? LIST().urgenzaPct) / 100 : 1) - n2(KM.kmTot) * KM.euro) < 0.01 ? '1' : '0'; aggiornaTotali(); }
   else initImporto('#f_importo', l.righe, l.importo, !!l.urgenzaApplicata);
+  if (!isNew && GESTORE()) $('#sheetBody').insertAdjacentHTML('beforeend', trasformaHtml('lavori', l));
 }
 function cambiaCalcolo(modo) {
   const ore = modo === 'ore';
@@ -3158,6 +3160,48 @@ function sheetInt(i, day, prefill) {
   });
   if (!isNew || i.urgenzaApplicata !== undefined) { const u = $('#f_urgApp'); if (u) u.dataset.touched = '1'; }
   initImporto('#f_costo', i.righe, i.costo, i.urgenzaApplicata ?? (i.urgenza && i.urgenza !== 'normale'));
+  if (!isNew && GESTORE()) $('#sheetBody').insertAdjacentHTML('beforeend', trasformaHtml('interventi', i));
+}
+/* ---------- trasformare una posa in intervento e viceversa ---------- */
+const trasformaHtml = (kind, x) => `<div class="row trasforma"><button type="button" class="linkbtn small" data-act="trasforma" data-arg="${kind}" data-id="${esc(x.id)}">${svg('swap', 'i')} ${kind === 'lavori' ? 'Trasforma in intervento' : 'Trasforma in posa'}</button></div>`;
+function sheetTrasforma(kind, id) {
+  const x = S[kind].find(r => r.id === id); if (!x) return;
+  const aInt = kind === 'lavori', rif = rifDi(x);
+  const giorno = aInt ? x.data || '' : x.dataProg || x.data || TODAY;
+  const statoDef = !giorno ? 'aperto' : (x.giorniFatti || []).length || giorno < TODAY ? 'completato' : 'programmato';
+  openSheet(aInt ? 'Trasforma in intervento' : 'Trasforma in posa', `
+    <div class="small"><b>${esc(x.cliente || 'Cliente')}</b>${rif ? ' · ' + esc(rif) : ''}${x.indirizzo ? ' · ' + esc(x.indirizzo) : ''}</div>
+    <div class="notice small">Restano cliente, riferimento, indirizzo, telefono, orario, voci e prezzi, materiali, foto e allegati, moduli, preventivo collegato e stato del consuntivo.
+      ${aInt ? `${x.dataFine && x.dataFine > x.data ? `<br><b>Un intervento è di un giorno solo:</b> scegli quale tenere.` : ''}${x.installato || x.note ? '<br>Quello che hai scritto in «Installato» e nelle note diventa la descrizione dell\'intervento.' : ''}` : `${x.descrizione ? '<br>La descrizione dell\'intervento diventa «Installato».' : ''}${visiteDi(x).length ? '<br>I passaggi segnati come «lavoro non finito» restano nelle note.' : ''}`}</div>
+    <div class="g2">${F(aInt ? 'Data dell\'intervento' : 'Giorno della posa', inp('tdata', giorno, 'date', aInt ? '' : 'required'))}${aInt ? F('Stato', sel('tstato', [['programmato', 'Programmato'], ['completato', 'Completato'], ['aperto', 'Da programmare']], statoDef)) : F('Fino al giorno', inp('tdataFine', '', 'date', 'placeholder="Facoltativo"'))}</div>
+    ${aInt ? '<div class="small muted">Senza data resta tra gli interventi da programmare.</div>' : ''}`,
+  fd => {
+    const cur = S[kind].find(r => r.id === id); if (!cur) return;
+    const dt = String(fd.get('tdata') || ''), d = { ...stripId(cur) };
+    let nuovo;
+    if (aInt) {
+      const stato = !dt ? 'aperto' : fd.get('tstato') === 'aperto' ? 'programmato' : fd.get('tstato');
+      Object.assign(d, { dataProg: dt, data: cur.data || TODAY, stato, urgenza: cur.urgenza || 'normale', ...(cur.importo != null ? { costo: n2(cur.importo) } : {}),
+        descrizione: [cur.installato, cur.note].map(t => String(t || '').trim()).filter(Boolean).join('\n') });
+      for (const k of ['dataFine', 'soloFeriali', 'giorniFatti', 'orariGiorni', 'importo', 'installato', 'note', 'pezzi', 'calcolo']) delete d[k];
+      nuovo = 'interventi';
+    } else {
+      const fine = String(fd.get('tdataFine') || '');
+      if (fine && fine < dt) throw Object.assign(new Error('date'), { userMsg: 'Il giorno di fine è prima di quello di inizio' });
+      const passaggi = visiteDi(cur).map(v => `Passaggio del ${dIt(v.data)}: lavoro non finito${v.nota ? ' (' + v.nota + ')' : ''}`);
+      Object.assign(d, { data: dt, dataFine: fine && fine > dt ? fine : '', ...(cur.costo != null ? { importo: n2(cur.costo) } : {}), installato: String(cur.descrizione || '').trim(),
+        note: [cur.note, ...passaggi].filter(Boolean).join('\n'), giorniFatti: cur.stato === 'completato' ? [dt] : [] });
+      for (const k of ['dataProg', 'stato', 'urgenza', 'costo', 'descrizione', 'visite', 'cantiereId']) delete d[k];
+      nuovo = 'lavori';
+    }
+    // stesso codice: preventivi, moduli, prenotazioni e documenti nelle cartelle restano collegati
+    store.put(nuovo, id, d); store.drop(kind, id);
+    for (const p of S.preventivi.filter(q => q.lavoroId === id)) store.put('preventivi', p.id, { ...stripId(p), lavoroKind: nuovo });
+    for (const m of S.moduli.filter(q => q.ref?.id === id)) store.put('moduli', m.id, { ...stripId(m), ref: { ...m.ref, kind: nuovo } });
+    if (store.st.mode !== 'demo') store.tabella('documenti_cliente').update({ kind: nuovo }).eq('lavoro_id', id).then(() => {}, () => {});
+    toast(nuovo === 'interventi' ? 'Ora è un intervento' : 'Ora è una posa');
+    setTimeout(() => { const y = S[nuovo].find(r => r.id === id); if (y) (nuovo === 'lavori' ? sheetLav : sheetInt)(y); }, 80);
+  }, { saveLabel: aInt ? 'Trasforma in intervento' : 'Trasforma in posa' });
 }
 
 /* consuntivo */
@@ -4426,6 +4470,7 @@ document.addEventListener('click', async e => {
     case 'amm': advance(arg, id); render(); break;
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
+    case 'trasforma': sheetTrasforma(arg, id); break;
     case 'listApri': { const box = $('#listPick'); if (!box) break; const apri = box.hidden; box.hidden = !apri; $('[data-act="listApri"][aria-expanded]')?.setAttribute('aria-expanded', String(apri)); if (apri) { UI.listQ = ''; listPickHtml(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } break; }
     case 'listG': UI.listG = +arg; UI.listQ = ''; listPickHtml(); $('#listPick')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); break;
     case 'listSu': UI.listG = null; UI.listQ = ''; listPickHtml(); break;
