@@ -120,7 +120,7 @@ const soloFoto = q => { const p = q.precedente || {}; return !!p.foto && ['clien
 for (const tit of new Set((modPrev || []).map(x => x.titolare))) {
   const M = modPrev.filter(x => x.titolare === tit);
   const righe = M.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'} ${soloFoto(q) ? 'ha aggiunto foto' : 'ha modificato la richiesta'}: ${[q.cliente, q.indirizzo].filter(Boolean).join(' · ') || 'preventivo'}`; });
-  const titolo = M.length === 1 ? (soloFoto(M[0]) ? 'Nuove foto in una richiesta di preventivo' : 'Richiesta di preventivo modificata') : `${M.length} richieste di preventivo modificate`;
+  const titolo = M.length === 1 ? (soloFoto(M[0]) ? 'Nuove foto o file in una richiesta di preventivo' : 'Richiesta di preventivo modificata') : `${M.length} richieste di preventivo modificate`;
   const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#richieste', tag: `prevmod-${Date.now()}` });
   for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);
   await fetch(`${base}/richieste_preventivo?id=in.(${M.map(x => x.id).join(',')})`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ modifica_notificata: true }) }).catch(() => {});

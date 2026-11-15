@@ -857,6 +857,7 @@ function rRivPreventivo() {
     ${r.modificata ? `<div class="small muted">Modificata il ${quandoMod(r.modificata)}</div>` : ''}
     ${r.risposta ? `<div class="small">${r.stato === 'inviato' ? '' : 'Preventivo di prima: '}${esc(r.risposta)}</div>` : ''}
     ${fotoRichHtml(store.uid(), r.id, { aggiungi: !modAttiva && richAperta(r) })}
+    ${fileCantHtml([[store.uid(), 'richieste/' + r.id]], { soloDoc: true, titolo: 'Video, PDF e altri file', togli: richAperta(r) })}
     ${pdf || (modAttiva && r.stato !== 'chiusa') ? `<div class="row">${pdf ? `<button class="btn sm primary" data-act="rivPrevPdf" data-id="${esc(pdf.id)}" type="button">${svg('doc', 'i')} ${r.stato === 'inviato' || r.stato === 'chiusa' ? 'Apri il preventivo' : 'Apri il preventivo di prima'}</button>` : ''}${modAttiva && r.stato !== 'chiusa' ? `<button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button>` : ''}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
@@ -912,35 +913,42 @@ function sheetPrevRiv(r = null) {
         : !liberi ? `Hai già mandato ${MAX_FOTO_RICH} foto, il massimo: per cambiarne una, toglila dalla scheda della richiesta.`
         : `${gia ? `Ne hai già ${gia === 1 ? 'mandata una' : 'mandate ' + gia}: le vedi e le togli dalla scheda della richiesta. ` : ''}Qui puoi aggiungerne ${liberi === 1 ? 'ancora una' : 'altre ' + liberi}.`}</div>
     </div>
+    <div class="fieldset"><span class="fs-t">${r ? 'Altri video, PDF e file' : 'Video, PDF e altri file'}</span>
+      <div class="small muted">Video del cantiere, rilievi, disegni, schede tecniche… (al massimo ${MAX_DOC_CANT} file da ${MAX_MB_DOC} MB l'uno)</div>
+      ${r ? fileCantHtml([[store.uid(), 'richieste/' + r.id]], { soloDoc: true, titolo: 'Già mandati', togli: true, vuoto: 'Nessun file mandato finora.' }).replace('class="fieldset filecant"', 'class="filecant stack"') : ''}
+      <div class="stack doclist" id="pDocList"></div>
+      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi file<input type="file" id="pDocIn" accept="${ACCETTA_DOC}" multiple hidden></label></div>
     <div class="small muted">Nessun campo è obbligatorio. Il prezzo te lo manda l'installatore con il preventivo.</div>`,
   async fd => {
-    const d = leggiPrevRiv(fd, r?.righe);
+    const d = leggiPrevRiv(fd, r?.righe), docs = [...pDocs];
     await rvPronte;   // se sta ancora preparando le foto scelte, aspetto
-    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente && !rvFoto.length && !gia) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
+    if (!d.righe.length && !d.indirizzo && !d.note && !d.cliente && !rvFoto.length && !docs.length && !gia) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi almeno qualcosa: una tipologia, il luogo o una nota' });
     let msg;
     if (r) {
-      const cambiata = diffRich(r, d).length > 0, n = rvFoto.length;
+      const cambiata = diffRich(r, d).length > 0, n = rvFoto.length + docs.length;
       if (!cambiata && !n) { toast('Non hai cambiato niente: la richiesta resta com\'è'); return; }
       if (cambiata) await modificaRich(r.id, { ...d, ...(n ? { conFoto: true } : {}) });
-      // da qui le modifiche sono salvate: se una foto non si carica lo dico, senza far ripetere tutto
-      const perse = n ? await caricaFotoRich(r.id, rvFoto) : 0;
+      // da qui le modifiche sono salvate: se un file non si carica lo dico, senza far ripetere tutto
+      const perse = (rvFoto.length ? await caricaFotoRich(r.id, rvFoto) : 0) + (docs.length ? await caricaFileCant('richieste/' + r.id, [], docs) : 0);
       if (!cambiata && perse < n) await modificaRich(r.id, { soloFoto: true }).catch(() => {});
-      const foto = !n ? '' : perse ? (perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`) + ' dalla richiesta' : n === 1 ? 'una foto aggiunta' : `${n} foto aggiunte`;
-      msg = !cambiata ? (perse === n ? 'Foto non caricate: controlla la rete e riprova' : perse ? `Foto aggiunte, ma ${foto}` : n === 1 ? 'Foto aggiunta alla richiesta' : `${n} foto aggiunte alla richiesta`)
+      const foto = !n ? '' : perse ? (perse === 1 ? 'un file non è stato caricato: aggiungilo' : `${perse} file non sono stati caricati: aggiungili`) + ' dalla richiesta' : n === 1 ? 'un file aggiunto' : `${n} file aggiunti`;
+      msg = !cambiata ? (perse === n ? 'File non caricati: controlla la rete e riprova' : perse ? `File aggiunti, ma ${foto}` : n === 1 ? 'Aggiunto alla richiesta' : `${n} file aggiunti alla richiesta`)
         : (r.stato === 'inviato' ? 'Richiesta modificata: l\'installatore aggiorna il preventivo e te lo rimanda' : 'Richiesta modificata: l\'installatore vede che cosa è cambiato') + (!n ? '' : perse ? `. Attenzione, ${foto}` : ` · ${foto}`);
     } else {
       const id = await store.rpc('chiedi_preventivo', { dati: d });
       // da qui la richiesta è partita: se una foto non si carica lo dico, ma non la mando due volte
       msg = 'Richiesta inviata: ti arriva il preventivo';
-      if (rvFoto.length) {
-        const perse = typeof id === 'string' && id ? await caricaFotoRich(id, rvFoto) : rvFoto.length;
-        msg = perse ? `Richiesta inviata, ma ${perse === 1 ? 'una foto non è stata caricata: aggiungila' : `${perse} foto non sono state caricate: aggiungile`} dalla richiesta` : `Richiesta inviata con ${rvFoto.length === 1 ? 'una foto' : rvFoto.length + ' foto'}`;
+      const tot = rvFoto.length + docs.length;
+      if (tot) {
+        const ok = typeof id === 'string' && id;
+        const perse = !ok ? tot : (rvFoto.length ? await caricaFotoRich(id, rvFoto) : 0) + (docs.length ? await caricaFileCant('richieste/' + id, [], docs) : 0);
+        msg = perse ? `Richiesta inviata, ma ${perse === 1 ? 'un file non è stato caricato: aggiungilo' : `${perse} file non sono stati caricati: aggiungili`} modificando la richiesta` : `Richiesta inviata con ${tot === 1 ? 'un file' : tot + ' file'}`;
       }
     }
-    svuotaRvFoto();
+    svuotaRvFoto(); pDocs = [];
     toast(msg); RIV.listinoCarico = false; UI.rivTab = 'prev'; render();
   }, { saveLabel: r ? 'Salva le modifiche' : 'Invia richiesta' });
-  svuotaRvFoto(); rvMax = liberi;
+  svuotaRvFoto(); rvMax = liberi; pDocs = [];
   // il tiro al piano si segna da solo, ma non se in questa richiesta era stato scelto a mano
   if (r && !!r.tiro !== ((r.piano || 'Piano terra') !== 'Piano terra' && r.ascensore !== 'Sì')) $('#f_rv_tiro').dataset.toccato = '1';
 }
@@ -992,7 +1000,7 @@ function novitaRich(r) {
 const richDaGuardare = r => r.stato === 'nuova' || !!novitaRich(r);
 function novitaHtml(r, nov, nelPreventivo = false) {
   return `<div class="modrich stack"><div class="small"><b>${nelPreventivo ? 'Il rivenditore ha modificato la richiesta' : 'Modificata dal rivenditore'}</b>${r.modificata ? ' · ' + quandoMod(r.modificata) : ''}</div>
-    <ul class="difflist small">${nov.d.map(x => `<li class="${x.tipo}">${esc(x.testo)}</li>`).join('')}${nov.foto ? '<li class="piu">Nuove foto del cantiere</li>' : ''}</ul>
+    <ul class="difflist small">${nov.d.map(x => `<li class="${x.tipo}">${esc(x.testo)}</li>`).join('')}${nov.foto ? '<li class="piu">Nuove foto o file del cantiere</li>' : ''}</ul>
     ${nelPreventivo ? '<div class="small muted">Sistema le voci qui sotto. Quando salvi il preventivo come inviato, il rivenditore riceve l\'avviso che è pronto.</div>' : ''}
     <div class="row"><button class="btn sm" data-act="richPrevVista" data-id="${esc(r.id)}" type="button">Ho visto</button></div></div>`;
 }
@@ -1041,8 +1049,10 @@ async function hydrateFotoRich(root) {
 /* ---------- foto e documenti del cantiere caricati dal rivenditore ----------
    Nella cartella del rivenditore: <riv>/cantieri/<chiave>/f-<k>.jpg e t-<k>.jpg (foto e miniatura), d-<k>-<nome> (documenti).
    La chiave è l'id della prenotazione, oppure <tipo>-<id> per i lavori segnati dall'installatore. */
-const MAX_FOTO_CANT = 30, MAX_DOC_CANT = 20, MAX_MB_DOC = 25;
-const ACCETTA_DOC = '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt,.csv,.rtf,.dwg,.dxf,.zip,.heic,image/*,application/pdf';
+const MAX_FOTO_CANT = 30, MAX_DOC_CANT = 20, MAX_MB_DOC = 50;   // 50 MB: il limite di ogni file nello spazio di Supabase
+const ACCETTA_DOC = '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt,.csv,.rtf,.dwg,.dxf,.zip,.heic,.mp4,.mov,.m4v,image/*,video/*,application/pdf';
+const cartCant = c => c.includes('/') ? c : `cantieri/${c}`;   // «richieste/<id>» per le richieste di preventivo
+const iconaFile = n => /\.(mp4|mov|m4v|webm|3gp|avi)$/i.test(n) ? 'cam' : 'doc';
 const FCANT = new Map();   // "riv|chiave" → { t, foto: [{ k, path, mini }], doc: [{ path, nome }] }
 const chiaveCantRiv = l => l.prenotazioneId || (RIV.mie || []).find(p => p.lavoro_id === l.id)?.id || `${l.kind}-${l.id}`;
 /** Da quali cartelle leggo i file di un mio lavoro: la prenotazione da cui è nato e i rivenditori dello stesso cliente. */
@@ -1055,7 +1065,7 @@ function sorgentiCant(kind, x) {
 }
 async function leggiCant(riv, chiave) {
   const per = new Map(), doc = [];
-  for (const f of await store.elencoFile(`${riv}/cantieri/${chiave}`)) {
+  for (const f of await store.elencoFile(`${riv}/${cartCant(chiave)}`)) {
     const d = f.nome.match(/^d-[a-z0-9]+-(.+)$/i); if (d) { doc.push({ path: f.path, nome: d[1] }); continue; }
     const m = f.nome.match(/^([ft])-(.+)\.jpe?g$/i); if (!m) continue;
     const o = per.get(m[2]) || { k: m[2] }; o[m[1].toLowerCase() === 'f' ? 'path' : 'mini'] = f.path; per.set(m[2], o);
@@ -1065,23 +1075,23 @@ async function leggiCant(riv, chiave) {
 }
 const nomeFileSicuro = n => String(n || 'documento').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(-80) || 'documento';
 /** Riquadro «Foto e documenti del cantiere». src: [[rivenditore, chiave], …]; agg: la chiave in cui il rivenditore aggiunge. */
-function fileCantHtml(src, { agg = '', tipo = '', lavoro = '', titolo = 'Foto e documenti del cantiere', vuoto = '' } = {}) {
+function fileCantHtml(src, { agg = '', tipo = '', lavoro = '', titolo = 'Foto e documenti del cantiere', vuoto = '', soloDoc = false, togli = false } = {}) {
   if (!src.length || store.st.mode === 'demo') return '';
-  return `<div class="fieldset filecant" data-src="${esc(JSON.stringify(src))}" data-agg="${esc(agg)}" data-tipo="${esc(tipo)}" data-lav="${esc(lavoro)}" data-vuoto="${esc(vuoto)}"><span class="fs-t">${esc(titolo)}</span><div class="fcbody small muted">Carico…</div></div>`;
+  return `<div class="fieldset filecant" data-src="${esc(JSON.stringify(src))}" data-agg="${esc(agg)}" ${soloDoc ? 'data-solodoc="1"' : ''} ${togli ? 'data-togli="1"' : ''} data-tipo="${esc(tipo)}" data-lav="${esc(lavoro)}" data-vuoto="${esc(vuoto)}"><span class="fs-t">${esc(titolo)}</span><div class="fcbody small muted">Carico…</div></div>`;
 }
 function fileCantDentro(box, foto, doc) {
-  const agg = box.dataset.agg, mio = !!agg;
+  const agg = box.dataset.agg, mio = !!agg, puoTogliere = mio || !!box.dataset.togli || GESTORE();
   return `${foto.length ? `<div class="small muted">Foto (${foto.length})</div><div class="thumbs">${foto.map((f, i) => `<button type="button" class="thumbbtn" data-act="fcFoto" data-arg="${i}" aria-label="Apri la foto ${i + 1} di ${foto.length}"><img data-file="${esc(f.mini || f.path)}" alt=""></button>`).join('')}</div>` : ''}
-    ${doc.length ? `<div class="small muted">Documenti (${doc.length})</div><div class="stack doclist">${doc.map(d => `<div class="docrow"><button type="button" class="linkbtn" data-act="fcDoc" data-arg="${esc(d.path)}" data-nome="${esc(d.nome)}">${svg('doc', 'i')} ${esc(d.nome)}</button>${mio || GESTORE() ? `<button type="button" class="iconbtn sm" data-act="fcDocTogli" data-arg="${esc(d.path)}" aria-label="Elimina ${esc(d.nome)}">×</button>` : ''}</div>`).join('')}</div>` : ''}
+    ${doc.length ? `<div class="small muted">${box.dataset.solodoc ? 'File' : 'Documenti'} (${doc.length})</div><div class="stack doclist">${doc.map(d => `<div class="docrow"><button type="button" class="linkbtn" data-act="fcDoc" data-arg="${esc(d.path)}" data-nome="${esc(d.nome)}">${svg(iconaFile(d.nome), 'i')} ${esc(d.nome)}</button>${puoTogliere ? `<button type="button" class="iconbtn sm" data-act="fcDocTogli" data-arg="${esc(d.path)}" aria-label="Elimina ${esc(d.nome)}">×</button>` : ''}</div>`).join('')}</div>` : ''}
     ${!foto.length && !doc.length ? `<div class="small muted">${esc(box.dataset.vuoto || (mio ? 'Aggiungi le foto del cantiere e i documenti utili per la posa: documenti di trasporto, rilievo misure, progetti…' : 'Nessuna foto o documento.'))}</div>` : ''}
-    ${mio ? `<div class="row">${foto.length < MAX_FOTO_CANT ? `<label class="btn sm">${svg('cam', 'i')} Aggiungi foto<input type="file" class="fcFotoIn" accept="image/*" multiple hidden></label>` : ''}${doc.length < MAX_DOC_CANT ? `<label class="btn sm">${svg('doc', 'i')} Aggiungi documenti<input type="file" class="fcDocIn" accept="${ACCETTA_DOC}" multiple hidden></label>` : ''}</div>` : ''}`;
+    ${mio ? `<div class="row">${!box.dataset.solodoc && foto.length < MAX_FOTO_CANT ? `<label class="btn sm">${svg('cam', 'i')} Aggiungi foto<input type="file" class="fcFotoIn" accept="image/*" multiple hidden></label>` : ''}${doc.length < MAX_DOC_CANT ? `<label class="btn sm">${svg('doc', 'i')} Aggiungi documenti<input type="file" class="fcDocIn" accept="${ACCETTA_DOC}" multiple hidden></label>` : ''}</div>` : ''}`;
 }
 async function hydrateFileCant(root, forza = false) {
   await Promise.all([...root.querySelectorAll('.filecant[data-src]')].map(async box => {
     let src; try { src = JSON.parse(box.dataset.src); } catch { return; }
     let R; try { R = await Promise.all(src.map(([r, c]) => { const v = FCANT.get(r + '|' + c); return !forza && v && Date.now() - v.t < 60000 ? v : leggiCant(r, c); })); } catch (e) { console.warn(e); R = []; }
     if (!box.isConnected) return;
-    box._foto = R.flatMap(v => v.foto); const doc = R.flatMap(v => v.doc);
+    box._foto = box.dataset.solodoc ? [] : R.flatMap(v => v.foto); const doc = R.flatMap(v => v.doc);
     box.querySelector('.fcbody').outerHTML = `<div class="fcbody stack">${fileCantDentro(box, box._foto, doc)}</div>`;
     if (!box._foto.length && !doc.length && !box.dataset.agg && !box.dataset.vuoto) box.hidden = true;
     hydrateFiles(box);
@@ -1092,12 +1102,12 @@ async function caricaFileCant(chiave, foto = [], docs = []) {
   let perse = 0; const base = Date.now().toString(36), tot = foto.length + docs.length; let n = 0;
   for (let i = 0; i < foto.length; i++) {
     toast(`Carico ${++n} di ${tot}…`); const k = `${base}${String(i).padStart(2, '0')}`;
-    try { await store.caricaInCartella(`cantieri/${chiave}`, `f-${k}.jpg`, foto[i].blob); await store.caricaInCartella(`cantieri/${chiave}`, `t-${k}.jpg`, foto[i].mini).catch(() => {}); }
+    try { await store.caricaInCartella(cartCant(chiave), `f-${k}.jpg`, foto[i].blob); await store.caricaInCartella(cartCant(chiave), `t-${k}.jpg`, foto[i].mini).catch(() => {}); }
     catch (e) { console.warn(e); perse++; }
   }
   for (let i = 0; i < docs.length; i++) {
     toast(`Carico ${++n} di ${tot}…`);
-    try { await store.caricaInCartella(`cantieri/${chiave}`, `d-${base}${i}-${nomeFileSicuro(docs[i].name)}`, docs[i]); }
+    try { await store.caricaInCartella(cartCant(chiave), `d-${base}${i}-${nomeFileSicuro(docs[i].name)}`, docs[i]); }
     catch (e) { console.warn(e); perse++; }
   }
   for (const k of [...FCANT.keys()]) if (k.endsWith('|' + chiave)) FCANT.delete(k);
@@ -1117,7 +1127,7 @@ async function aggiungiFileCant(box, foto, docs) {
 let pDocs = [];
 function disegnaPDocs() {
   const box = $('#pDocList'); if (!box) return;
-  box.innerHTML = pDocs.map((f, i) => `<div class="docrow"><span>${svg('doc', 'i')} ${esc(f.name)}</span><button type="button" class="iconbtn sm" data-act="pDocRm" data-arg="${i}" aria-label="Togli ${esc(f.name)}">×</button></div>`).join('');
+  box.innerHTML = pDocs.map((f, i) => `<div class="docrow"><span>${svg(iconaFile(f.name), 'i')} ${esc(f.name)}</span><button type="button" class="iconbtn sm" data-act="pDocRm" data-arg="${i}" aria-label="Togli ${esc(f.name)}">×</button></div>`).join('');
   const piu = $('#pDocPiu'); if (piu) piu.hidden = pDocs.length >= MAX_DOC_CANT;
 }
 /** Riduce una foto: quella da guardare (1800 px) e la miniatura (320 px). */
@@ -1259,6 +1269,7 @@ function cardRichPrev(r) {
     <div class="small">${esc(pz)}</div>${r.note ? `<div class="small muted prewrap">${esc(r.note)}</div>` : ''}
     ${nov ? novitaHtml(r, nov) : ''}
     ${fotoRichHtml(r.rivenditore, r.id)}
+    ${r.rivenditore ? fileCantHtml([[r.rivenditore, 'richieste/' + r.id]], { soloDoc: true, titolo: 'Video, PDF e altri file' }) : ''}
     <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
 }
 function preventivoDaRichiesta(r) {
@@ -3515,6 +3526,7 @@ function sheetPrev(p) {
     <label class="check"><input type="checkbox" id="f_condizioni" name="condizioni" ${p.condizioni !== false ? 'checked' : ''}> Allega termini e condizioni con firma per accettazione</label>
     <div class="fieldset firmatobox" id="firmatoBox">${firmatoHtml()}</div>
     ${p.richiestaRiv ? fotoRichHtml(p.richiestaDi || ACC_PREV.L.find(r => r.id === p.richiestaRiv)?.rivenditore, p.richiestaRiv) : ''}
+    ${p.richiestaRiv && (p.richiestaDi || ACC_PREV.L.find(r => r.id === p.richiestaRiv)?.rivenditore) ? fileCantHtml([[p.richiestaDi || ACC_PREV.L.find(r => r.id === p.richiestaRiv)?.rivenditore, 'richieste/' + p.richiestaRiv]], { soloDoc: true, titolo: 'Video, PDF e altri file del rivenditore' }) : ''}
     ${boxCollegaPrev(p, isNew)}
   `, async fd => { salvaPrev(fd); toast('Preventivo salvato'); }, {
     del: isNew ? null : async () => { store.drop('preventivi', p.id); togliPdfPrev(p.id); toast('Preventivo eliminato'); },
