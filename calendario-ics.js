@@ -7,7 +7,7 @@ const pad = n => String(n).padStart(2, '0');
 const isoGiorno = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 const giorno = s => new Date(s + 'T12:00:00Z');
 const compatto = s => s.replaceAll('-', '');
-const esc = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const esc = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 function piega(riga) {
   // righe al massimo di 75 byte, come vuole il formato iCalendar
   const out = []; let cur = '', len = 0; const enc = new TextEncoder();
@@ -25,6 +25,10 @@ const VTIMEZONE = [
   'BEGIN:STANDARD', 'TZOFFSETFROM:+0200', 'TZOFFSETTO:+0100', 'TZNAME:CET', 'DTSTART:19701025T030000', 'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU', 'END:STANDARD',
   'END:VTIMEZONE',
 ];
+/** Link che apre l'indirizzo in Mappe sull'iPhone (su altri telefoni si apre nel browser). */
+const urlMappa = ind => `https://maps.apple.com/?q=${encodeURIComponent(String(ind).trim())}`;
+/** Luogo dell'evento: l'indirizzo e il link a Mappe (il calendario dell'iPhone lo mostra toccabile). */
+const luogo = ind => String(ind || '').trim() ? [`LOCATION:${esc(String(ind).trim())}`, `URL:${urlMappa(ind)}`] : [];
 const NOMI = { ferie: 'Ferie', fiera: 'Fiera', corso: 'Corso', altro: 'Impegno' };
 
 /** @param S dati dell'app (lavori, interventi, eventi) @param giornata orari di lavoro @param stamp DTSTAMP (es. 20261028T190000Z) */
@@ -53,8 +57,8 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       `SUMMARY:${esc(`${x.urgenzaApplicata ? '⚠ ' : ''}Posa · ${x.cliente || 'Cliente'}${(x.riferimento || x.clienteFinale) ? ' · ' + (x.riferimento || x.clienteFinale) : ''}${giorni.length > 1 ? ` (${i + 1}/${giorni.length})` : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(k)}T${hm(ini)}`,
       `DTEND;TZID=Europe/Rome:${compatto(k)}T${hm(fin)}`,
-      ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
-      `DESCRIPTION:${esc([x.installato, x.note, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
+      ...luogo(x.indirizzo),
+      `DESCRIPTION:${esc([x.installato, x.note, x.telefono && 'Tel. ' + x.telefono, x.indirizzo && 'Mappa: ' + urlMappa(x.indirizzo)].filter(Boolean).join('\n'))}`,
     ]); });
   }
   for (const x of S.interventi || []) {
@@ -66,8 +70,8 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       `SUMMARY:${esc(`${x.urgenza === 'critica' ? '⚠ ' : ''}Intervento · ${x.cliente || 'Cliente'}${x.riferimento ? ' · ' + x.riferimento : ''}${x.stato === 'completato' ? ' (fatto)' : ''}`)}`,
       `DTSTART;TZID=Europe/Rome:${compatto(x.dataProg)}T${inizio}`,
       `DTEND;TZID=Europe/Rome:${compatto(x.dataProg)}T${fine}`,
-      ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
-      `DESCRIPTION:${esc([x.descrizione, x.telefono && 'Tel. ' + x.telefono].filter(Boolean).join('\n'))}`,
+      ...luogo(x.indirizzo),
+      `DESCRIPTION:${esc([x.descrizione, x.telefono && 'Tel. ' + x.telefono, x.indirizzo && 'Mappa: ' + urlMappa(x.indirizzo)].filter(Boolean).join('\n'))}`,
     ]);
   }
   // giorni in cui sono già passato per un intervento non finito
@@ -81,8 +85,8 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
         `SUMMARY:${esc(`Intervento · ${x.cliente || 'Cliente'}${x.riferimento ? ' · ' + x.riferimento : ''} (non finito)`)}`,
         `DTSTART;TZID=Europe/Rome:${compatto(v.data)}T${inizio}`,
         `DTEND;TZID=Europe/Rome:${compatto(v.data)}T${fine}`,
-        ...(x.indirizzo ? [`LOCATION:${esc(x.indirizzo)}`] : []),
-        `DESCRIPTION:${esc([x.descrizione, v.nota && 'Da completare: ' + v.nota, x.dataProg && 'Si torna il ' + x.dataProg.split('-').reverse().join('/')].filter(Boolean).join('\n'))}`,
+        ...luogo(x.indirizzo),
+        `DESCRIPTION:${esc([x.descrizione, v.nota && 'Da completare: ' + v.nota, x.dataProg && 'Si torna il ' + x.dataProg.split('-').reverse().join('/'), x.indirizzo && 'Mappa: ' + urlMappa(x.indirizzo)].filter(Boolean).join('\n'))}`,
       ]);
     }
   }
@@ -95,8 +99,8 @@ export function creaCalendario(S, giornata = {}, stamp = '') {
       `SUMMARY:${esc(x.titolo || NOMI[x.tipo] || 'Impegno')}`,
       `DTSTART;VALUE=DATE:${compatto(x.data)}`,
       `DTEND;VALUE=DATE:${compatto(isoGiorno(dopo))}`,
-      ...(x.luogo ? [`LOCATION:${esc(x.luogo)}`] : []),
-      `DESCRIPTION:${esc([NOMI[x.tipo], x.orario, x.note].filter(Boolean).join('\n'))}`,
+      ...luogo(x.luogo),
+      `DESCRIPTION:${esc([NOMI[x.tipo], x.orario, x.note, x.luogo && 'Mappa: ' + urlMappa(x.luogo)].filter(Boolean).join('\n'))}`,
       ...(x.tipo === 'ferie' ? ['TRANSP:OPAQUE'] : []),
     ]);
   }
