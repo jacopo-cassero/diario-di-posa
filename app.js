@@ -42,6 +42,7 @@ const ICON = {
   tel: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
   mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>',
   chat: '<path d="M4 4h16v12H8l-4 4z"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   swap: '<path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   clip2: '<path d="M8 4h8v3H8zM6 5H5v16h14V5h-1M8.5 12l2 2 4-4M8.5 17h7"/>',
 };
@@ -169,6 +170,8 @@ function conSquadra(kind, id, d, fd) {
   if (cur?.lavoroSquadra) d.lavoroSquadra = cur.lavoroSquadra;
   if (cur?.prenotazioneId) { d.prenotazioneId = cur.prenotazioneId; d.clienteFinale = cur.clienteFinale; }
   for (const k of ['gruppoCons', 'importoCons', 'consAgg', 'giorniFatti', 'preventivoId']) if (cur && cur[k] != null && d[k] == null) d[k] = cur[k];
+  // tutto quello che il modulo non mostra resta com'era (diario, passaggi, consuntivo dal rapporto, note e file del rivenditore…)
+  if (cur) for (const k of Object.keys(cur)) if (k !== 'id' && !(k in d)) d[k] = cur[k];
   return d;
 }
 
@@ -953,6 +956,20 @@ function sheetPrevRiv(r = null) {
   if (r && !!r.tiro !== ((r.piano || 'Piano terra') !== 'Piano terra' && r.ascensore !== 'Sì')) $('#f_rv_tiro').dataset.toccato = '1';
 }
 /** Nella scheda di posa o intervento: che cosa ha corretto il rivenditore. */
+/* ---------- il mio diario del cantiere: solo per me ----------
+   Nel lavoro, campo «diario»: [{ id, data, testo }]. Non entra in rapporti, consuntivi, PDF, calendario,
+   né in quello che vedono rivenditori e dipendenti (le loro funzioni leggono solo i campi che servono). */
+const diarioDel = (x, g) => (x?.diario || []).filter(e => e.data === g);
+function diarioHtml(kind, x) {
+  const L = [...(x.diario || [])].sort((a, b) => (b.data + b.id).localeCompare(a.data + a.id));
+  return `<div class="fieldset diario" id="diarioBox"><span class="fs-t">${svg('lock', 'i')} Il mio diario del cantiere</span>
+    <div class="small muted">Lo vedi solo tu: non esce in rapporti, consuntivi o PDF e non lo vedono rivenditori né dipendenti.</div>
+    <div class="diarioadd"><input type="date" id="diarioData" value="${TODAY}" aria-label="Giorno"><textarea id="diarioTesto" rows="2" placeholder="Cosa hai fatto, cosa resta, com'è andata…" aria-label="Cosa hai fatto"></textarea>
+      <button type="button" class="btn sm primary" data-act="diarioAdd" data-arg="${kind}" data-id="${esc(x.id)}">Aggiungi al diario</button></div>
+    ${L.length ? `<div class="stack diariolist">${L.map(e => `<div class="diariorow"><div class="mid"><b class="small">${esc(fmtD(e.data, { weekday: 'short', day: 'numeric', month: 'short', year: e.data.slice(0, 4) !== TODAY.slice(0, 4) ? 'numeric' : undefined }))}</b><div class="prewrap">${esc(e.testo)}</div></div><button type="button" class="iconbtn sm" data-act="diarioTogli" data-arg="${kind}" data-id="${esc(x.id)}" data-e="${esc(e.id)}" aria-label="Elimina questa nota">×</button></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+function ridisegnaDiario(kind, id) { const x = S[kind].find(r => r.id === id), box = $('#diarioBox'); if (x && box) box.outerHTML = diarioHtml(kind, x); }
 /** Nella scheda di un mio lavoro: note, foto e documenti che il rivenditore ha aggiunto. */
 function dalRivHtml(kind, x) {
   const src = sorgentiCant(kind, x), f = x.fileRiv;
@@ -1755,7 +1772,7 @@ function lavoroCard(l, giorno = UI.day) {
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
     <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${chipCli(l)}${rifDi(l) ? `<small class="rif">Rif. ${esc(rifDi(l))}</small>` : ''}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
-    ${badgeOrario(l, giorno)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}
+    ${badgeOrario(l, giorno)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}${GESTORE() ? diarioDel(l, giorno).map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo.length > 90 ? e.testo.slice(0, 90) + '…' : e.testo)}</div>`).join('') : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
     ${l.installato ? `<div>${esc(l.installato)}</div>` : ''}
     ${rigaNoteSospesi(l, 'lavori')}
@@ -1904,6 +1921,7 @@ function intCard(i, giorno = '') {
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
     <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
+    ${GESTORE() && giorno ? diarioDel(i, giorno).map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo.length > 90 ? e.testo.slice(0, 90) + '…' : e.testo)}</div>`).join('') : ''}
     ${vis ? `<div class="visita small"><b>Passaggio del ${fmtD(vis.data, { day: 'numeric', month: 'short' })}: lavoro non finito</b>${i.stato === 'completato' ? ' · poi completato' : i.dataProg ? ` · si torna ${fmtD(i.dataProg, { weekday: 'short', day: 'numeric', month: 'short' })}` : ' · da riprogrammare'}${vis.nota ? `<br>${esc(vis.nota)}` : ''}</div>` : i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
     ${i.descrizione ? `<div class="prewrap">${esc(i.descrizione)}</div>` : ''}
@@ -3019,7 +3037,7 @@ function sheetLav(l, prefill) {
   const tariffa = righeOre[0] ? n2(righeOre[0].prezzo) : tariffaOraria();
   const notaVecchia = !l.note && !(l.righe || []).length && l.installato ? l.installato : '';
   openSheet(isNew ? 'Nuova posa' : 'Posa', `
-    ${modRivHtml(l, 'lavori')}${isNew ? '' : dalRivHtml('lavori', l)}
+    ${modRivHtml(l, 'lavori')}${isNew ? '' : dalRivHtml('lavori', l)}${isNew || !GESTORE() ? '' : diarioHtml('lavori', l)}
     ${l.preventivoId && isNew ? `<div class="notice small">Dal preventivo accettato: scegli la data e salva.</div>` : ''}
     ${campoCliente('cliente', 'Cliente', l.cliente, 'placeholder="Nome o impresa"')}
     ${F('Riferimento', inp('riferimento', l.riferimento ?? l.clienteFinale, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
@@ -3079,7 +3097,7 @@ function sheetLav(l, prefill) {
     d.clienteId = assicuraCliente(d.cliente);
     conSquadra('lavori', isNew ? null : l.id, d, fd);
     Object.assign(d, leggiOrario(fd));
-    { const og = leggiOrariGiorni(fd, d); if (Object.keys(og).length) d.orariGiorni = og; }
+    { const og = leggiOrariGiorni(fd, d); if (Object.keys(og).length) d.orariGiorni = og; else delete d.orariGiorni; }
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
     if (!isNew && (l.data !== d.data || (l.dataFine || '') !== (d.dataFine || ''))) spostaPrenotazioniDi(id, d.data, d.dataFine);
@@ -3118,7 +3136,7 @@ function sheetInt(i, day, prefill) {
   const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
-    ${modRivHtml(i, 'interventi')}${isNew ? '' : dalRivHtml('interventi', i)}
+    ${modRivHtml(i, 'interventi')}${isNew ? '' : dalRivHtml('interventi', i)}${isNew || !GESTORE() ? '' : diarioHtml('interventi', i)}
     ${campoCliente('cliente', 'Cliente', i.cliente)}
     ${F('Riferimento', inp('riferimento', i.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale), referente in cantiere" list="riflist"'))}
     <div class="cliline small" id="cliInfo"></div>
@@ -4483,6 +4501,19 @@ document.addEventListener('click', async e => {
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
+    case 'diarioAdd': {
+      const t = String($('#diarioTesto')?.value || '').trim(), g = $('#diarioData')?.value || TODAY;
+      if (!t) { toast('Scrivi cosa hai fatto'); $('#diarioTesto')?.focus(); break; }
+      const cur = S[arg]?.find(r => r.id === id); if (!cur) break;
+      store.put(arg, id, { ...stripId(cur), diario: [...(cur.diario || []), { id: Date.now().toString(36), data: g, testo: t.slice(0, 4000) }] });
+      ridisegnaDiario(arg, id); toast('Aggiunto al diario'); break;
+    }
+    case 'diarioTogli': {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Elimina?'; break; }
+      const cur = S[arg]?.find(r => r.id === id); if (!cur) break;
+      store.put(arg, id, { ...stripId(cur), diario: (cur.diario || []).filter(e => e.id !== b.dataset.e) });
+      ridisegnaDiario(arg, id); break;
+    }
     case 'listApri': { const box = $('#listPick'); if (!box) break; const apri = box.hidden; box.hidden = !apri; $('[data-act="listApri"][aria-expanded]')?.setAttribute('aria-expanded', String(apri)); if (apri) { UI.listQ = ''; listPickHtml(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } break; }
     case 'listG': UI.listG = +arg; UI.listQ = ''; listPickHtml(); $('#listPick')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); break;
     case 'listSu': UI.listG = null; UI.listQ = ''; listPickHtml(); break;

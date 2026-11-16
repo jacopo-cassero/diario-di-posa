@@ -627,3 +627,14 @@ details.cartella[open]>summary{margin-bottom:10px}
 .ogrow{display:grid;grid-template-columns:minmax(78px,1fr) minmax(0,1.2fr) auto minmax(0,1.2fr);gap:8px;align-items:center}
 .ogrow input{min-width:0;width:100%}
 .ogrow input{padding:9px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font:inherit;color:inherit;min-height:42px}
+
+/* il mio diario del cantiere */
+.diarioadd{display:grid;gap:8px}
+.diarioadd textarea,.diarioadd input{width:100%}
+.diarioadd .btn{justify-self:start}
+.diariorow{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+.diariorow .mid{min-width:0;flex:1}
+.diariorow .iconbtn.armed{width:auto;padding:0 8px;font-size:.8rem;color:var(--bad,#b3261e)}
+.diariomini{display:flex;gap:6px;align-items:flex-start;color:var(--muted)}
+.diariomini svg.i{width:14px;height:14px;flex:none;margin-top:2px}
+.fs-t svg.i{width:15px;height:15px;vertical-align:-2px}
