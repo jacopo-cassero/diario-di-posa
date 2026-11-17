@@ -1,4 +1,4 @@
-2026-11-17T17:22:47.578Z
+2026-11-17T17:26:01.345Z
 SUPABASE_URL: presente (40 caratteri, inizia con "https://uolc…")
 SUPABASE_SERVICE_ROLE_KEY: presente (41 caratteri, inizia con "sb_…")
 VAPID_PUBLIC_KEY: presente (87 caratteri, inizia con "BHJ…")
@@ -6,6 +6,7 @@ VAPID_PRIVATE_KEY: presente (43 caratteri, inizia con "yUG…")
 VAPID_SUBJECT: presente
 2026-11-17 ore 18: 5 dispositivi, 2 utenti
 Notifica inviata a un dispositivo Apple
-Notifica inviata a un dispositivo
-Rivenditore avvisato: prenotazione confermata
+Notifica inviata a un dispositivo Apple
+Notifica inviata a un dispositivo Apple
+Lavori modificati dai rivenditori: 1 avviso
 Niente da mandare adesso per un utente
