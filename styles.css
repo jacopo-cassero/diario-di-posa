@@ -235,7 +235,7 @@ svg.i{width:14px;height:14px;vertical-align:-2px;stroke:currentColor;fill:none;s
 details summary{cursor:pointer}
 
 /* Preventivi e voci dal listino */
-.tabs-in{grid-template-columns:repeat(6,1fr)}
+.tabs-in{grid-template-columns:repeat(7,minmax(0,1fr))}
 .tab{font-size:.64rem;letter-spacing:0;padding-left:0;padding-right:0}
 .righe{display:flex;flex-direction:column;gap:8px}
 .riga{border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--bg)}
@@ -280,7 +280,7 @@ a.btn.primary{color:var(--tape-ink)}
 .hist .hd{color:var(--muted);font-size:.8rem}
 .hist .hm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hist .hr{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.tabs-in{grid-template-columns:repeat(6,1fr)}
+.tabs-in{grid-template-columns:repeat(7,minmax(0,1fr))}
 .tab{font-size:.6rem}
 .tab svg{width:21px;height:21px}
 .clipick{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:6px}
@@ -646,3 +646,45 @@ details.cartella[open]>summary{margin-bottom:10px}
 
 /* sede del rivenditore */
 .sedechip{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--accent-soft,rgba(242,183,5,.18));color:inherit;vertical-align:1px}
+
+/* barra in basso con 7 voci */
+.tabs-in .tab{font-size:.66rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* calendario a strisce, come quello dell'iPhone */
+.day.dayx{aspect-ratio:auto;min-height:76px;justify-content:flex-start;gap:3px;padding:3px}
+.strisce{display:flex;flex-direction:column;gap:2px;width:100%;min-width:0}
+.str{display:block;font-style:normal;font-size:.6rem;line-height:1.25;font-weight:600;padding:1px 3px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;
+  background:rgba(37,99,235,.14);color:#1e3a8a;border-left:2px solid #2563eb}
+.str.int{background:rgba(234,88,12,.14);color:#7c2d12;border-left-color:#ea580c}
+.str.urg{background:rgba(220,38,38,.16);color:#7f1d1d;border-left-color:#dc2626}
+.str.ev{background:rgba(100,116,139,.16);color:#334155;border-left-color:#64748b}
+.str.done{opacity:.5;text-decoration:line-through}
+.str.piu{background:none;border:0;color:var(--muted);padding:0 2px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .str{color:#c7d7ff}:root:not([data-theme="light"]) .str.int{color:#ffd3b8}:root:not([data-theme="light"]) .str.urg{color:#ffc9c9}:root:not([data-theme="light"]) .str.ev{color:#d6dde8}}
+:root[data-theme="dark"] .str{color:#c7d7ff}:root[data-theme="dark"] .str.int{color:#ffd3b8}:root[data-theme="dark"] .str.urg{color:#ffc9c9}:root[data-theme="dark"] .str.ev{color:#d6dde8}
+@media (min-width:700px){.day.dayx{min-height:96px}.str{font-size:.7rem}}
+.giornobtn{flex-wrap:wrap}
+/* pagina Oggi */
+.oggihead h2{margin:0}
+.oggistrip{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.oggistrip::-webkit-scrollbar{display:none}
+.ostr{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:1px;max-width:180px;padding:6px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;font-size:.78rem;text-align:left;border-left:4px solid #2563eb}
+.ostr.int{border-left-color:#ea580c}
+.ostr b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.ostr .num{font-size:.7rem;color:var(--muted)}
+.ostr.cur{box-shadow:0 0 0 2px var(--tape)}
+.ostr.done{opacity:.55}
+.oggicard{border-left:5px solid #2563eb}
+.oggicard.int{border-left-color:#ea580c}
+.oggicard.cur{box-shadow:0 0 0 2px var(--tape)}
+.oggicard.done{opacity:.7}
+.oggicard>summary{list-style:none;cursor:pointer}
+.oggicard>summary::-webkit-details-marker{display:none}
+.oggidett{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.oggiind span{display:flex;gap:6px;align-items:flex-start}
+.oggivoci{margin:4px 0 0;padding:0;list-style:none}
+.oggivoci li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.oggivoci li:last-child{border-bottom:0}
+.oggidomani{padding:4px 2px}
+/* cantieri già fatti (interventi): sezione chiusa */
+.cantdet>summary{cursor:pointer;font-weight:600;font-size:.9rem;padding:4px 0}
+.legend .str{display:inline-block;font-size:.72rem;padding:1px 6px}

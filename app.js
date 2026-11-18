@@ -58,8 +58,8 @@ const store = createStore(CFG, () => {
   else if (store.st.ruolo === 'dipendente' && DIP.carico && Date.now() - (DIP.t || 0) > 30000) caricaDip();
 });
 const S = store.S;
-const UI = { tab: 'cal', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
+const UI = { tab: 'oggi', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
+const TABS = [['oggi', 'Oggi', 'clock'], ['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
 function readHash() {
   const h = location.hash.slice(1);
   if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van'].includes(h)) UI.tab = h;
@@ -1716,9 +1716,12 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ oggi: rOggi, cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main')); hydrateFotoRich($('#main')); hydrateFileCant($('#main')); if (UI.tab === "set") caricaBackup();
+  if (UI.tab === 'oggi') vaiAlCantiere();
+  // il foglio del giorno aperto dal calendario si aggiorna dopo ogni azione
+  const sh = $('#sheet'); if (sh && !sh.hidden && sh.dataset.giorno) { $('#sheetTitle').textContent = titoloGiorno(sh.dataset.giorno); $('#sheetBody').innerHTML = giornoHtml(sh.dataset.giorno); hydrateFiles($('#sheetBody')); }
 }
 async function hydrateFiles(root) {
   for (const img of root.querySelectorAll('img[data-file]')) {
@@ -1979,6 +1982,94 @@ function rTodo() {
     ${p.map(x => `<button class="todo-item" data-act="${x.act}" data-arg="${x.arg || ''}" type="button"><span class="dot ${x.lvl}"></span><span><b>${esc(x.txt)}</b>${x.sub && /^domani/i.test(x.txt) ? `<br><span class="small muted">${esc(x.sub)}</span>` : ''}</span><span class="go">›</span></button>`).join('')}</section>`;
 }
 
+/* ---------- OGGI: la giornata, con il cantiere di adesso già aperto ---------- */
+const oraAdesso = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const lavoriDelGiorno = k => [...S.lavori.filter(l => inPosa(l, k)).map(x => ['lavori', x]), ...S.interventi.filter(i => intNelGiorno(i, k) && i.stato !== 'annullato').map(x => ['interventi', x])]
+  .sort(([, a], [, b]) => ((orarioDi(a, k) || ['99'])[0]).localeCompare((orarioDi(b, k) || ['99'])[0]));
+const fattoOggi = (kind, x, k) => kind === 'lavori' ? posaFatta(x, k) : intChiuso(x) || !!visitaDel(x, k);
+const fineDi = (x, k) => { const o = orarioDi(x, k); if (!o) return '23:59'; if (x.tuttoGiorno && !x.orariGiorni?.[k]) return o[1] || '23:59'; return o[1] || `${String(Math.min(+o[0].slice(0, 2) + 2, 23)).padStart(2, '0')}${o[0].slice(2)}`; };
+/** Il cantiere di adesso: il primo non ancora fatto che non è già finito (finito alle 14 e sono le 14:10 → il successivo). */
+function cantiereAdesso(L, k = TODAY) {
+  const ora = oraAdesso(), aperti = L.filter(([kind, x]) => !fattoOggi(kind, x, k));
+  return (aperti.find(([, x]) => fineDi(x, k) > ora) || aperti[aperti.length - 1] || [])[1]?.id || null;
+}
+function dettaglioOggi(kind, x, k, focus) {
+  const ind = String(x.indirizzo || '').trim(), tel = String(x.telefono || '').trim();
+  const righe = (x.righe || []).filter(r => r.descr || r.nome);
+  const mats = (x.materiali || []).filter(m => m.nome);
+  const sosp = sospesiAperti(x), vis = kind === 'interventi' ? visiteDi(x) : [];
+  const squadra = (x.assegnati || []).map(nomeMembro);
+  const cosa = kind === 'lavori' ? x.installato : x.descrizione;
+  const diaQui = (x.diario || []).filter(e => e.data === k);
+  return `<div class="stack oggidett">
+    ${ind ? `<div class="row oggiind"><span>${svg('pin', 'i')} ${esc(ind)}</span></div>` : ''}
+    <div class="row">${ind ? `<a class="btn sm" href="https://maps.apple.com/?q=${encodeURIComponent(ind)}" target="_blank" rel="noopener">${svg('pin', 'i')} Mappe</a>` : ''}${tel ? `<a class="btn sm" href="tel:${esc(tel.replace(/\s+/g, ''))}">${svg('tel', 'i')} Chiama</a><a class="btn sm" href="https://wa.me/${telWa(tel)}" target="_blank" rel="noopener">${svg('chat', 'i')} WhatsApp</a>` : ''}</div>
+    ${cosa ? `<div><div class="fs-t">Cosa c'è da fare</div><div class="prewrap">${esc(cosa)}</div></div>` : ''}
+    ${righe.length ? `<div><div class="fs-t">Voci e regolazioni</div><ul class="oggivoci">${righe.map(r => `<li><span>${esc(r.descr || r.nome)}</span>${n2(r.qta) ? `<b class="num">${num(r.qta, n2(r.qta) % 1 ? 2 : 0)}${r.unita && r.unita !== 'pz' ? ' ' + esc(r.unita) : ''}</b>` : ''}</li>`).join('')}</ul></div>` : ''}
+    ${mats.length ? `<div><div class="fs-t">Materiali</div><div class="small">${mats.map(m => esc(`${n2(m.qta) ? num(m.qta, 0) + ' × ' : ''}${m.nome}`)).join(' · ')}</div></div>` : ''}
+    ${sosp.length ? `<div class="sospcard"><b>Da completare</b><ul>${sosp.map(r => `<li>${esc(r.t)}</li>`).join('')}</ul></div>` : ''}
+    ${vis.length ? `<div class="small muted">${vis.map(v => `Passaggio del ${esc(dIt(v.data))}: lavoro non finito${v.nota ? ' · ' + esc(v.nota) : ''}`).join('<br>')}</div>` : ''}
+    ${x.note ? `<div><div class="fs-t">Note</div><div class="prewrap small">${esc(x.note)}</div></div>` : ''}
+    ${x.noteRiv ? `<div class="notice small"><b>Note del rivenditore</b><div class="prewrap">${esc(x.noteRiv)}</div></div>` : ''}
+    ${squadra.length ? `<div class="small muted">Squadra: ${squadra.map(esc).join(', ')}</div>` : ''}
+    <div class="row">${bottoneFatto(kind, x)}${kind === 'interventi' && !intChiuso(x) && !visitaDel(x, k) ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(x.id)}">Non finito: riprogramma</button>` : ''}<button type="button" class="btn sm" data-act="${kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${esc(x.id)}">Apri la scheda</button><button type="button" class="btn sm" data-act="rapporto" data-arg="${kind}" data-id="${esc(x.id)}">Rapporto</button></div>
+    ${focus ? diarioHtml(kind, x) : diaQui.map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo)}</div>`).join('')}
+  </div>`;
+}
+function rOggi() {
+  const k = TODAY; UI.day = k;   // «Segna fatta» e gli altri pulsanti lavorano su oggi
+  const L = lavoriDelGiorno(k), ev = evDel(k), focus = cantiereAdesso(L, k), ora = oraAdesso();
+  UI.oggiFocus = focus;
+  const titolo = fmtD(k, { weekday: 'long', day: 'numeric', month: 'long' });
+  const fatti = L.filter(([kind, x]) => fattoOggi(kind, x, k)).length;
+  const domani = lavoriDelGiorno(piuGiorni(k, 1));
+  const prossimo = !L.length ? [...S.lavori.filter(l => l.data > k).map(x => ['lavori', x, x.data]), ...S.interventi.filter(i => i.dataProg > k && !intChiuso(i)).map(x => ['interventi', x, x.dataProg])].sort((a, b) => a[2].localeCompare(b[2]))[0] : null;
+  const nome = x => rifDi(x) || x.cliente || 'Cantiere';
+  const stato = (kind, x) => fattoOggi(kind, x, k) ? ['done', 'Fatto'] : x.id === focus ? ['cur', fineDi(x, k) <= ora ? 'Da segnare fatto' : (orarioDi(x, k)?.[0] || '00:00') <= ora ? 'Adesso' : 'Il prossimo'] : ['', ''];
+  return `${avvisoAccessi()}
+  <div class="oggihead"><h2>Oggi</h2><div class="small muted">${esc(titolo.replace(/^./, c => c.toUpperCase()))}${L.length ? ` · ${L.length} ${L.length === 1 ? 'lavoro' : 'lavori'}${fatti ? `, ${fatti} ${fatti === 1 ? 'fatto' : 'fatti'}` : ''}` : ''}</div></div>
+  ${ev.map(eventoCard).join('')}
+  ${L.length > 1 ? `<div class="oggistrip">${L.map(([kind, x]) => { const [c] = stato(kind, x); return `<button type="button" class="ostr ${c} ${kind === 'interventi' ? 'int' : 'pos'}" data-act="oggiVai" data-id="${esc(x.id)}"><span class="num">${esc(testoOrario(x, k) || 'senza orario')}</span><b>${esc(nome(x))}</b></button>`; }).join('')}</div>` : ''}
+  ${L.map(([kind, x]) => { const [c, t] = stato(kind, x); return `<details class="card oggicard ${c} ${kind === 'interventi' ? 'int' : 'pos'}" id="o-${esc(x.id)}" ${x.id === focus || L.length === 1 ? 'open' : ''}>
+    <summary><div class="row between"><span class="t">${esc(nome(x))}${rifDi(x) && x.cliente ? `<small class="rif">${esc(x.cliente)}${x.sede ? ' · ' + esc(x.sede) : ''}</small>` : ''}</span>${t ? `<span class="chip ${c === 'done' ? 'ok' : 'warn'}">${t}</span>` : ''}</div>
+      <div class="small muted">${kind === 'lavori' ? 'Posa' : 'Intervento'}${testoOrario(x, k) ? ' · ' + esc(testoOrario(x, k)) : ''}${kind === 'lavori' && x.dataFine && x.dataFine > x.data ? ` · giorno ${giorniPosa(x).indexOf(k) + 1} di ${giorniPosa(x).length}` : ''}</div></summary>
+    ${dettaglioOggi(kind, x, k, x.id === focus || (L.length === 1 && !focus))}
+  </details>`; }).join('')}
+  ${!L.length ? `<div class="empty"><b>Oggi nessun lavoro in calendario.</b>${prossimo ? `<span>Il prossimo: ${prossimo[0] === 'lavori' ? 'posa' : 'intervento'} ${esc(nome(prossimo[1]))}, ${esc(fmtD(prossimo[2], { weekday: 'long', day: 'numeric', month: 'long' }))}.</span><button class="btn sm" data-act="${prossimo[0] === 'lavori' ? 'editLav' : 'editInt'}" data-id="${esc(prossimo[1].id)}" type="button">Apri</button>` : ''}</div>` : ''}
+  ${domani.length ? `<div class="small muted oggidomani"><b>Domani:</b> ${domani.map(([, x]) => esc(`${orarioDi(x, piuGiorni(k, 1)) && !x.tuttoGiorno ? orarioDi(x, piuGiorni(k, 1))[0] + ' ' : ''}${nome(x)}`)).join(' · ')}</div>` : ''}
+  ${rTodo()}`;
+}
+/** Porta in vista il cantiere di adesso (all'apertura e quando cambia, non a ogni ridisegno). */
+let oggiVisto = '';
+const altezzaTesta = () => (document.querySelector('header')?.getBoundingClientRect().height || 80) + 10;
+function vaiAlCantiere(forza) {
+  const id = UI.oggiFocus; if (!id) return;
+  const chiave = TODAY + '|' + id; if (!forza && oggiVisto === chiave) return; oggiVisto = chiave;
+  requestAnimationFrame(() => { const el = $('#o-' + CSS.escape(id)); if (!el) return; const y = el.getBoundingClientRect().top + window.scrollY - altezzaTesta(); window.scrollTo({ top: Math.max(0, y), behavior: forza ? 'smooth' : 'auto' }); });
+}
+// ogni minuto: se il cantiere di adesso è cambiato (uno è finito), ridisegno la pagina Oggi
+setInterval(() => {
+  if (UI.tab !== 'oggi' || !$('#sheet')?.hidden || document.hidden) return;
+  if (oggi() !== TODAY || cantiereAdesso(lavoriDelGiorno(oggi())) !== UI.oggiFocus) render();
+}, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && UI.tab === 'oggi' && $('#sheet')?.hidden) render(); });
+// i cantieri già fatti: ricordo se hai aperto la sezione, così non si richiude mentre scrivi
+document.addEventListener('toggle', e => { if (e.target.classList?.contains('cantdet')) { const bx = $('#cantBox'); if (bx) bx.dataset.aperto = e.target.open ? '1' : ''; } }, true);
+/* ---------- il giorno, in un foglio sopra il calendario ---------- */
+const titoloGiorno = k => fmtD(k, { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, c => c.toUpperCase());
+function giornoHtml(k) {
+  UI.day = k;
+  const cc = UI.calCli && S.clienti.find(c => c.id === UI.calCli);
+  const mioCli = x => !cc || x.clienteId === cc.id || (!x.clienteId && normNome(x.cliente) === normNome(cc.nome));
+  const dl = S.lavori.filter(mioCli).filter(l => inPosa(l, k)), di = S.interventi.filter(mioCli).filter(i => intNelGiorno(i, k)), de = evDel(k);
+  return `<div class="row giornobtn"><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button><button class="btn sm" data-act="newInt" data-arg="${k}" type="button">+ Intervento</button><button class="btn sm" data-act="newEv" data-arg="${k}" type="button">+ Ferie, fiera, corso</button></div>
+    ${elencoGiorno(dl, di, de)}`;
+}
+function apriGiorno(k) {
+  openSheet(titoloGiorno(k), giornoHtml(k), null);
+  $('#sheet').dataset.giorno = k;
+  hydrateFiles($('#sheetBody'));
+}
 function rCal() {
   const cc = UI.calCli && S.clienti.find(c => c.id === UI.calCli);
   const mioCli = x => !cc || x.clienteId === cc.id || (!x.clienteId && normNome(x.cliente) === normNome(cc.nome));
@@ -1992,26 +2083,25 @@ function rCal() {
     const posaK = LAV.filter(l => inPosa(l, k)); const nl = posaK.length;
     const ints = INT.filter(i => intNelGiorno(i, k));
     const evs = evDel(k), ferie = evs.some(e => e.tipo === 'ferie');
-    cells += `<button class="day ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="marks">${posaK.slice(0, 3).map(l => `<i class="mk ${l.urgenzaApplicata ? 'urg' : ''}"></i>`).join('')}${ints.map(i => `<i class="mk int ${i.stato === 'completato' || visitaDel(i, k) ? 'done' : ''}"></i>`).slice(0, 2).join('')}${evs.filter(e => e.tipo !== 'ferie').slice(0, 2).map(e => `<i class="mk ev ev-${esc(e.tipo)}"></i>`).join('')}</span></button>`;
+    const senzaTitolo = t => String(t || '').replace(/^(sig\.?r?a?|sigg\.?|fam\.?|famiglia|dott\.?(ssa)?|ing\.?|arch\.?|geom\.?)\s+/i, '').trim() || String(t || '');
+    const strisce = [...posaK.map(l => [orarioDi(l, k)?.[0] || '', `<i class="str pos ${l.urgenzaApplicata ? 'urg' : ''} ${posaFatta(l, k) ? 'done' : ''}">${esc(senzaTitolo(rifDi(l) || l.cliente || 'Posa'))}</i>`]),
+      ...ints.map(i => [orarioDi(i, k)?.[0] || '', `<i class="str int ${i.stato === 'completato' || visitaDel(i, k) ? 'done' : ''}">${esc(senzaTitolo(rifDi(i) || i.cliente || 'Intervento'))}</i>`]),
+      ...evs.map(e => ['', `<i class="str ev ev-${esc(e.tipo)}">${esc(e.titolo || tipoEv(e.tipo))}</i>`])].sort((a, b) => (a[0] || '99').localeCompare(b[0] || '99')).map(x => x[1]);
+    cells += `<button class="day dayx ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="strisce">${strisce.slice(0, 3).join('')}${strisce.length > 3 ? `<i class="str piu">+${strisce.length - 3}</i>` : ''}</span></button>`;
   }
   const ml = LAV.filter(l => (l.data || '').startsWith(UI.month));
   const dl = LAV.filter(l => inPosa(l, UI.day));
   const di = INT.filter(i => intNelGiorno(i, UI.day));
   const de = evDel(UI.day);
   const empty = !S.lavori.length && !S.interventi.length && !S.movimenti.length;
-  return `${avvisoAccessi()}${rTodo()}
-  ${empty ? `<div class="empty"><b>Il diario è vuoto.</b><span>Tocca un giorno e segna la prima posa, oppure carica alcuni dati di esempio per vedere come funziona. Gli esempi si cancellano con un tocco.</span><button class="btn" data-act="seed" type="button">Carica dati di esempio</button></div>` : ''}
+  return `${empty ? `<div class="empty"><b>Il diario è vuoto.</b><span>Tocca un giorno e segna la prima posa, oppure carica alcuni dati di esempio per vedere come funziona. Gli esempi si cancellano con un tocco.</span><button class="btn" data-act="seed" type="button">Carica dati di esempio</button></div>` : ''}
   <section class="stack">
     <div class="cal-head"><button class="iconbtn" data-act="month" data-arg="-1" aria-label="Mese precedente" type="button">${svg('l')}</button><h2>${monthName(UI.month)}</h2><button class="iconbtn" data-act="month" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     ${cc ? `<div class="selbar"><div><b>Calendario di ${esc(cc.nome)}</b><div class="small">${LAV.length} ${LAV.length === 1 ? 'posa' : 'pose'} · ${INT.length} ${INT.length === 1 ? 'intervento' : 'interventi'} · solo i suoi lavori</div></div><div class="row"><button class="btn sm" data-act="editCli" data-id="${cc.id}" type="button">Scheda</button><button class="btn sm dark" data-act="calTutti" type="button">Mostra tutti</button></div></div>` : ''}
     <div class="cal">${cells}</div>
-    <div class="legend"><span><i class="mk"></i> posa</span><span><i class="mk urg"></i> posa urgente</span><span><i class="mk int"></i> intervento</span><span><i class="mk int done"></i> intervento fatto</span><span><i class="mk ev ev-ferie"></i> ferie</span><span><i class="mk ev ev-fiera"></i> fiera</span><span><i class="mk ev ev-corso"></i> corso</span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
+    <div class="small muted">Tocca un giorno per vedere e aggiungere i lavori.</div>
+    <div class="legend"><span><i class="str pos">posa</i></span><span><i class="str urg">urgente</i></span><span><i class="str int">intervento</i></span><span><i class="str ev">ferie, fiere, corsi</i></span><span><i class="str pos done">fatto</i></span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
     ${barraSelezione()}
-  </section>
-  <section class="stack">
-    <div class="row between"><h3>${fmtD(UI.day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
-      <div class="row"><button class="btn sm" data-act="newEv" data-arg="${UI.day}" type="button">+ Ferie, fiera, corso</button><button class="btn sm" data-act="newInt" data-arg="${UI.day}" type="button">+ Intervento</button><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button></div></div>
-    ${elencoGiorno(dl, di, de)}
   </section>
   ${S.lavori.some(x => x.esempio) || S.movimenti.some(x => x.esempio) ? `<button class="btn ghost small" data-act="unseed" type="button">Rimuovi i dati di esempio</button>` : ''}`;
 }
@@ -2953,6 +3043,7 @@ async function pushOn() {
 /* ---------- foglio modale ---------- */
 let onSubmit = null, sheetDel = null;
 function openSheet(title, body, submit, { saveLabel = 'Salva', del = null, extra = '' } = {}) {
+  $('#sheet').dataset.giorno = '';
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = body;
   onSubmit = submit; sheetDel = del;
@@ -3998,9 +4089,10 @@ function aggiornaCantieri(tutti) {
   if (tutti) box.dataset.tutti = '1';
   if (!unici.length) { box.innerHTML = ''; box._html = ''; return; }
   const scelto = $('#f_cantiereId')?.value || '';
-  const html = `<div class="small muted">${L.length ? 'Cantieri già fatti per questo cliente: tocca quello giusto per riprendere i dati.' : 'Nessun cantiere nell\'ultimo anno.'}</div>
+  const html = `<details class="cantdet" ${box.dataset.aperto ? 'open' : ''}><summary>Cantieri già fatti con questo cliente <span class="chip">${unici.length}</span></summary>
+    <div class="small muted">${L.length ? 'Tocca quello giusto per riprendere indirizzo, telefono e riferimento.' : 'Nessun cantiere nell\'ultimo anno.'}</div>
     <div class="cantlist">${L.slice(0, 12).map(l => `<button type="button" class="cantpick" data-act="usaCantiere" data-id="${esc(l.id)}" aria-pressed="${l.id === scelto}"><b>${esc(l.indirizzo || 'Indirizzo non segnato')}</b><span class="small muted">${fmtD(l.data, { day: 'numeric', month: 'short', year: 'numeric' })}${rifDi(l) ? ' · Rif. ' + esc(rifDi(l)) : ''}${l.installato ? ' · ' + esc(l.installato) : ''}</span></button>`).join('')}</div>
-    ${!tutti && !box.dataset.tutti && unici.length > recenti.length ? `<button type="button" class="linkbtn small" data-act="cantTutti">Mostra anche i cantieri più vecchi (${unici.length - recenti.length})</button>` : ''}`;
+    ${!tutti && !box.dataset.tutti && unici.length > recenti.length ? `<button type="button" class="linkbtn small" data-act="cantTutti">Mostra anche i cantieri più vecchi (${unici.length - recenti.length})</button>` : ''}</details>`;
   // non ridisegno se non cambia nulla: altrimenti il tocco su un cantiere andrebbe perso
   if (box._html !== html) { box.innerHTML = html; box._html = html; }
 }
@@ -4419,7 +4511,9 @@ document.addEventListener('click', async e => {
     case 'month': UI.month = shiftMonth(UI.month, +arg); UI.day = UI.month === TODAY.slice(0, 7) ? TODAY : UI.month + '-01'; render(); break;
     case 'day':
       if (UI.sel && UI.tab === 'cal') { UI.sel.has(arg) ? UI.sel.delete(arg) : UI.sel.add(arg); UI.day = arg; render(); break; }
-      UI.tab = 'cal'; UI.day = arg; UI.month = arg.slice(0, 7); render(); break;
+      UI.day = arg; UI.month = arg.slice(0, 7);
+      if (UI.tab === 'cal' && b.closest('#main .cal')) { render(); apriGiorno(arg); } else { UI.tab = 'cal'; render(); apriGiorno(arg); }
+      break;
     case 'selMode': UI.sel = new Set(); render(); toast('Tocca i giorni da mettere nel consuntivo'); break;
     case 'selAnnulla': UI.sel = null; render(); break;
     case 'selCons': sheetConsMulti(); break;
@@ -4555,6 +4649,7 @@ document.addEventListener('click', async e => {
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
+    case 'oggiVai': { const el = $('#o-' + CSS.escape(id)); if (el) { el.open = true; const y = el.getBoundingClientRect().top + window.scrollY - altezzaTesta(); window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' }); } break; }
     case 'diarioAdd': {
       const t = String($('#diarioTesto')?.value || '').trim(), g = $('#diarioData')?.value || TODAY;
       if (!t) { toast('Scrivi cosa hai fatto'); $('#diarioTesto')?.focus(); break; }
@@ -4599,7 +4694,7 @@ document.addEventListener('click', async e => {
       $('#f_descrizione')?.focus({ preventScroll: true });
       break;
     }
-    case 'cantTutti': aggiornaCantieri(true); break;
+    case 'cantTutti': { const bx = $('#cantBox'); if (bx) bx.dataset.aperto = '1'; aggiornaCantieri(true); break; }
     case 'matProd': UI.matProd = arg; render(); break;
     case 'addrow': $('#matrows').insertAdjacentHTML('beforeend', matRow({}, arg === 'buy')); break;
     case 'rmrow': { const rows = $('#matrows'); if (rows.children.length > 1) b.parentElement.remove(); else b.parentElement.querySelectorAll('input').forEach(i => i.value = ''); break; }
@@ -4741,7 +4836,7 @@ document.addEventListener('click', async e => {
       store.drop('cfg', 'listino'); closeSheet(); render(); toast('Listino 2027 ripristinato'); break;
     case 'unseed': unseed(); render(); break;
     case 'pushOn': pushOn(); break;
-    case 'logout': await store.logout(); UI.tab = 'cal'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '', listino: null, listinoCarico: false, prev: null }); UI.rivTab = 'cal'; RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
+    case 'logout': await store.logout(); UI.tab = 'oggi'; UI.authView = 'login'; Object.assign(RIV, { carico: false, mie: [], da: '', a: '', listino: null, listinoCarico: false, prev: null }); UI.rivTab = 'cal'; RIV.occ.clear(); RIV.mesiCaricati.clear(); Object.assign(DIP, { carico: false, lavori: [], moduli: [] }); Object.assign(ACC, { ok: null, t: 0, membri: [], richieste: [], pren: [] }); render(); break;
   }
 });
 document.addEventListener('keydown', e => {
