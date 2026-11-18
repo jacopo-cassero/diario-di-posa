@@ -96,13 +96,13 @@ const nuovePren = await leggiSeEsiste('/prenotazioni?notificato=eq.false&stato=e
 const nuoviPrev = await leggiSeEsiste('/richieste_preventivo?notificato=eq.false&stato=eq.nuova&select=id,titolare,rivenditore,indirizzo,cliente,righe');
 // richieste di preventivo che il rivenditore ha modificato dopo averle mandate (o a cui ha aggiunto foto)
 const modPrev = await leggiSeEsiste('/richieste_preventivo?modifica_notificata=eq.false&stato=neq.chiusa&select=id,titolare,rivenditore,cliente,indirizzo,telefono,piano,ascensore,tiro,righe,note,precedente');
-const membri = (nuoveRich?.length || nuovePren?.length || nuoviPrev?.length || modPrev?.length) ? (await leggiSeEsiste('/membri?select=user_id,titolare,ruolo,nome,azienda,stato')) || [] : [];
+const membri = (nuoveRich?.length || nuovePren?.length || nuoviPrev?.length || modPrev?.length) ? (await leggiSeEsiste('/membri?select=*')) || [] : [];
 const dataIt = s => new Date(s + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
 for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuoviPrev || [])].map(x => x.titolare))) {
   const R = (nuoveRich || []).filter(x => x.titolare === tit), P = (nuovePren || []).filter(x => x.titolare === tit), Q = (nuoviPrev || []).filter(x => x.titolare === tit);
   const righe = [
-    ...P.map(p => { const r = membri.find(m => m.user_id === p.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'}: ${p.tipo} ${p.data_fine > p.data ? `dal ${dataIt(p.data)} al ${dataIt(p.data_fine)}` : `il ${dataIt(p.data)}`}${p.cliente ? ' · ' + p.cliente : ''}`; }),
-    ...Q.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); const pz = (q.righe || []).reduce((s, x) => s + (+x.qta || 0), 0); return `• ${r?.azienda || r?.nome || 'Un rivenditore'} chiede un preventivo: ${pz} pz · ${q.indirizzo || ''}`; }),
+    ...P.map(p => { const r = membri.find(m => m.user_id === p.rivenditore); return `• ${(r?.azienda || r?.nome || 'Un rivenditore') + (r?.sede ? ' · ' + r.sede : '')}: ${p.tipo} ${p.data_fine > p.data ? `dal ${dataIt(p.data)} al ${dataIt(p.data_fine)}` : `il ${dataIt(p.data)}`}${p.cliente ? ' · ' + p.cliente : ''}`; }),
+    ...Q.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); const pz = (q.righe || []).reduce((s, x) => s + (+x.qta || 0), 0); return `• ${(r?.azienda || r?.nome || 'Un rivenditore') + (r?.sede ? ' · ' + r.sede : '')} chiede un preventivo: ${pz} pz · ${q.indirizzo || ''}`; }),
     ...R.map(r => `• ${r.nome}${r.azienda ? ' (' + r.azienda + ')' : ''} chiede l'accesso${r.ruolo !== 'altro' ? ' come ' + r.ruolo : ''}`),
   ];
   const titolo = Q.length && !P.length ? `${Q.length} ${Q.length === 1 ? 'richiesta di preventivo' : 'richieste di preventivo'}` : P.length ? `${P.length} ${P.length === 1 ? 'prenotazione da confermare' : 'prenotazioni da confermare'}` : `${R.length} ${R.length === 1 ? 'richiesta di accesso' : 'richieste di accesso'}`;
@@ -119,7 +119,7 @@ for (const tit of new Set([...(nuoveRich || []), ...(nuovePren || []), ...(nuovi
 const soloFoto = q => { const p = q.precedente || {}; return !!p.foto && ['cliente', 'indirizzo', 'telefono', 'piano', 'ascensore', 'note'].every(k => String(p[k] ?? '').trim() === String(q[k] ?? '').trim()) && !!p.tiro === !!q.tiro && JSON.stringify(p.righe || []) === JSON.stringify(q.righe || []); };
 for (const tit of new Set((modPrev || []).map(x => x.titolare))) {
   const M = modPrev.filter(x => x.titolare === tit);
-  const righe = M.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); return `• ${r?.azienda || r?.nome || 'Un rivenditore'} ${soloFoto(q) ? 'ha aggiunto foto' : 'ha modificato la richiesta'}: ${[q.cliente, q.indirizzo].filter(Boolean).join(' · ') || 'preventivo'}`; });
+  const righe = M.map(q => { const r = membri.find(m => m.user_id === q.rivenditore); return `• ${(r?.azienda || r?.nome || 'Un rivenditore') + (r?.sede ? ' · ' + r.sede : '')} ${soloFoto(q) ? 'ha aggiunto foto' : 'ha modificato la richiesta'}: ${[q.cliente, q.indirizzo].filter(Boolean).join(' · ') || 'preventivo'}`; });
   const titolo = M.length === 1 ? (soloFoto(M[0]) ? 'Nuove foto o file in una richiesta di preventivo' : 'Richiesta di preventivo modificata') : `${M.length} richieste di preventivo modificate`;
   const payload = JSON.stringify({ title: titolo, body: righe.slice(0, 6).join('\n'), url: './#richieste', tag: `prevmod-${Date.now()}` });
   for (const uid of [tit, ...membri.filter(m => m.titolare === tit && m.ruolo === 'titolare' && m.stato === 'attivo').map(m => m.user_id)]) await manda(uid, payload);

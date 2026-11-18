@@ -643,3 +643,6 @@ details.cartella[open]>summary{margin-bottom:10px}
 .docesito{display:grid;gap:6px}
 .docesito>.esitoriv{padding:0 4px}
 .esitoriv{flex-wrap:wrap}
+
+/* sede del rivenditore */
+.sedechip{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--accent-soft,rgba(242,183,5,.18));color:inherit;vertical-align:1px}
