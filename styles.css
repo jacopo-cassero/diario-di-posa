@@ -688,3 +688,4 @@ details.cartella[open]>summary{margin-bottom:10px}
 /* cantieri già fatti (interventi): sezione chiusa */
 .cantdet>summary{cursor:pointer;font-weight:600;font-size:.9rem;padding:4px 0}
 .legend .str{display:inline-block;font-size:.72rem;padding:1px 6px}
+.videobox video{width:100%;max-height:70vh;border-radius:10px;background:#000}

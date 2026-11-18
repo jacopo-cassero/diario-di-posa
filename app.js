@@ -330,12 +330,13 @@ async function nuovaPwMembro(m) {
 }
 async function confermaPren(p) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore) || {};
-  const chi = r.azienda || r.nome || 'Rivenditore';
+  const dcr = datiClienteRiv(r), chi = dcr.cliente.nome;
   const s = p.scheda || {};
   const testo = schedaTesto(p);
   const mat = (s.materiale || []).filter(x => x.tipo || x.qta).map(x => `${n2(x.qta) || ''} ${x.tipo || ''}`.trim()).join(', ');
   const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', riferimento: p.cliente || '', amm: 'da_cons', ...(sedeDi(r) ? { sede: sedeDi(r) } : {}) };
-  base.clienteId = assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
+  base.clienteId = dcr.id || assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
+  if (base.clienteFinale && stessoCliente(base.clienteFinale, '', chi, '')) { base.clienteFinale = ''; base.riferimento = ''; }
   let kind, d;
   if (p.tipo === 'posa') { kind = 'lavori'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: 'pezzo', righe: [], installato: mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · ') }; }
   else { kind = 'interventi'; d = { ...base, data: TODAY, dataProg: p.data, stato: 'programmato', urgenza: 'normale', descrizione: `${p.tipo === 'sopralluogo' ? 'SOPRALLUOGO\n' : ''}${testo}` }; }
@@ -829,6 +830,19 @@ function sheetDocRiv(x) {
   } });
 }
 /** Scarica un file della cartella online con il suo nome. */
+const ePic = n => /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(n || '');
+const eVideo = n => /\.(mp4|mov|m4v|webm|3gp)$/i.test(n || '');
+/** Apre un file per guardarlo: foto nel visore, video nel lettore, PDF nel visore PDF; gli altri si scaricano. */
+async function guardaFile(path, nome) {
+  if (ePic(nome)) { apriFoto([{ path, nome }], 0); return; }
+  if (eVideo(nome)) {
+    openSheet(nome || 'Video', `<div class="videobox"><div class="small muted">Carico il video…</div></div>`, null, { extra: `<button type="button" class="btn" data-act="fcScarica" data-arg="${esc(path)}" data-nome="${esc(nome || 'video.mp4')}">Scarica</button>` });
+    const u = await store.fileUrl(path); const box = $('#sheet .videobox'); if (!box) return;
+    box.innerHTML = u ? `<video controls playsinline preload="metadata" src="${esc(u)}"></video>` : '<div class="small muted">Video non disponibile, riprova.</div>';
+    return;
+  }
+  scaricaFile(path, nome);
+}
 async function scaricaFile(path, nome) {
   try {
     toast('Scarico…');
@@ -1255,7 +1269,7 @@ let LB = null;
 function apriFoto(L, i, { togli = null } = {}) {
   chiudiFoto();
   const ov = document.createElement('div'); ov.className = 'lightbox'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Foto del cantiere');
-  ov.innerHTML = `<div class="lb-top"><span class="lb-n"></span><span class="sp"></span>${togli ? '<button type="button" class="btn sm" data-lb="togli">Elimina</button>' : ''}<a class="btn sm" data-lb="apri" target="_blank" rel="noopener">Apri</a><button type="button" class="btn sm" data-lb="chiudi" aria-label="Chiudi">✕</button></div>
+  ov.innerHTML = `<div class="lb-top"><span class="lb-n"></span><span class="sp"></span>${togli ? '<button type="button" class="btn sm" data-lb="togli">Elimina</button>' : ''}<button type="button" class="btn sm" data-lb="scarica">Scarica</button><button type="button" class="btn sm" data-lb="chiudi" aria-label="Chiudi">✕</button></div>
     <div class="lb-img"><img alt=""></div>
     ${L.length > 1 ? '<button type="button" class="lb-nav lb-prec" data-lb="prec" aria-label="Foto precedente">‹</button><button type="button" class="lb-nav lb-succ" data-lb="succ" aria-label="Foto successiva">›</button>' : ''}`;
   document.body.appendChild(ov);
@@ -1270,6 +1284,7 @@ function apriFoto(L, i, { togli = null } = {}) {
     if (a === 'chiudi' || (!a && e.target.classList.contains('lb-img'))) chiudiFoto();
     if (a === 'prec') mostraFoto(LB.i - 1);
     if (a === 'succ') mostraFoto(LB.i + 1);
+    if (a === 'scarica') { const f = LB.L[LB.i]; scaricaFile(f.path, f.nome || `foto-${LB.i + 1}.${(String(f.path).split('.').pop() || 'jpg').toLowerCase()}`); }
     if (a === 'togli') {
       const b = e.target.closest('[data-lb]');
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per eliminare'; return; }
@@ -1287,7 +1302,7 @@ async function mostraFoto(i) {
   const img = LB.ov.querySelector('img'); img.removeAttribute('src'); img.alt = `Foto ${i + 1} del cantiere`;
   const u = await store.fileUrl(LB.L[i].path);
   if (!LB || LB.i !== i) return;
-  if (u) { img.src = u; LB.ov.querySelector('[data-lb="apri"]').href = u; }
+  if (u) img.src = u;
 }
 function chiudiFoto() { if (!LB) return; document.removeEventListener('keydown', LB.tasti); LB.ov.remove(); LB = null; }
 /** Scarica un PDF dall'archivio e lo mostra con i tasti Invia / Apri / Scarica. */
@@ -1326,13 +1341,29 @@ function cardRichPrev(r) {
     ${r.rivenditore ? fileCantHtml([[r.rivenditore, 'richieste/' + r.id]], { soloDoc: true, titolo: 'Video, PDF e altri file' }) : ''}
     <div class="row"><button class="btn sm primary" data-act="richPrevCrea" data-id="${r.id}" type="button">${r.preventivo_id ? 'Apri il preventivo' : 'Crea preventivo'}</button><button class="btn sm" data-act="richPrevChiudi" data-id="${r.id}" type="button">Archivia</button></div></div>`;
 }
+/** Il cliente della rubrica abbinato a un accesso del rivenditore (quello scelto negli Accessi, oppure riconosciuto dal nome). */
+function clienteDiRiv(m) {
+  if (!m) return null;
+  return (m.cliente_id && S.clienti.find(c => c.id === m.cliente_id))
+    || S.clienti.find(c => normNome(c.nome) === normNome(m.cliente_nome || m.azienda || m.nome))
+    || S.clienti.filter(c => c.tipo === 'rivenditore').find(c => stessoCliente(c.nome, '', m.cliente_nome || m.azienda || m.nome, '')) || null;
+}
+/** I dati del cliente per un preventivo o un lavoro nato da un rivenditore: sempre quelli della rubrica, se c'è. */
+function datiClienteRiv(m) {
+  const c = clienteDiRiv(m);
+  return c ? { id: c.id, cliente: { nome: c.nome, tipo: c.tipo || 'rivenditore', indirizzo: c.indirizzo || '', piva: c.piva || '', telefono: c.telefono || m?.telefono || '', email: c.email || m?.email || '' } }
+    : { id: '', cliente: { nome: m?.cliente_nome || m?.azienda || m?.nome || 'Rivenditore', tipo: 'rivenditore', telefono: m?.telefono || '', email: m?.email || '' } };
+}
 function preventivoDaRichiesta(r) {
   const m = ACC.membri.find(x => x.user_id === r.rivenditore) || {};
+  const dc = datiClienteRiv(m);
+  // se nel «cliente finale» il rivenditore ha scritto il proprio nome, non è un riferimento
+  const fin = r.cliente && !stessoCliente(r.cliente, '', dc.cliente.nome, '') && !stessoCliente(r.cliente, '', m.azienda || m.nome, '') ? r.cliente : '';
   const s = stimaPrev(r, LIST());
   const az = AZ();
   return { numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, iva: az.ivaPredefinita, condizioni: true,
-    cliente: { nome: m.azienda || m.nome || 'Rivenditore', tipo: 'rivenditore', telefono: m.telefono || '', email: m.email || '' },
-    riferimento: r.cliente || '', cantiere: r.indirizzo || '', oggetto: [r.cliente && `Cliente finale: ${r.cliente}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
+    cliente: dc.cliente, ...(dc.id ? { clienteId: dc.id } : {}),
+    riferimento: fin, cantiere: r.indirizzo || '', oggetto: [fin && `Cliente finale: ${fin}`, [r.piano, r.ascensore && `ascensore ${r.ascensore.toLowerCase()}`].filter(Boolean).join(', '), r.note].filter(Boolean).join('\n'),
     righe: s.righe.map(x => { const v = LIST().voci.find(y => y.id === x.voce); return v ? { ...rigaDaVoce(v, x.qta), descr: x.descr } : null; }).filter(Boolean),
     richiestaRiv: r.id, richiestaDi: r.rivenditore };
 }
@@ -1407,6 +1438,7 @@ document.addEventListener('click', async e => {
     case 'richSeg': UI.richSeg = b.dataset.arg; render(); break;
     case 'richFiltro': UI.richFiltro = b.dataset.arg; render(); break;
     case 'richAggiorna': FOTO_RICH.clear(); await caricaAccessi(true); toast('Aggiornato'); break;
+    case 'fcScarica': scaricaFile(b.dataset.arg, b.dataset.nome); break;
     case 'pDocRm': pDocs.splice(+b.dataset.arg, 1); disegnaPDocs(); break;
     case 'fcFoto': {
       const box = b.closest('.filecant'), L = box?._foto || []; if (!L.length) break;
@@ -1414,7 +1446,7 @@ document.addEventListener('click', async e => {
       apriFoto(L, +b.dataset.arg || 0, { togli: puo ? async f => { await Promise.all([f.path, f.mini].filter(Boolean).map(x => store.removeFile(x).catch(() => {}))); FCANT.clear(); toast('Foto eliminata'); hydrateFileCant(document, true); } : null });
       break;
     }
-    case 'fcDoc': scaricaFile(b.dataset.arg, b.dataset.nome); break;
+    case 'fcDoc': guardaFile(b.dataset.arg, b.dataset.nome); break;
     case 'fcDocTogli': {
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Elimina?'; break; }
       await store.removeFile(b.dataset.arg).catch(() => {}); FCANT.clear(); toast('Documento eliminato'); hydrateFileCant(document, true); break;
