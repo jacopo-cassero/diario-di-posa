@@ -42,6 +42,7 @@ const ICON = {
   tel: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
   mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>',
   chat: '<path d="M4 4h16v12H8l-4 4z"/>',
+  check: '<path d="M4 12.5 9.5 18 20 6"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   swap: '<path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   clip2: '<path d="M8 4h8v3H8zM6 5H5v16h14V5h-1M8.5 12l2 2 4-4M8.5 17h7"/>',
@@ -662,8 +663,30 @@ async function caricaListinoRiv() {
   catch (e) { RIV.listino = null; RIV.listinoErr = /find the function|does not exist/i.test(e.message || '') ? 'Il listino non è ancora disponibile.' : (e.userMsg || 'Non riesco a leggere il listino.'); }
   try { const { data, error } = await store.tabella('richieste_preventivo').select('*').order('creato', { ascending: false }).limit(40); if (!error) RIV.prev = data; } catch {}
   // i preventivi in PDF che l'installatore ha messo nella mia area
-  try { const { data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id').eq('kind', 'preventivi'); RIV.prevDoc = error ? [] : data || []; } catch { RIV.prevDoc = []; }
+  try {
+    let { data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id,esito,esito_quando,esito_nota').eq('kind', 'preventivi');
+    if (error) ({ data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id').eq('kind', 'preventivi'));
+    RIV.prevDoc = error ? [] : data || [];
+  } catch { RIV.prevDoc = []; }
   RIV.listinoCarico = true; render();
+}
+/** Sotto un preventivo nella mia area: «Accetto» / «Non lo accetto», oppure la risposta già data. Senza lo script non compare. */
+function esitoPrevRiv(d) {
+  if (!d || !('esito' in d)) return '';
+  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'bad'}">${d.esito === 'accettato' ? 'Accettato' : 'Non accettato'}</span>${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}</div>`;
+  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivPrevEsito" data-arg="accettato" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Accetto il preventivo</button><button class="btn sm" data-act="rivPrevEsito" data-arg="rifiutato" data-id="${esc(d.id)}" type="button">Non lo accetto</button></div>`;
+}
+function sheetEsitoPrev(d, scelta) {
+  const si = scelta === 'accettato';
+  openSheet(si ? 'Accetti il preventivo?' : 'Non accetti il preventivo?', `
+    <div class="small"><b>${esc(d.titolo || 'Preventivo')}</b></div>
+    <div class="small muted">${si ? 'L\'installatore riceve subito l\'avviso e il preventivo risulta accettato.' : 'L\'installatore riceve l\'avviso. Se vuoi, scrivi il motivo: lo aiuta a rifarlo meglio.'}</div>
+    ${F(si ? 'Note per l\'installatore (facoltativo)' : 'Motivo (facoltativo)', `<textarea name="enota" id="f_enota" rows="3" maxlength="1000" placeholder="${si ? 'Es. procediamo, il cliente vuole iniziare a marzo' : 'Es. il cliente ha scelto un\'altra soluzione'}"></textarea>`)}`,
+  async fd => {
+    const r = await store.rpc('rispondi_preventivo', { documento: d.id, scelta, messaggio: String(fd.get('enota') || '').trim() });
+    toast(String(r || '').startsWith('gia:') ? `L'installatore l'aveva già segnato come ${r.slice(4) === 'accettato' ? 'accettato' : 'non accettato'}` : si ? 'Preventivo accettato: l\'installatore è avvisato' : 'Risposta mandata all\'installatore');
+    RIV.listinoCarico = false; RIV.docCarico = false; render();
+  }, { saveLabel: si ? 'Sì, accetto' : 'Manda la risposta' });
 }
 /* ---------- documenti per i rivenditori ---------- */
 const DOC_LISTA = () => S.documentiRiv?.lista || [];
@@ -817,7 +840,8 @@ function rRivMieiDoc() {
   if (!RIV.docCarico) { caricaDocRiv(); return `<div class="empty">Caricamento dei documenti…</div>`; }
   const visti = new Set(), M = (RIV.mieiDoc || []).filter(d => { const k = chiaveDoc(d); if (visti.has(k)) return false; visti.add(k); return true; }).map(d => ({ ...d, tipo: tipoDocRiv(d) }));
   const tipi = [...new Set(M.map(d => d.tipo))].sort((a, b) => ORD_TIPI(a) - ORD_TIPI(b) || a.localeCompare(b));
-  const card = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
+  const card0 = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
+  const card = d => d.kind === 'preventivi' && esitoPrevRiv(d) ? `<div class="docesito">${card0(d)}${esitoPrevRiv(d)}</div>` : card0(d);
   return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
   <div class="small muted">I documenti dei tuoi lavori in PDF: preventivi, rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
   ${M.length ? tipi.map(t => { const L = M.filter(d => d.tipo === t); return `<details class="cartella" ${tipi.length === 1 ? 'open' : ''}><summary>${svg('folder', 'i')} <b>${esc(t)}</b> <span class="chip">${L.length}</span></summary><div class="stack">${L.map(card).join('')}</div></details>`; }).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
@@ -861,7 +885,7 @@ function rRivPreventivo() {
     ${r.risposta ? `<div class="small">${r.stato === 'inviato' ? '' : 'Preventivo di prima: '}${esc(r.risposta)}</div>` : ''}
     ${fotoRichHtml(store.uid(), r.id, { aggiungi: !modAttiva && richAperta(r) })}
     ${fileCantHtml([[store.uid(), 'richieste/' + r.id]], { soloDoc: true, titolo: 'Video, PDF e altri file', togli: richAperta(r) })}
-    ${pdf || (modAttiva && r.stato !== 'chiusa') ? `<div class="row">${pdf ? `<button class="btn sm primary" data-act="rivPrevPdf" data-id="${esc(pdf.id)}" type="button">${svg('doc', 'i')} ${r.stato === 'inviato' || r.stato === 'chiusa' ? 'Apri il preventivo' : 'Apri il preventivo di prima'}</button>` : ''}${modAttiva && r.stato !== 'chiusa' ? `<button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button>` : ''}</div>` : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
+    ${pdf || (modAttiva && r.stato !== 'chiusa') ? `<div class="row">${pdf ? `<button class="btn sm primary" data-act="rivPrevPdf" data-id="${esc(pdf.id)}" type="button">${svg('doc', 'i')} ${r.stato === 'inviato' || r.stato === 'chiusa' ? 'Apri il preventivo' : 'Apri il preventivo di prima'}</button>` : ''}${modAttiva && r.stato !== 'chiusa' && pdf?.esito !== 'accettato' ? `<button class="btn sm" data-act="rivPrevMod" data-id="${esc(r.id)}" type="button">Modifica la richiesta</button>` : ''}</div>` : ''}${pdf && (r.stato === 'inviato' || r.stato === 'chiusa') ? esitoPrevRiv(pdf) : ''}</div>`; }).join('') || '<div class="empty small">Nessuna richiesta di preventivo.</div>'}</section>`;
 }
 const rigaPrevRiv = (L, r = {}) => {
   const gruppi = [...new Set(vociPrev(L).map(v => v.gruppo))];
@@ -1300,6 +1324,8 @@ function preventivoDaRichiesta(r) {
     richiestaRiv: r.id, richiestaDi: r.rivenditore };
 }
 /** Dove va il PDF di un preventivo nell'area del rivenditore: sempre lo stesso file, che si aggiorna a ogni invio. */
+/** Il preventivo torna «Inviato» (per esempio rifatto dopo un rifiuto): il rivenditore può rispondere di nuovo. */
+const riapriEsitoPrev = id => { if (store.st.mode !== 'demo') store.tabella('documenti_cliente').update({ esito: null, esito_quando: null, esito_nota: null }).eq('kind', 'preventivi').eq('lavoro_id', id).then(() => {}, () => {}); };
 const pubPrev = p => ({ x: { cliente: p.cliente?.nome, clienteId: p.clienteId }, rivId: p.richiestaDi || null, chiave: `prev-${p.id}`, cartella: 'preventivi',
   titolo: nomeDoc(`Preventivo ${String(p.numero || '').replace('/', '-')}`.trim(), p.riferimento, p.cliente?.nome),
   data: p.data || TODAY, lavoro_id: p.id, kind: 'preventivi' });
@@ -1395,6 +1421,7 @@ document.addEventListener('click', async e => {
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
     case 'rivPrevPdf': { const d = (RIV.prevDoc || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
+    case 'rivPrevEsito': { const d = (RIV.prevDoc || []).find(x => x.id === id) || (RIV.mieiDoc || []).find(x => x.id === id); if (d) sheetEsitoPrev(d, b.dataset.arg); break; }
     case 'rivPrevMod': { const r = (RIV.prev || []).find(x => x.id === id); if (r) sheetPrevRiv(r); break; }
     case 'richPrevVista': {
       b.disabled = true;
@@ -3524,6 +3551,7 @@ function sheetPrev(p) {
   const c = p.cliente || {};
   openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
     ${p.richiestaRiv ? novitaPrevHtml(p.richiestaRiv) : ''}
+    ${p.esitoRiv ? `<div class="notice small ${p.esitoRiv.esito === 'accettato' ? 'ok' : ''}"><b>${p.esitoRiv.esito === 'accettato' ? 'Accettato' : 'Non accettato'} da ${esc(p.esitoRiv.chi || 'rivenditore')}</b> · ${esc(quandoMod(p.esitoRiv.quando))}${p.esitoRiv.nota ? `<div class="prewrap">${esc(p.esitoRiv.nota)}</div>` : ''}</div>` : ''}
     ${p.richiestaRiv && store.st.mode !== 'demo' ? '<div class="small muted">Nato dalla richiesta di un rivenditore: quando lo salvi con lo stato «Inviato», lui riceve l\'avviso e trova il PDF nella sua area riservata.</div>' : ''}
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
     ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
@@ -3638,6 +3666,9 @@ function salvaPrev(fd) {
     riferimento: String(fd.get('riferimento') || '').trim(), cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd), firmato: prevFirmato || null,
     urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
+  { const ora = !isNew && S.preventivi.find(q => q.id === p.id);
+    if (ora?.esitoRiv && !p.esitoRiv && d.stato === (p.stato || 'bozza')) { d.esitoRiv = ora.esitoRiv; d.stato = ora.stato; }   // ha risposto mentre avevi la scheda aperta
+    if (d.esitoRiv && d.stato === 'inviato') { delete d.esitoRiv; riapriEsitoPrev(p.id); } }
   d.clienteId = assicuraCliente(d.cliente.nome, { tipo: d.cliente.tipo, indirizzo: d.cliente.indirizzo, piva: d.cliente.piva, telefono: d.cliente.telefono, email: d.cliente.email });
   const id = store.put('preventivi', isNew ? null : p.id, d);
   aggiornaRichiestaPrev(d, id);
@@ -4657,7 +4688,7 @@ document.addEventListener('click', async e => {
     case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
-    case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { const d = { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }; store.put('preventivi', p.id, d); aggiornaRichiestaPrev(d, p.id); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
+    case 'prevInviato': { const p = S.preventivi.find(x => x.id === pdfCorrente?.doc?.id); if (p) { const d = { ...stripId(p), stato: 'inviato', dataInvio: p.dataInvio || TODAY }; if (d.esitoRiv) { delete d.esitoRiv; riapriEsitoPrev(p.id); } store.put('preventivi', p.id, d); aggiornaRichiestaPrev(d, p.id); pdfCorrente.doc = { ...p, stato: 'inviato' }; b.remove(); toast('Segnato come inviato'); } break; }
     case 'collegaPrevScegli': {
       const form = $('#sheetForm'); if (!form.reportValidity()) break;
       const saved = salvaPrev(new FormData(form)); prevCtx.isNew = false; sheetScegliLavoro(saved); break;

@@ -638,3 +638,8 @@ details.cartella[open]>summary{margin-bottom:10px}
 .diariomini{display:flex;gap:6px;align-items:flex-start;color:var(--muted)}
 .diariomini svg.i{width:14px;height:14px;flex:none;margin-top:2px}
 .fs-t svg.i{width:15px;height:15px;vertical-align:-2px}
+
+/* il rivenditore accetta o rifiuta il preventivo */
+.docesito{display:grid;gap:6px}
+.docesito>.esitoriv{padding:0 4px}
+.esitoriv{flex-wrap:wrap}
