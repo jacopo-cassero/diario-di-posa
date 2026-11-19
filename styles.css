@@ -700,3 +700,4 @@ details.cartella[open]>summary{margin-bottom:10px}
 .str.forse{border-left-style:dashed;background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.55) 0 4px,transparent 4px 8px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip.forse{color:#ddd0ff}}
 :root[data-theme="dark"] .chip.forse{color:#ddd0ff}
+.mostraaltri{width:100%;justify-content:center}

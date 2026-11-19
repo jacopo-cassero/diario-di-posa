@@ -28,10 +28,14 @@ export function createStore(cfg, onChange) {
       if (S[r.kind]) S[r.kind].push({ id: r.id, ...r.data });
     }
   }
+  // la coda da mandare si salva subito; la copia di tutti i dati poco dopo (scriverla a ogni tocco rallentava)
+  let persistTimer = 0;
+  function salvaCache() { clearTimeout(persistTimer); persistTimer = 0; ls.set(key('cache'), [...recs.values()]); }
   function persist() {
-    ls.set(key('cache'), [...recs.values()]);
     ls.set(key('outbox'), outbox);
+    clearTimeout(persistTimer); persistTimer = setTimeout(salvaCache, 800);
   }
+  if (typeof window !== 'undefined') { window.addEventListener('pagehide', () => persistTimer && salvaCache()); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && persistTimer) salvaCache(); }); }
   function changed() { rebuild(); persist(); onChange && onChange(); }
   function loadLocal() {
     recs.clear();

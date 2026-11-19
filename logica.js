@@ -18,7 +18,8 @@ export const daysBetween = (from, to) => Math.round((pd(to) - pd(from)) / 864e5)
 export const n2 = v => { const x = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0; };
 export const sum = (a, f) => a.reduce((s, x) => s + (+f(x) || 0), 0);
 export const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'materiale';
-export const eur = n => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(+n || 0);
+const EUR = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
+export const eur = n => EUR.format(+n || 0);
 
 /** Impostazioni predefinite (salvate per utente, valgono su tutti i dispositivi). */
 export const IMPOSTAZIONI_BASE = {

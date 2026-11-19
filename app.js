@@ -1,4 +1,4 @@
-import { MESI, AMM, STATI, URG, CAT, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm } from './logica.js';
+import { MESI, AMM, STATI, URG, SCAD, oggi, pd, iso, daysBetween, n2, sum, slug, eur, promemoria, impostazioni, oreGiornata, orarioDi, testoOrario, TUTTO_GIORNO, kmFurgone, ritmoKm } from './logica.js';
 import { LISTINO_BASE, AZIENDA_BASE, IVA, ivaOf, totali, totaleRiga, prezzoUnitario, rigaDaVoce, prossimoNumero, rigaSconto, baseSconto } from './listino.js';
 import { creaDocumento, docDaLavoro, creaListino, creaRapporto } from './documento.js';
 import { MODELLI_BASE, TIPI_CAMPO, creaModulo, MODELLI_UFFICIALI, campiUfficiali, creaModuloUfficiale } from './moduli.js';
@@ -11,12 +11,19 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (n, d = 1) => new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(+n || 0);
 let TODAY = oggi();
-const fmtD = (s, o = { day: 'numeric', month: 'short', year: 'numeric' }) => s ? pd(s).toLocaleDateString('it-IT', o) : '—';
+// date in italiano: i formattatori e i risultati restano in memoria (sul telefono toLocaleDateString è lento)
+const FMT_D = new Map(), FMT_R = new Map(), FMT_BASE = { day: 'numeric', month: 'short', year: 'numeric' };
+const fmtD = (s, o = FMT_BASE) => {
+  if (!s) return '—';
+  const ko = o === FMT_BASE ? 'b' : JSON.stringify(o), kr = ko + '|' + s;
+  let r = FMT_R.get(kr); if (r !== undefined) return r;
+  let f = FMT_D.get(ko); if (!f) { f = new Intl.DateTimeFormat('it-IT', o); FMT_D.set(ko, f); }
+  r = f.format(pd(s)); if (FMT_R.size > 20000) FMT_R.clear(); FMT_R.set(kr, r); return r;
+};
 const daysTo = s => Math.round((pd(s) - pd(TODAY)) / 864e5);
 const addYears = (s, n) => { const d = pd(s || TODAY); d.setFullYear(d.getFullYear() + n); return iso(d); };
 const monthName = k => { const [y, m] = k.split('-'); return MESI[+m - 1] + ' ' + y; };
 const shiftMonth = (k, n) => { const [y, m] = k.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
-const catName = k => (CAT.find(c => c[0] === k) || [k, k])[1].split(' (')[0];
 const ammOf = k => AMM.find(a => a[0] === (k || 'da_cons')) || AMM[0];
 const isUrl = u => /^https?:\/\/\S+$/i.test(String(u || '').trim());
 const ICON = {
@@ -51,8 +58,10 @@ const svg = (k, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidde
 
 /* ---------- stato ---------- */
 const CFG = window.DIARIO_CONFIG || {};
+let renderPronto = 0;
 const store = createStore(CFG, () => {
-  render();
+  // più cambi di fila (sincronizzazione, salvataggi) → un solo ridisegno
+  if (!renderPronto) renderPronto = requestAnimationFrame(() => { renderPronto = 0; render(); });
   if (GESTORE()) { aggiornaCalendario(); caricaAccessi(); }
   else if (store.st.ruolo === 'rivenditore' && RIV.carico && Date.now() - (RIV.t || 0) > 30000) caricaRiv(true);
   else if (store.st.ruolo === 'dipendente' && DIP.carico && Date.now() - (DIP.t || 0) > 30000) caricaDip();
@@ -1629,7 +1638,8 @@ document.addEventListener('click', async e => {
 
 
 /* ---------- materiale usato ---------- */
-function normNome(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+const NORM = new Map();
+function normNome(s) { const k = String(s || ''); let r = NORM.get(k); if (r === undefined) { r = k.trim().toLowerCase().replace(/\s+/g, ' '); if (NORM.size > 20000) NORM.clear(); NORM.set(k, r); } return r; }
 /** Prezzo unitario di un materiale: dall'ultimo acquisto registrato con le righe (o dal vecchio magazzino). */
 function prezzoMat(nome) {
   const k = normNome(nome); const fisso = n2(S.prezziMat?.[k]?.prezzo); if (fisso > 0) return fisso; let best = null;
@@ -1921,6 +1931,10 @@ function sovrapposti(kind, id, giorni, d) {
 }
 /** Riferimento del lavoro (es. il cliente finale del rivenditore). */
 const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
+/* liste lunghe: ne disegno 40 alla volta, con «Mostra altri» (le pagine con centinaia di schede rallentavano) */
+const PASSO = 40;
+const quanti = k => (UI.mostra ||= {})[k] || PASSO;
+const altri = (k, tot) => tot > quanti(k) ? `<button class="btn ghost mostraaltri" data-act="mostraAltri" data-arg="${esc(k)}" type="button">Mostra altri ${Math.min(PASSO, tot - quanti(k))} <span class="muted">(ne restano ${tot - quanti(k)})</span></button>` : '';
 /** 2026-11-19 → 19/11/2026 */
 const dIt = s => String(s || '').split('-').reverse().join('/');
 /** Nome dei PDF: «Consuntivo - Fam. Rossi», oppure «Fam. Rossi - Consuntivo» (Impostazioni › Dati azienda).
@@ -2216,7 +2230,7 @@ function rInt() {
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
   ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
   ${barra}
-  <div class="stack">${L.map(i => sel ? `<label class="selcard"><input type="checkbox" class="intChk" data-id="${esc(i.id)}" ${sel.has(i.id) ? 'checked' : ''} ${open(i) ? '' : 'disabled'}>${intCard(i)}</label>` : intCard(i)).join('') || `<div class="empty">${f === 'daprog' ? 'Nessun intervento da programmare.<br><span class="small">Quando crei un intervento senza data intervento, finisce qui.</span>' : 'Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span>'}</div>`}</div>`;
+  <div class="stack">${L.slice(0, sel ? L.length : quanti('int-' + f)).map(i => sel ? `<label class="selcard"><input type="checkbox" class="intChk" data-id="${esc(i.id)}" ${sel.has(i.id) ? 'checked' : ''} ${open(i) ? '' : 'disabled'}>${intCard(i)}</label>` : intCard(i)).join('') || `<div class="empty">${f === 'daprog' ? 'Nessun intervento da programmare.<br><span class="small">Quando crei un intervento senza data intervento, finisce qui.</span>' : 'Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span>'}</div>`}${sel ? '' : altri('int-' + f, L.length)}</div>`;
 }
 
 const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', cons: 'Segna fatturato', fatt: 'Segna incassato' };
@@ -2234,10 +2248,10 @@ function rCons() {
       for (const x of L) { if (x.gruppoCons?.id && k !== 'da_cons') { if (statoGruppo(x.gruppoCons.id) !== k) continue; if (!gruppi.has(x.gruppoCons.id)) gruppi.set(x.gruppoCons.id, lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ ...y, _k: kk, _d: kk === 'lavori' ? y.data : (y.dataProg || y.data), _t: kk === 'lavori' ? y.installato : y.descrizione, importo: kk === 'lavori' ? y.importo : y.costo })).sort((a, b) => String(a._d).localeCompare(b._d))); } else singoli.push(x); }
       const voci = [...[...gruppi.values()].map(gg => ({ d: gg[0]._d, h: cardGruppoCons(gg, k) })), ...singoli.map(x => ({ d: x._d, h: null, x }))].sort((a, b) => String(a.d).localeCompare(b.d));
       const testa = `<div class="row between"><h3>${k === 'pag' ? 'Incassati (ultimi 2 mesi)' : l}</h3><span class="chip ${c} num">${gruppi.size + singoli.length} · ${eur(sum(singoli, imp) + sum([...gruppi.values()], gg => n2(gg[0].gruppoCons.imponibile)))}</span></div>`;
-      if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}</details>`; return; }
+      if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.slice(0, quanti('cons-' + k)).map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</details>`; return; }
       h += `<section class="stack">${testa}
-      ${voci.map(v => v.h || ((x) => `<div class="card tap" ${tapLavCons(x)}><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.consRap ? ` · consuntivo con il rapporto del ${fmtD(x.consRap, { day: 'numeric', month: 'short' })}` : x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
-        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k === 'inv' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}</section>`;
+      ${voci.slice(0, quanti('cons-' + k)).map(v => v.h || ((x) => `<div class="card tap" ${tapLavCons(x)}><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.consRap ? ` · consuntivo con il rapporto del ${fmtD(x.consRap, { day: 'numeric', month: 'short' })}` : x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
+        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k === 'inv' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</section>`;
     });
   }
   return h;
@@ -3740,7 +3754,7 @@ function rPrev() {
   return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Nuovo</button></div>
   <div class="kpis"><div class="kpi"><div class="l">Da inviare</div><div class="v">${S.preventivi.filter(p => (p.stato || 'bozza') === 'bozza').length}</div></div><div class="kpi"><div class="l">In attesa</div><div class="v">${S.preventivi.filter(p => p.stato === 'inviato').length}</div></div><div class="kpi"><div class="l">Accettati ${anno}</div><div class="v">${eur(sum(acc.filter(p => (p.data || '').startsWith(anno)), p => totPrev(p).imponibile))}</div></div><div class="kpi"><div class="l">Tasso accettazione</div><div class="v">${chiusi.length ? Math.round(acc.length / chiusi.length * 100) + '%' : '—'}</div></div></div>
   <div class="seg" role="group" aria-label="Filtro">${FL.map(([k, l]) => `<button data-act="prevF" data-arg="${k}" aria-pressed="${UI.prevFilter === k}" type="button">${l}</button>`).join('')}</div>
-  <div class="stack">${L.map(prevCard).join('') || `<div class="empty"><b>${S.preventivi.length ? 'Nessun preventivo in questa lista.' : 'Nessun preventivo ancora.'}</b><span class="small">Scegli le voci dal listino, il totale si calcola da solo e il PDF con termini, condizioni e firma è pronto da mandare.</span><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Crea un preventivo</button></div>`}</div>`;
+  <div class="stack">${L.slice(0, quanti('prev-' + UI.prevFilter)).map(prevCard).join('') || `<div class="empty"><b>${S.preventivi.length ? 'Nessun preventivo in questa lista.' : 'Nessun preventivo ancora.'}</b><span class="small">Scegli le voci dal listino, il totale si calcola da solo e il PDF con termini, condizioni e firma è pronto da mandare.</span><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Crea un preventivo</button></div>`}${altri('prev-' + UI.prevFilter, L.length)}</div>`;
 }
 let prevCtx = null;
 function sheetPrev(p) {
@@ -3905,9 +3919,18 @@ function assicuraCliente(nome, extra = {}) {
   return store.put('clienti', null, { nome: String(nome).trim(), tipo: 'finale', creato: TODAY, ...pulito });
 }
 /** Tutto ciò che riguarda un cliente: collegato per id o, per i dati vecchi, per nome. */
+/** Indice «cliente → lavori, interventi, preventivi, moduli», rifatto solo quando cambiano i dati (invece di scorrere tutto per ogni cliente). */
+let IDX_CLI = null;
+function indiceClienti() {
+  if (IDX_CLI && IDX_CLI.l === S.lavori && IDX_CLI.i === S.interventi && IDX_CLI.p === S.preventivi && IDX_CLI.m === S.moduli) return IDX_CLI;
+  const fai = arr => { const id = new Map(), nome = new Map(); arr.forEach((x, pos) => { const m = x.clienteId ? id : nome, k = x.clienteId || normNome(nomeDi(x)); let a = m.get(k); if (!a) m.set(k, a = []); a.push([pos, x]); }); return { id, nome }; };
+  IDX_CLI = { l: S.lavori, i: S.interventi, p: S.preventivi, m: S.moduli, lavori: fai(S.lavori), interventi: fai(S.interventi), preventivi: fai(S.preventivi), moduli: fai(S.moduli) };
+  return IDX_CLI;
+}
+const delCliente = (ix, c) => { const a = ix.id.get(c.id) || [], b = ix.nome.get(normNome(c.nome)) || []; return (b.length ? [...a, ...b].sort((x, y) => x[0] - y[0]) : a).map(v => v[1]); };
 function storicoCliente(c) {
-  const mio = x => x.clienteId === c.id || (!x.clienteId && normNome(nomeDi(x)) === normNome(c.nome));
-  const lav = S.lavori.filter(mio), int = S.interventi.filter(mio), prev = S.preventivi.filter(mio), mod = S.moduli.filter(mio);
+  const ix = indiceClienti();
+  const lav = delCliente(ix.lavori, c), int = delCliente(ix.interventi, c), prev = delCliente(ix.preventivi, c), mod = delCliente(ix.moduli, c);
   const fatt = [...lav.map(x => ({ imp: fatturato(x), d: x.data, amm: x.amm })), ...int.filter(i => i.stato === 'completato').map(x => ({ imp: fatturato(x), d: x.dataProg || x.data, amm: x.amm }))].filter(x => x.d && x.d <= TODAY);
   return {
     lav, int, prev, mod,
@@ -4003,12 +4026,12 @@ function rClienti() {
   <div class="seg" role="group" aria-label="Tipo">${FT.map(([k, l]) => `<button data-act="cliTipo" data-arg="${k}" aria-pressed="${UI.cliTipo === k}" type="button">${l}</button>`).join('')}</div>
   <div class="chips">${[['tutti', 'Tutti'], ...STATI_CLI.map(([k, l]) => [k, l === 'Attivo' ? 'Attivi' : l === 'Potenziale' ? 'Potenziali' : 'Inattivi']), ['azioni', 'Con azioni aperte']].map(([k, l]) => `<button type="button" class="chipf" data-act="cliStato" data-arg="${k}" aria-pressed="${fs === k}">${l}</button>`).join('')}</div>
   <div class="row between small muted"><span>${L.length === S.clienti.length ? `${S.clienti.length} clienti` : `${L.length} di ${S.clienti.length} clienti`}</span><button class="linkbtn" data-act="cliOrd" data-arg="${prossimoOrd}" type="button">Ordinati per ${ORD[UI.cliOrd] || ORD.recenti} · cambia</button></div>
-  <div class="stack" id="listaClienti">${L.map(({ c, k }) => { const z = k.az[0]; return `<div class="card crmcard" role="button" tabindex="0" data-act="crmApri" data-arg="${c.id}">
+  <div class="stack" id="listaClienti">${L.slice(0, quanti('cli')).map(({ c, k }) => { const z = k.az[0]; return `<div class="card crmcard" role="button" tabindex="0" data-act="crmApri" data-arg="${c.id}">
       <div class="crmtop"><span class="avatar t-${esc(c.tipo || 'finale')}">${esc(iniziali(c.nome))}</span><span class="mid"><span class="t">${esc(c.nome)}</span><span class="small muted">${esc([tipoCliente(c.tipo), c.referente, c.telefono].filter(Boolean).join(' · '))}</span></span>${chipStato(k.stato)}</div>
       <div class="meta"><span><b class="num">${k.lav.length}</b> ${k.lav.length === 1 ? 'posa' : 'pose'}</span><span><b class="num">${k.int.length}</b> ${k.int.length === 1 ? 'intervento' : 'interventi'}</span>${k.prevAperti.length ? `<span><b class="num">${k.prevAperti.length}</b> ${k.prevAperti.length === 1 ? 'preventivo aperto' : 'preventivi aperti'}</span>` : ''}${k.accessi.length ? '<span class="chip in">area riservata</span>' : ''}<span>${k.ultimo ? 'ultimo contatto ' + giorniFa(k.ultimo) : 'nessun contatto'}</span></div>
       ${k.prossimi[0] ? `<div class="small">${svg('cal', 'i')} ${k.prossimi[0].kind === 'lavori' ? 'Posa' : 'Intervento'} ${fmtD(k.prossimi[0].d, { weekday: 'short', day: 'numeric', month: 'short' })}</div>` : ''}
       ${z ? `<div class="small ${z.data && z.data < TODAY ? 'bad' : ''}">${svg('bell', 'i')} ${esc(z.testo)}${z.data ? ' · ' + fmtD(z.data, { day: 'numeric', month: 'short' }) : ''}</div>` : ''}
-    </div>`; }).join('') || `<div class="empty"><b>${S.clienti.length ? 'Nessun cliente trovato.' : 'La rubrica è vuota.'}</b><span class="small">Ogni cliente che scrivi in una posa, un intervento o un preventivo finisce qui da solo, con tutto lo storico.</span></div>`}</div>`;
+    </div>`; }).join('') || `<div class="empty"><b>${S.clienti.length ? 'Nessun cliente trovato.' : 'La rubrica è vuota.'}</b><span class="small">Ogni cliente che scrivi in una posa, un intervento o un preventivo finisce qui da solo, con tutto lo storico.</span></div>`}${altri('cli', L.length)}</div>`;
 }
 /** La scheda del cliente, a tutta pagina. */
 function rCliente(c) {
@@ -4745,6 +4768,7 @@ document.addEventListener('click', async e => {
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
+    case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
     case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
     case 'poseF': UI.poseFilter = arg; render(); break;
     case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: '', calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
@@ -5010,7 +5034,21 @@ document.addEventListener('input', e => {
   if (t.closest && t.closest('#righeBox')) aggiornaTotali();
 });
 caricaImmagini();
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn(e));
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  const giaControllata = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // controllo gli aggiornamenti anche quando riapri l'app dal telefono (non solo al primo avvio)
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(e => console.warn(e));
+  // versione nuova pronta: ricarico appena non stai compilando niente
+  let ricarica = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!giaControllata || ricarica) return; ricarica = true;
+    const libero = () => $('#sheet')?.hidden !== false && !document.querySelector('input:focus, textarea:focus, select:focus') && !document.querySelector('.lightbox');
+    const prova = () => { if (libero()) location.reload(); else setTimeout(prova, 2000); };
+    prova();
+  });
+}
 render();
 
 document.addEventListener('toggle', e => { if (e.target.classList?.contains('pagati')) UI.pagAperti = e.target.open; }, true);
