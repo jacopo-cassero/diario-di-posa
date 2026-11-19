@@ -456,6 +456,19 @@ function sheetGiornoRiv(k) {
   openSheet(fmtD(k, { weekday: 'long', day: 'numeric', month: 'long' }), `<div class="stack">${L.map(cardLavRiv).join('')}</div>`, null);
 }
 /** Scheda di un lavoro del rivenditore: la programmazione e, se il lavoro è ancora da fare, la correzione di cliente, indirizzo e telefono. */
+/* note, materiali e allegati dell'installatore che il rivenditore vede (il diario no) */
+function allegatiInst(l) { const L = (l.allegati || []).filter(f => f && f.path); return { foto: L.filter(eImmagine), altri: L.filter(f => !eImmagine(f)) }; }
+function notaInstHtml(l) {
+  const { foto, altri } = allegatiInst(l), mats = (l.materiali || []).filter(m => m && m.nome);
+  if (!l.note && !mats.length && !foto.length && !altri.length) return '';
+  const rif = `data-id="${esc(l.id)}" data-kind="${esc(l.kind)}"`;
+  return `<div class="fieldset"><span class="fs-t">Dall'installatore</span>
+    ${l.note ? `<div class="small prewrap">${esc(l.note)}</div>` : ''}
+    ${mats.length ? `<div class="small muted">Materiale: ${mats.map(m => esc(m.nome) + (n2(m.qta) ? ' ' + esc(num(n2(m.qta))) : '')).join(', ')}</div>` : ''}
+    ${foto.length ? `<div class="small muted">Foto (${foto.length})</div><div class="thumbs">${foto.map((f, i) => `<button type="button" class="thumbbtn" data-act="rivAllFoto" ${rif} data-arg="${i}" aria-label="Apri la foto ${i + 1} di ${foto.length}"><img data-file="${esc(f.mini || f.path)}" alt=""></button>`).join('')}</div>` : ''}
+    ${altri.length ? `<div class="files">${altri.map((f, i) => `<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="rivAllFile" ${rif} data-arg="${i}">${esc(f.nome || 'File')}</button></div>`).join('')}</div>` : ''}
+  </div>`;
+}
 function sheetLavRiv(l, modifica = false) {
   const nome = l.kind === 'lavori' ? 'Posa' : 'Intervento';
   const quando = l.dataFine && l.dataFine > l.data ? `Dal ${fmtD(l.data, { weekday: 'short', day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}` : fmtD(l.data, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -492,6 +505,7 @@ function sheetLavRiv(l, modifica = false) {
       ${(l.voci || []).length || l.cosa ? `<div class="fieldset"><span class="fs-t">${l.kind === 'lavori' ? 'Cosa si posa' : 'Cosa si fa'}</span>
         ${(l.voci || []).length ? `<ul class="small">${l.voci.map(v => `<li>${v.qta != null && v.qta !== '' ? esc(num(n2(v.qta))) + (v.unita && v.unita !== 'pz' ? ' ' + esc(v.unita) : '') + ' × ' : ''}${esc(v.descr || '')}</li>`).join('')}</ul>` : ''}
         ${l.cosa ? `<div class="small prewrap">${esc(l.cosa)}</div>` : ''}</div>` : ''}
+      ${notaInstHtml(l)}
       ${l.noteRiv ? `<div class="fieldset"><span class="fs-t">Le tue note per l'installazione</span><div class="small prewrap">${esc(l.noteRiv)}</div></div>` : ''}
       ${fileCantHtml([[store.uid(), chiaveCantRiv(l)]], { agg: l.stato === 'annullato' ? '' : chiaveCantRiv(l), tipo: l.kind, lavoro: l.id })}
       ${(l.sospesi || []).length ? `<div class="sospcard"><b>Da completare</b><ul>${l.sospesi.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
@@ -1619,6 +1633,13 @@ document.addEventListener('click', async e => {
     case 'rivAggiorna': await caricaRiv(true); toast('Calendario aggiornato'); break;
     case 'rivLav': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l); break; }
     case 'rivLavMod': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l, true); break; }
+    case 'rivAllFoto': case 'rivAllFile': {
+      const l = (RIV.lavori || []).find(x => x.id === id && x.kind === b.dataset.kind); if (!l) break;
+      const { foto, altri } = allegatiInst(l), i = +arg || 0;
+      if (a === 'rivAllFoto') apriFoto(foto.map(f => ({ path: f.path, nome: f.nome })), i);
+      else if (altri[i]) guardaFile(altri[i].path, altri[i].nome);
+      break;
+    }
     case 'modRivVisto': {
       const L = arg === 'interventi' ? S.interventi : S.lavori, x = L.find(v => v.id === id); if (!x) break;
       const { modRiv, ...resto } = x; void modRiv; store.put(arg, id, stripId(resto)); b.closest('.modrich')?.remove(); render(); break;
