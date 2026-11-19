@@ -107,7 +107,7 @@ function schedaTesto(p) {
   const s = p.scheda || {};
   const mat = (s.materiale || []).filter(r => r.tipo || r.qta).map(r => `${n2(r.qta) || ''} ${r.tipo || ''}${r.note ? ' (' + r.note + ')' : ''}`.trim());
   return [
-    p.cliente && `Cliente finale: ${p.cliente}`, p.telefono && `Tel. ${p.telefono}`,
+    s.forse && 'Data: FORSE, non ancora sicura', p.cliente && `Cliente finale: ${p.cliente}`, p.telefono && `Tel. ${p.telefono}`,
     ...SCHEDA.filter(([k]) => s[k]).map(([k, l]) => `${l}: ${s[k]}`),
     mat.length && `Materiale: ${mat.join(', ')}`, s.misure && `Misure e dettagli: ${s.misure}`,
     s.descrizione && `Lavoro: ${s.descrizione}`, s.note && `Note: ${s.note}`,
@@ -235,7 +235,7 @@ function rRichieste() {
 function cardPren(p, azioni) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore);
   const giorni = p.data_fine > p.data ? `dal ${fmtD(p.data, { day: 'numeric', month: 'short' })} al ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'long', day: 'numeric', month: 'long' });
-  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></div>
+  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chipgrp">${p.scheda?.forse ? '<span class="chip forse">Forse</span>' : ''}<span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></span></div>
     <div class="small"><b>${giorni}</b>${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.indirizzo ? ' · ' + esc(p.indirizzo) : ''}</div>
     ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
     ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
@@ -334,7 +334,7 @@ async function confermaPren(p) {
   const s = p.scheda || {};
   const testo = schedaTesto(p);
   const mat = (s.materiale || []).filter(x => x.tipo || x.qta).map(x => `${n2(x.qta) || ''} ${x.tipo || ''}`.trim()).join(', ');
-  const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', riferimento: p.cliente || '', amm: 'da_cons', ...(sedeDi(r) ? { sede: sedeDi(r) } : {}) };
+  const base = { cliente: chi, indirizzo: p.indirizzo || '', telefono: p.telefono || '', prenotazioneId: p.id, clienteFinale: p.cliente || '', riferimento: p.cliente || '', amm: 'da_cons', ...(sedeDi(r) ? { sede: sedeDi(r) } : {}), ...(p.scheda?.forse ? { forse: true } : {}) };
   base.clienteId = dcr.id || assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
   if (base.clienteFinale && stessoCliente(base.clienteFinale, '', chi, '')) { base.clienteFinale = ''; base.riferimento = ''; }
   let kind, d;
@@ -510,7 +510,7 @@ function giorniLavorativi(da, a) {
 function cardMiaPren(p) {
   const st = String(p.risposta || '').startsWith(ANNULLATA_INST) ? ['bad', 'Annullata'] : { richiesta: ['warn', 'Da confermare'], confermata: ['ok', 'Confermata'], rifiutata: ['bad', 'Non disponibile'], annullata: ['', 'Annullata da te'] }[p.stato];
   return `<div class="card"><div class="row between"><span class="t">${p.data_fine > p.data ? `${fmtD(p.data, { day: 'numeric', month: 'short' })} – ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'short', day: 'numeric', month: 'short' })}</span><span class="chip ${st[0]}">${st[1]}</span></div>
-    <div class="small muted">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]} · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
+    <div class="small muted">${p.scheda?.forse ? '<span class="chip forse">Data forse</span> ' : ''}${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]} · ${esc(p.cliente || '')} · ${esc(p.indirizzo || '')}</div>
     ${p.risposta ? `<div class="small">Risposta: ${esc(p.risposta)}</div>` : ''}
     ${p.stato === 'richiesta' ? `<button class="linkbtn small" data-act="rivAnnulla" data-id="${p.id}" type="button">Annulla la richiesta</button>` : ''}</div>`;
 }
@@ -520,7 +520,7 @@ function sheetPrenota() {
   openSheet('Prenota', `
     <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · le giornate restano bloccate per te finché non confermo.</div>
     <div class="small muted">Compila quello che sai: nessun campo è obbligatorio, il resto ce lo diciamo a voce.</div>
-    ${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza']], 'posa'))}
+    <div class="g2">${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza']], 'posa'))}${F('La data è', sel('pforse', [['no', 'Confermata'], ['si', 'Forse (non ancora sicura)']], 'no'))}</div>
     <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
       <div class="g2">${F('Cliente finale', inp('pcliente', ''))}${F('Telefono cliente', inp('ptel', '', 'tel'))}</div>
       ${F('Indirizzo del cantiere', inp('pind', '', 'text', 'placeholder="Via, civico, comune"'))}
@@ -550,6 +550,7 @@ function sheetPrenota() {
     const mt = fd.getAll('pm_tipo'), mq = fd.getAll('pm_qta'), mn = fd.getAll('pm_note');
     scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
     scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim(); scheda.note = String(fd.get('pnote') || '').trim();
+    if (fd.get('pforse') === 'si') scheda.forse = true;
     const nuova = await store.rpc('prenota', { da, a, tipo: fd.get('ptipo'), cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
     RIV.da = RIV.a = '';
     const foto = [...rvFoto], docs = [...pDocs]; let msg = 'Prenotazione inviata: ti confermo appena possibile';
@@ -1846,7 +1847,7 @@ function lavoroCard(l, giorno = UI.day) {
   const cart = S.cartelle.find(c => c.id === l.cartellaId);
   const nAll = (l.allegati || []).length;
   return `<div class="card ${l.urgenzaApplicata ? 'urg-alta' : ''}" role="button" tabindex="0" data-act="editLav" data-id="${l.id}">
-    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${l.sede ? ` <small class="sedechip">${esc(l.sede)}</small>` : ''}${chipCli(l)}${rifDi(l) ? `<small class="rif">Rif. ${esc(rifDi(l))}</small>` : ''}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(l.cliente || 'Cliente')}${l.forse ? ' <small class="chip forse">Forse</small>' : ''}${l.sede ? ` <small class="sedechip">${esc(l.sede)}</small>` : ''}${chipCli(l)}${rifDi(l) ? `<small class="rif">Rif. ${esc(rifDi(l))}</small>` : ''}</span><span class="price">${n2(l.importo) ? eur(l.importo) : ''}</span></div>
     ${l.dataFine && l.dataFine > l.data ? `<div class="small"><span class="chip in">${(() => { const g = giorniPosa(l); const i = g.indexOf(UI.day); return (i >= 0 ? `Giorno ${i + 1} di ${g.length}` : `${g.length} giorni`); })()}</span> dal ${fmtD(l.data, { day: 'numeric', month: 'short' })} al ${fmtD(l.dataFine, { day: 'numeric', month: 'short' })}</div>` : ''}
     ${badgeOrario(l, giorno)}${posaFatta(l, UI.day) ? '<div class="small"><span class="chip ok">Fatta</span></div>' : ''}${GESTORE() ? diarioDel(l, giorno).map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo.length > 90 ? e.testo.slice(0, 90) + '…' : e.testo)}</div>`).join('') : ''}
     ${l.indirizzo ? `<div class="addr">${esc(l.indirizzo)}</div>` : ''}
@@ -1861,7 +1862,7 @@ function lavoroCard(l, giorno = UI.day) {
       ${isUrl(l.cartellaUrl) ? `<a href="${esc(l.cartellaUrl)}" target="_blank" rel="noopener">Cartella cantiere</a>` : ''}
       ${nAll ? `<span class="small muted">${svg('clip', 'i')} ${nAll} ${nAll === 1 ? 'allegato' : 'allegati'}</span>` : ''}</div>` : ''}
     ${dettaglioPrev(l)}
-    <div class="row fattorow">${bottoneFatto('lavori', l)}</div>
+    <div class="row fattorow">${bottoneForse('lavori', l)}${bottoneFatto('lavori', l)}</div>
   </div>`;
 }
 /* ---------- orari ---------- */
@@ -1968,6 +1969,7 @@ function elencoGiorno(dl, di, de) {
     ${tot && !vediL.length && !vediI.length && f === 'dafare' ? `<div class="empty small">Tutto fatto per oggi 👍</div>` : ''}
     ${nasc ? `<button type="button" class="linkbtn small" data-act="dayFiltro" data-arg="tutti">${nasc} ${nasc === 1 ? 'lavoro completato o annullato nascosto' : 'lavori completati o annullati nascosti'}: mostra</button>` : ''}`;
 }
+const bottoneForse = (kind, x) => x.forse ? `<button type="button" class="btn sm" data-act="confermaData" data-arg="${kind}" data-id="${esc(x.id)}">${svg('check', 'i')} Data confermata</button>` : '';
 const bottoneFatto = (kind, x) => {
   if (kind === 'lavori') { const f = posaFatta(x, UI.day); return `<button type="button" class="btn sm ${f ? '' : 'ok'}" data-act="${f ? 'posaRiapri' : 'posaFatta'}" data-id="${x.id}">${f ? 'Riapri' : '✓ Segna fatta'}</button>`; }
   if (x.stato === 'annullato') return '';
@@ -1998,7 +2000,7 @@ function intCard(i, giorno = '') {
   const puoRiprog = i.dataProg && !intChiuso(i) && i.dataProg <= TODAY;
   const u = URG.find(x => x[0] === (i.urgenza || 'normale')) || URG[0];
   return `<div class="card urg-${u[0]}" role="button" tabindex="0" data-act="editInt" data-id="${i.id}">
-    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${i.sede ? ` <small class="sedechip">${esc(i.sede)}</small>` : ''}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
+    <div class="row between"><span class="t">${esc(i.cliente || 'Cliente')}${i.forse && i.dataProg ? ' <small class="chip forse">Forse</small>' : ''}${i.sede ? ` <small class="sedechip">${esc(i.sede)}</small>` : ''}${chipCli(i)}${rifDi(i) ? `<small class="rif">Rif. ${esc(rifDi(i))}</small>` : ''}</span><span class="price">${n2(i.costo) ? eur(i.costo) : ''}</span></div>
     ${GESTORE() && giorno ? diarioDel(i, giorno).map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo.length > 90 ? e.testo.slice(0, 90) + '…' : e.testo)}</div>`).join('') : ''}
     ${vis ? `<div class="visita small"><b>Passaggio del ${fmtD(vis.data, { day: 'numeric', month: 'short' })}: lavoro non finito</b>${i.stato === 'completato' ? ' · poi completato' : i.dataProg ? ` · si torna ${fmtD(i.dataProg, { weekday: 'short', day: 'numeric', month: 'short' })}` : ' · da riprogrammare'}${vis.nota ? `<br>${esc(vis.nota)}` : ''}</div>` : i.dataProg ? badgeOrario(i) : ''}
     ${i.indirizzo ? `<div class="addr">${esc(i.indirizzo)}</div>` : ''}
@@ -2007,7 +2009,7 @@ function intCard(i, giorno = '') {
     <div class="meta"><span class="chip ${st[2]}">${st[1]}</span>${u[0] !== 'normale' ? `<span class="chip ${u[2]}">${u[1]}</span>` : ''}<span>Richiesto ${fmtD(i.data, { day: 'numeric', month: 'short' })}</span>${i.dataProg ? `<span>Fissato <b>${fmtD(i.dataProg, { day: 'numeric', month: 'short' })}</b></span>` : ''}${V.length ? `<span>Già passato ${V.map(v => fmtD(v.data, { day: 'numeric', month: 'short' })).join(', ')}</span>` : ''}${i.esempio ? '<span class="chip ex">esempio</span>' : ''}</div>
     ${i.telefono || i.indirizzo || cliDi(i) ? `<div class="links">${linkCli(i)}${i.telefono ? `<a href="tel:${esc(i.telefono.replace(/\s/g, ''))}">Chiama ${esc(i.telefono)}</a>` : ''}${i.indirizzo ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(i.indirizzo)}" target="_blank" rel="noopener">Mappa</a>` : ''}</div>` : ''}
     ${dettaglioPrev(i)}
-    ${vis ? '' : i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneFatto('interventi', i)}${puoRiprog ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(i.id)}">${svg('cal', 'i')} Non finito: riprogramma</button>` : ''}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
+    ${vis ? '' : i.dataProg || i.stato === 'completato' ? `<div class="row fattorow">${bottoneForse('interventi', i)}${bottoneFatto('interventi', i)}${puoRiprog ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(i.id)}">${svg('cal', 'i')} Non finito: riprogramma</button>` : ''}</div>` : ['aperto', 'in_corso'].includes(i.stato || 'aperto') ? `<div class="row fattorow"><button type="button" class="btn sm" data-act="intFissa" data-id="${esc(i.id)}">${svg('cal', 'i')} Fissa data</button></div>` : ''}
   </div>`;
 }
 function rTodo() {
@@ -2100,7 +2102,7 @@ function dettaglioOggi(kind, x, k, focus) {
     ${x.note ? `<div><div class="fs-t">Note</div><div class="prewrap small">${esc(x.note)}</div></div>` : ''}
     ${x.noteRiv ? `<div class="notice small"><b>Note del rivenditore</b><div class="prewrap">${esc(x.noteRiv)}</div></div>` : ''}
     ${squadra.length ? `<div class="small muted">Squadra: ${squadra.map(esc).join(', ')}</div>` : ''}
-    <div class="row">${bottoneFatto(kind, x)}${kind === 'interventi' && !intChiuso(x) && !visitaDel(x, k) ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(x.id)}">Non finito: riprogramma</button>` : ''}<button type="button" class="btn sm" data-act="${kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${esc(x.id)}">Apri la scheda</button><button type="button" class="btn sm" data-act="rapporto" data-arg="${kind}" data-id="${esc(x.id)}">Rapporto</button></div>
+    <div class="row">${bottoneForse(kind, x)}${bottoneFatto(kind, x)}${kind === 'interventi' && !intChiuso(x) && !visitaDel(x, k) ? `<button type="button" class="btn sm" data-act="intRiprog" data-id="${esc(x.id)}">Non finito: riprogramma</button>` : ''}<button type="button" class="btn sm" data-act="${kind === 'lavori' ? 'editLav' : 'editInt'}" data-id="${esc(x.id)}">Apri la scheda</button><button type="button" class="btn sm" data-act="rapporto" data-arg="${kind}" data-id="${esc(x.id)}">Rapporto</button></div>
     ${focus ? diarioHtml(kind, x) : diaQui.map(e => `<div class="small diariomini">${svg('lock', 'i')} ${esc(e.testo)}</div>`).join('')}
   </div>`;
 }
@@ -2119,7 +2121,7 @@ function rOggi() {
   ${ev.map(eventoCard).join('')}
   ${L.length > 1 ? `<div class="oggistrip">${L.map(([kind, x]) => { const [c] = stato(kind, x); return `<button type="button" class="ostr ${c} ${kind === 'interventi' ? 'int' : 'pos'}" data-act="oggiVai" data-id="${esc(x.id)}"><span class="num">${esc(testoOrario(x, k) || 'senza orario')}</span><b>${esc(nome(x))}</b></button>`; }).join('')}</div>` : ''}
   ${L.map(([kind, x]) => { const [c, t] = stato(kind, x); return `<details class="card oggicard ${c} ${kind === 'interventi' ? 'int' : 'pos'}" id="o-${esc(x.id)}" ${x.id === focus || L.length === 1 ? 'open' : ''}>
-    <summary><div class="row between"><span class="t">${esc(nome(x))}${rifDi(x) && x.cliente ? `<small class="rif">${esc(x.cliente)}${x.sede ? ' · ' + esc(x.sede) : ''}</small>` : ''}</span>${t ? `<span class="chip ${c === 'done' ? 'ok' : 'warn'}">${t}</span>` : ''}</div>
+    <summary><div class="row between"><span class="t">${x.forse ? '<small class="chip forse">Forse</small> ' : ''}${esc(nome(x))}${rifDi(x) && x.cliente ? `<small class="rif">${esc(x.cliente)}${x.sede ? ' · ' + esc(x.sede) : ''}</small>` : ''}</span>${t ? `<span class="chip ${c === 'done' ? 'ok' : 'warn'}">${t}</span>` : ''}</div>
       <div class="small muted">${kind === 'lavori' ? 'Posa' : 'Intervento'}${testoOrario(x, k) ? ' · ' + esc(testoOrario(x, k)) : ''}${kind === 'lavori' && x.dataFine && x.dataFine > x.data ? ` · giorno ${giorniPosa(x).indexOf(k) + 1} di ${giorniPosa(x).length}` : ''}</div></summary>
     ${dettaglioOggi(kind, x, k, x.id === focus || (L.length === 1 && !focus))}
   </details>`; }).join('')}
@@ -2172,8 +2174,8 @@ function rCal() {
     const ints = INT.filter(i => intNelGiorno(i, k));
     const evs = evDel(k), ferie = evs.some(e => e.tipo === 'ferie');
     const senzaTitolo = t => String(t || '').replace(/^(sig\.?r?a?|sigg\.?|fam\.?|famiglia|dott\.?(ssa)?|ing\.?|arch\.?|geom\.?)\s+/i, '').trim() || String(t || '');
-    const strisce = [...posaK.map(l => [orarioDi(l, k)?.[0] || '', `<i class="str pos ${l.urgenzaApplicata ? 'urg' : ''} ${posaFatta(l, k) ? 'done' : ''}">${esc(senzaTitolo(rifDi(l) || l.cliente || 'Posa'))}</i>`]),
-      ...ints.map(i => [orarioDi(i, k)?.[0] || '', `<i class="str int ${i.stato === 'completato' || visitaDel(i, k) ? 'done' : ''}">${esc(senzaTitolo(rifDi(i) || i.cliente || 'Intervento'))}</i>`]),
+    const strisce = [...posaK.map(l => [orarioDi(l, k)?.[0] || '', `<i class="str pos ${l.urgenzaApplicata ? 'urg' : ''} ${posaFatta(l, k) ? 'done' : ''} ${l.forse ? 'forse' : ''}">${l.forse ? '? ' : ''}${esc(senzaTitolo(rifDi(l) || l.cliente || 'Posa'))}</i>`]),
+      ...ints.map(i => [orarioDi(i, k)?.[0] || '', `<i class="str int ${i.stato === 'completato' || visitaDel(i, k) ? 'done' : ''} ${i.forse ? 'forse' : ''}">${i.forse ? '? ' : ''}${esc(senzaTitolo(rifDi(i) || i.cliente || 'Intervento'))}</i>`]),
       ...evs.map(e => ['', `<i class="str ev ev-${esc(e.tipo)}">${esc(e.titolo || tipoEv(e.tipo))}</i>`])].sort((a, b) => (a[0] || '99').localeCompare(b[0] || '99')).map(x => x[1]);
     cells += `<button class="day dayx ${k === TODAY ? 'today' : ''} ${dow >= 5 ? 'we' : ''} ${ferie ? 'ferie' : ''} ${UI.sel && UI.sel.has(k) ? 'sel' : ''}" data-act="day" data-arg="${k}" aria-pressed="${k === UI.day}" aria-label="${fmtD(k)}" type="button"><span class="n">${d}</span><span class="strisce">${strisce.slice(0, 3).join('')}${strisce.length > 3 ? `<i class="str piu">+${strisce.length - 3}</i>` : ''}</span></button>`;
   }
@@ -2188,7 +2190,7 @@ function rCal() {
     ${cc ? `<div class="selbar"><div><b>Calendario di ${esc(cc.nome)}</b><div class="small">${LAV.length} ${LAV.length === 1 ? 'posa' : 'pose'} · ${INT.length} ${INT.length === 1 ? 'intervento' : 'interventi'} · solo i suoi lavori</div></div><div class="row"><button class="btn sm" data-act="editCli" data-id="${cc.id}" type="button">Scheda</button><button class="btn sm dark" data-act="calTutti" type="button">Mostra tutti</button></div></div>` : ''}
     <div class="cal">${cells}</div>
     <div class="small muted">Tocca un giorno per vedere e aggiungere i lavori.</div>
-    <div class="legend"><span><i class="str pos">posa</i></span><span><i class="str urg">urgente</i></span><span><i class="str int">intervento</i></span><span><i class="str ev">ferie, fiere, corsi</i></span><span><i class="str pos done">fatto</i></span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
+    <div class="legend"><span><i class="str pos">posa</i></span><span><i class="str pos forse">? forse</i></span><span><i class="str urg">urgente</i></span><span><i class="str int">intervento</i></span><span><i class="str ev">ferie, fiere, corsi</i></span><span><i class="str pos done">fatto</i></span><span class="num">${ml.length} pose · ${num(sum(ml, l => l.ore))} h · ${eur(sum(ml, l => l.importo))}</span></div>
     ${barraSelezione()}
   </section>
   ${S.lavori.some(x => x.esempio) || S.movimenti.some(x => x.esempio) ? `<button class="btn ghost small" data-act="unseed" type="button">Rimuovi i dati di esempio</button>` : ''}`;
@@ -3265,7 +3267,7 @@ function sheetLav(l, prefill) {
     <div class="cliline small" id="cliInfo"></div>
     <div class="g2">${F('Dal giorno', inp('data', l.data, 'date', 'required'))}${F('Al giorno', inp('dataFine', l.dataFine, 'date'))}</div>
     ${campoOrario(l, 'lav')}
-    <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
+    <div class="row between small"><span class="muted" id="giorniInfo"></span><label class="check small"><input type="checkbox" name="forse" id="f_forse" ${l.forse ? 'checked' : ''}> Data forse (non ancora sicura)</label><label class="check small" id="wrapFeriali" hidden><input type="checkbox" id="f_soloFeriali" name="soloFeriali" ${l.soloFeriali !== false ? 'checked' : ''}> Salta i giorni non lavorativi</label></div>
     ${F('Indirizzo cantiere', inp('indirizzo', l.indirizzo, 'text', 'placeholder="Via, civico, comune"'))}
     ${F('Telefono del cliente', inp('telefono', l.telefono, 'tel', 'placeholder="Facoltativo"'))}
     ${isNew && l.preventivoId ? '' : boxPrevLavoro(l, 'lavori')}
@@ -3319,6 +3321,7 @@ function sheetLav(l, prefill) {
     conSquadra('lavori', isNew ? null : l.id, d, fd);
     Object.assign(d, leggiOrario(fd));
     { const og = leggiOrariGiorni(fd, d); if (Object.keys(og).length) d.orariGiorni = og; else delete d.orariGiorni; }
+    if (fd.get('forse')) d.forse = true; else delete d.forse;
     const id = store.put('lavori', isNew ? null : l.id, d);
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
     if (!isNew && (l.data !== d.data || (l.dataFine || '') !== (d.dataFine || ''))) spostaPrenotazioniDi(id, d.data, d.dataFine);
@@ -3370,6 +3373,7 @@ function sheetInt(i, day, prefill) {
     ${F('Problema / lavoro da fare', `<textarea id="f_descrizione" name="descrizione" placeholder="Es. regolazione anta che non chiude, sostituzione guarnizione">${esc(i.descrizione || '')}</textarea>`)}
     ${boxNoteSospesi(i)}
     <div class="g2">${F('Urgenza', sel('urgenza', URG.map(u => [u[0], u[1]]), i.urgenza || 'normale'))}${F('Stato', sel('stato', STATI.map(s => [s[0], s[1]]), i.stato || 'aperto'))}</div>
+    <label class="check small"><input type="checkbox" name="forse" id="f_forse" ${i.forse ? 'checked' : ''}> Data forse (non ancora sicura)</label>
     <div class="g2">${F('Data richiesta', inp('data', i.data, 'date'))}${F('Data intervento', inp('dataProg', i.dataProg, 'date'))}</div>
     ${visiteDi(i).length ? `<div class="small muted">Già passato: ${visiteDi(i).map(v => `<b>${fmtD(v.data, { day: 'numeric', month: 'short', year: 'numeric' })}</b>${v.nota ? ' (' + esc(v.nota) + ')' : ''}`).join(', ')} — lavoro non finito, riprogrammato.</div>` : ''}
     <div class="row" id="togliDataRow" ${i.dataProg ? '' : 'hidden'}><button type="button" class="btn sm" data-act="togliData">${svg('cal', 'i')} Togli la data: rimetti «Da programmare»</button></div>
@@ -3392,6 +3396,7 @@ function sheetInt(i, day, prefill) {
     d.clienteId = assicuraCliente(d.cliente, { telefono: d.telefono });
     conSquadra('interventi', isNew ? null : i.id, d, fd);
     Object.assign(d, leggiOrario(fd));
+    if (fd.get('forse') && d.dataProg) d.forse = true; else delete d.forse;
     const idInt = store.put('interventi', isNew ? null : i.id, d);
     // intervento nato dalle cose da completare: lo collego all'origine e, quando è fatto, le spunto
     const o = d.daSospesiDi, src = o && S[o.kind]?.find(x => x.id === o.id);
@@ -4740,6 +4745,7 @@ document.addEventListener('click', async e => {
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
+    case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
     case 'poseF': UI.poseFilter = arg; render(); break;
     case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: '', calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
     case 'posaNonServe': {

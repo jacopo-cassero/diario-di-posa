@@ -694,3 +694,9 @@ details.cartella[open]>summary{margin-bottom:10px}
 .seglav{margin-bottom:4px}
 .seglav button{flex:1}
 .posadata{margin:6px 2px -4px;font-weight:600;text-transform:capitalize}
+
+/* data «forse» */
+.chip.forse{background:repeating-linear-gradient(135deg,rgba(124,58,237,.14) 0 6px,rgba(124,58,237,.06) 6px 12px);color:#5b21b6;border:1px dashed #7c3aed}
+.str.forse{border-left-style:dashed;background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.55) 0 4px,transparent 4px 8px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip.forse{color:#ddd0ff}}
+:root[data-theme="dark"] .chip.forse{color:#ddd0ff}
