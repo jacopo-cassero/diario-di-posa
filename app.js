@@ -35,6 +35,7 @@ const ICON = {
   cam: '<path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   l: '<path d="M15 6l-6 6 6 6"/>', r: '<path d="M9 6l6 6-6 6"/>',
+  win: '<path d="M5 3h14v18H5zM12 3v18M5 12h14"/>',
   box: '<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/>',
   doc: '<path d="M6 3h9l4 4v14H6zM14 3v5h5"/>',
   fuel: '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/>',
@@ -68,10 +69,10 @@ const store = createStore(CFG, () => {
 });
 const S = store.S;
 const UI = { tab: 'oggi', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aperti', prevFilter: 'aperti', sel: null, calCli: null, cerca: '', cliTipo: 'tutti', cliOrd: 'recenti', seg: 'mov', cMonth: TODAY.slice(0, 7), anYear: +TODAY.slice(0, 4), anMonth: 'all', authView: 'login', authMsg: '', authErr: '' };
-const TABS = [['oggi', 'Oggi', 'clock'], ['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
+const TABS = [['oggi', 'Oggi', 'clock'], ['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['pose', 'Pose', 'win'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van', 'pose'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van', 'cli'].includes(h)) UI.tab = h;
   if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
@@ -1761,7 +1762,7 @@ function render() {
   $('#menuBtn').hidden = !pieno;
   document.body.dataset.ruolo = logged ? st.ruolo || '' : '';
   const nR = st.mode === 'demo' ? 0 : nRichieste();
-  $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}${k === 'richieste' && nR ? `<span class="tabbadge">${nR}</span>` : ''}</button>`).join('');
+  $('#tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" data-act="tab" data-arg="${k}" aria-current="${UI.tab === k}">${svg(i)}${l}${k === 'richieste' && nR ? `<span class="tabbadge">${nR}</span>` : ''}${k === 'pose' && prevDaProgrammare('posa').length ? `<span class="tabbadge">${prevDaProgrammare('posa').length}</span>` : ''}</button>`).join('');
   const pend = store.pending();
   $('#sync').innerHTML = logged && !pieno ? '' : st.mode === 'demo' ? '<span class="st off">Prova</span>'
     : !logged ? '' : !st.online ? `<span class="st off">Offline${pend ? ' · ' + pend + ' da inviare' : ''}</span>`
@@ -2098,7 +2099,7 @@ function rPose() {
   const fatte = S.lavori.filter(l => l.data && fatta(l)).sort((a, b) => b.data.localeCompare(a.data));
   const meseF = fatte.filter(l => (l.dataFine || l.data).slice(0, 7) === TODAY.slice(0, 7)).length;
   const L = f === 'prog' ? prog : f === 'fatte' ? fatte.slice(0, 60) : f === 'tutte' ? [...prog, ...fatte.slice(0, 60)] : [];
-  return `${segLavori('pose')}
+  return `
   <div class="row between"><h2>Pose</h2><button class="btn primary" data-act="newLav" type="button">${svg('plus')} Nuova</button></div>
   <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${dp.length}</div></div><div class="kpi"><div class="l">Programmate</div><div class="v">${prog.length}</div></div><div class="kpi"><div class="l">Fatte nel mese</div><div class="v">${meseF}</div></div></div>
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="poseF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && dp.length ? ` <span class="badge">${dp.length}</span>` : ''}</button>`).join('')}</div>
@@ -2246,7 +2247,7 @@ function rInt() {
   const barra = sel ? `<div class="selbar intsel"><div><b>${sel.size}</b> ${sel.size === 1 ? 'selezionato' : 'selezionati'}</div>
     <div class="row"><input type="date" id="intSelData" class="btn sm" aria-label="Data da fissare"><button class="btn sm primary" data-act="intSelFissa" type="button" ${sel.size ? '' : 'disabled'}>Fissa la data</button>
     <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Metti in «Da programmare»</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
-  return `${segLavori('int')}<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
+  return `<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
   <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length - nDp}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
   ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
@@ -2872,7 +2873,7 @@ function menuHtml() {
   return `<div class="dr-head"><div><img class="dr-logo" src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
   <div class="tape" aria-hidden="true"></div>
   <div class="dr-sec">Sezioni</div>
-  ${item('menuGo', 'pose', 'cal', `Pose${prevDaProgrammare('posa').length ? ` <span class="badge">${prevDaProgrammare('posa').length}</span>` : ''}`, 'da programmare, programmate, fatte', UI.tab === 'pose')}
+  ${item('menuGo', 'cli', 'cli', 'Clienti', 'rubrica con lo storico di ogni cliente', UI.tab === 'cli')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'compilati, divisi per modulo e rivenditore', UI.tab === 'moduli')}
   ${item('menuGo', 'an', 'an', 'Analisi', 'statistiche di lavoro e materiale', UI.tab === 'an')}
   ${item('menuGo', 'van', 'van', 'Furgone', 'scadenze e chilometri', UI.tab === 'van')}
@@ -4893,7 +4894,7 @@ document.addEventListener('click', async e => {
     case 'calSpegni': { const pth = S.impostazioni?.calendario?.path; salvaImp({ calendario: null }); if (pth) store.removeFile(pth).catch(() => {}); toast('Calendario disattivato: puoi toglierlo anche dall\'iPhone'); render(); break; }
     case 'calCopia': { const u = S.impostazioni?.calendario?.url || ''; try { await navigator.clipboard.writeText(u); toast('Indirizzo copiato'); } catch { prompt('Copia questo indirizzo', u); } break; }
     case 'menuClose': chiudiMenu(); break;
-    case 'menuGo': UI.tab = arg; if (arg !== 'cal') UI.calCli = null; try { history.replaceState(null, '', '#' + arg); } catch {} render(); window.scrollTo({ top: 0 }); break;
+    case 'menuGo': if (arg === 'cli') UI.cliApri = null; UI.tab = arg; if (arg !== 'cal') UI.calCli = null; try { history.replaceState(null, '', '#' + arg); } catch {} render(); window.scrollTo({ top: 0 }); break;
     case 'setNotifiche': sheetNotifiche(); break;
     case 'setGiornata': sheetGiornata(); break;
     case 'setAnalisi': sheetAnalisi(); break;
