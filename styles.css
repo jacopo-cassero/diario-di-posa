@@ -689,3 +689,8 @@ details.cartella[open]>summary{margin-bottom:10px}
 .cantdet>summary{cursor:pointer;font-weight:600;font-size:.9rem;padding:4px 0}
 .legend .str{display:inline-block;font-size:.72rem;padding:1px 6px}
 .videobox video{width:100%;max-height:70vh;border-radius:10px;background:#000}
+
+/* Interventi / Pose */
+.seglav{margin-bottom:4px}
+.seglav button{flex:1}
+.posadata{margin:6px 2px -4px;font-weight:600;text-transform:capitalize}

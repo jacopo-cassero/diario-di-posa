@@ -62,7 +62,7 @@ const UI = { tab: 'oggi', month: TODAY.slice(0, 7), day: TODAY, intFilter: 'aper
 const TABS = [['oggi', 'Oggi', 'clock'], ['cal', 'Calendario', 'cal'], ['int', 'Interventi', 'int'], ['prev', 'Preventivi', 'prev'], ['cli', 'Clienti', 'cli'], ['cons', 'Consuntivi', 'conti'], ['richieste', 'Richieste', 'bell']];
 function readHash() {
   const h = location.hash.slice(1);
-  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van'].includes(h)) UI.tab = h;
+  if (TABS.some(t => t[0] === h) || ['set', 'cantieri', 'moduli', 'accessi', 'documenti', 'rapportiriv', 'an', 'van', 'pose'].includes(h)) UI.tab = h;
   if (h === 'fatture' || h === 'conti') UI.tab = 'cons';
   if (h === 'magazzino') { UI.tab = 'an'; }
 }
@@ -1720,6 +1720,7 @@ async function caricaImmagini() {
 
 /* ---------- render ---------- */
 function render() {
+  try { interventiDaPreventivi(); } catch (e) { console.warn(e); }
   TODAY = oggi();
   const st = store.st;
   const logged = st.auth === 'in' || st.auth === 'demo';
@@ -1748,7 +1749,7 @@ function render() {
   let h = '';
   if (st.mode === 'demo') h += `<div class="notice">Modalità prova: i dati restano solo su questo dispositivo. Dopo il collegamento al database si sincronizzano su tutti i tuoi dispositivi.</div>`;
   if (st.error) h += `<div class="notice">${esc(st.error)}</div>`;
-  h += ({ oggi: rOggi, cal: rCal, int: rInt, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
+  h += ({ oggi: rOggi, cal: rCal, int: rInt, pose: rPose, prev: rPrev, cli: rClienti, cantieri: rCantieri, moduli: rModuli, accessi: rAccessi, richieste: rRichieste, documenti: rDocumenti, rapportiriv: rRapportiRiv, cons: rCons, van: rVan, an: rAn, set: rSet })[UI.tab]();
   $('#main').innerHTML = h;
   hydrateFiles($('#main')); hydrateFotoRich($('#main')); hydrateFileCant($('#main')); if (UI.tab === "set") caricaBackup();
   if (UI.tab === 'oggi') vaiAlCantiere();
@@ -1919,6 +1920,8 @@ function sovrapposti(kind, id, giorni, d) {
 }
 /** Riferimento del lavoro (es. il cliente finale del rivenditore). */
 const rifDi = x => String(x?.riferimento ?? x?.clienteFinale ?? '').trim();
+/** 2026-11-19 → 19/11/2026 */
+const dIt = s => String(s || '').split('-').reverse().join('/');
 /** Nome dei PDF: «Consuntivo - Fam. Rossi», oppure «Fam. Rossi - Consuntivo» (Impostazioni › Dati azienda).
     Il riferimento è quello del cantiere; se manca, il nome del cliente. */
 function nomeDoc(tipo, rif, cliente) {
@@ -2014,6 +2017,59 @@ function rTodo() {
     ${p.map(x => `<button class="todo-item" data-act="${x.act}" data-arg="${x.arg || ''}" type="button"><span class="dot ${x.lvl}"></span><span><b>${esc(x.txt)}</b>${x.sub && /^domani/i.test(x.txt) ? `<br><span class="small muted">${esc(x.sub)}</span>` : ''}</span><span class="go">›</span></button>`).join('')}</section>`;
 }
 
+/* ---------- preventivi accettati → da programmare ----------
+   Intervento: diventa da solo un intervento «da programmare» (senza data), collegato al preventivo.
+   Posa: resta nella pagina Pose › Da programmare finché non tocchi «Programma la posa» e scegli i giorni. */
+const perLavoroDi = p => p.perLavoro === 'intervento' ? 'intervento' : 'posa';
+const prevDaProgrammare = tipo => S.preventivi.filter(p => p.stato === 'accettato' && perLavoroDi(p) === tipo && !p.nonProgrammare && !lavoroDiPrev(p) && !(tipo === 'intervento' && p.intCreato));
+function datiDaPrev(p) {
+  return { cliente: p.cliente?.nome || '', clienteId: p.clienteId || '', riferimento: p.riferimento || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', telefono: p.cliente?.telefono || '',
+    righe: p.righe || [], allegati: p.firmato ? [p.firmato] : [], preventivoId: p.id, amm: 'da_cons', ...(p.sede ? { sede: p.sede } : {}) };
+}
+let creandoInt = false;
+function interventiDaPreventivi() {
+  if (creandoInt || !GESTORE()) return;
+  // solo con i dati appena scaricati dal cloud (o in prova): così non si crea un doppione da un telefono non aggiornato
+  if (store.st.mode !== 'demo' && (!store.st.lastSync || store.st.syncing || !store.st.online || store.pending())) return;
+  const L = prevDaProgrammare('intervento'); if (!L.length) return;
+  creandoInt = true;
+  try {
+    for (const p of L) {
+      const id = 'int-prev-' + p.id;   // sempre lo stesso: anche da due telefoni ne nasce uno solo
+      if (!S.interventi.some(i => i.id === id || i.preventivoId === p.id)) {
+        store.put('interventi', id, { ...datiDaPrev(p), data: TODAY, dataProg: '', stato: 'aperto', urgenza: p.urgenza ? 'alta' : 'normale',
+          descrizione: [p.oggetto, ...(p.righe || []).map(r => r.descr).filter(Boolean)].filter(Boolean).join('\n').slice(0, 2000), costo: totPrev(p).imponibile, note: p.note || '' });
+      }
+      store.put('preventivi', p.id, { ...stripId(p), intCreato: id, lavoroId: id, lavoroKind: 'interventi' });
+    }
+  } finally { creandoInt = false; }
+}
+function cardPrevDaProg(p) {
+  const t = totPrev(p);
+  return `<div class="card"><div class="row between"><span class="t">${esc(rifDi(p) || p.cliente?.nome || 'Cliente')}${rifDi(p) && p.cliente?.nome ? `<small class="rif">${esc(p.cliente.nome)}</small>` : ''}</span><span class="price">${eur(t.imponibile)}</span></div>
+    <div class="small muted">Preventivo ${esc(p.numero || '')}${p.esitoRiv?.quando ? ` · accettato ${esc(quandoMod(p.esitoRiv.quando))}` : p.dataInvio ? ` · inviato il ${esc(dIt(p.dataInvio))}` : ''}${p.cantiere ? ' · ' + esc(p.cantiere) : ''}</div>
+    ${p.oggetto ? `<div class="small prewrap">${esc(corto(p.oggetto, 220))}</div>` : ''}
+    <div class="row"><button class="btn sm primary" data-act="posaDaPrev" data-id="${esc(p.id)}" type="button">${svg('cal', 'i')} Programma la posa</button><button class="btn sm" data-act="editPrev" data-id="${esc(p.id)}" type="button">Apri il preventivo</button><button class="btn sm ghost" data-act="posaNonServe" data-id="${esc(p.id)}" type="button">Non serve</button></div></div>`;
+}
+/** Pagina Pose: come Interventi, ma per le pose. */
+function rPose() {
+  const F = [['daprog', 'Da programmare'], ['prog', 'Programmate'], ['fatte', 'Fatte'], ['tutte', 'Tutte']];
+  const f = UI.poseFilter || 'daprog';
+  const dp = prevDaProgrammare('posa');
+  const fatta = l => giorniPosa(l).every(g => posaFatta(l, g)) || (l.dataFine || l.data) < TODAY;
+  const prog = S.lavori.filter(l => l.data && !fatta(l)).sort((a, b) => a.data.localeCompare(b.data));
+  const fatte = S.lavori.filter(l => l.data && fatta(l)).sort((a, b) => b.data.localeCompare(a.data));
+  const meseF = fatte.filter(l => (l.dataFine || l.data).slice(0, 7) === TODAY.slice(0, 7)).length;
+  const L = f === 'prog' ? prog : f === 'fatte' ? fatte.slice(0, 60) : f === 'tutte' ? [...prog, ...fatte.slice(0, 60)] : [];
+  return `${segLavori('pose')}
+  <div class="row between"><h2>Pose</h2><button class="btn primary" data-act="newLav" type="button">${svg('plus')} Nuova</button></div>
+  <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${dp.length}</div></div><div class="kpi"><div class="l">Programmate</div><div class="v">${prog.length}</div></div><div class="kpi"><div class="l">Fatte nel mese</div><div class="v">${meseF}</div></div></div>
+  <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="poseF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && dp.length ? ` <span class="badge">${dp.length}</span>` : ''}</button>`).join('')}</div>
+  ${f === 'daprog' ? `<div class="small muted">I preventivi di posa accettati, ancora senza giorni in calendario. Tocca «Programma la posa» quando sai quando andare.</div>
+    <div class="stack">${dp.map(cardPrevDaProg).join('') || '<div class="empty">Nessuna posa da programmare.</div>'}</div>`
+    : `<div class="stack">${L.map(l => `<div class="small muted posadata">${esc(fmtD(l.data, { weekday: 'short', day: 'numeric', month: 'short' }))}${l.dataFine && l.dataFine > l.data ? ' → ' + esc(fmtD(l.dataFine, { weekday: 'short', day: 'numeric', month: 'short' })) : ''}</div>${lavoroCard(l, l.data)}`).join('') || '<div class="empty">Niente qui.</div>'}</div>`}`;
+}
+const segLavori = qui => `<div class="seg seglav" role="group" aria-label="Interventi o pose"><button type="button" data-act="tab" data-arg="int" aria-pressed="${qui === 'int'}">Interventi</button><button type="button" data-act="tab" data-arg="pose" aria-pressed="${qui === 'pose'}">Pose${prevDaProgrammare('posa').length ? ` <span class="badge">${prevDaProgrammare('posa').length}</span>` : ''}</button></div>`;
 /* ---------- OGGI: la giornata, con il cantiere di adesso già aperto ---------- */
 const oraAdesso = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const lavoriDelGiorno = k => [...S.lavori.filter(l => inPosa(l, k)).map(x => ['lavori', x]), ...S.interventi.filter(i => intNelGiorno(i, k) && i.stato !== 'annullato').map(x => ['interventi', x])]
@@ -2153,7 +2209,7 @@ function rInt() {
   const barra = sel ? `<div class="selbar intsel"><div><b>${sel.size}</b> ${sel.size === 1 ? 'selezionato' : 'selezionati'}</div>
     <div class="row"><input type="date" id="intSelData" class="btn sm" aria-label="Data da fissare"><button class="btn sm primary" data-act="intSelFissa" type="button" ${sel.size ? '' : 'disabled'}>Fissa la data</button>
     <button class="btn sm" data-act="intSelLista" type="button" ${conData ? '' : 'disabled'}>Metti in «Da programmare»</button><button class="btn sm ghost" data-act="intSelEsci" type="button">Fine</button></div></div>` : '';
-  return `<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
+  return `${segLavori('int')}<div class="row between"><h2>Interventi</h2><div class="row">${L.some(open) ? `<button class="btn sm" data-act="intSelOn" type="button" ${sel ? 'hidden' : ''}>Seleziona</button>` : ''}<button class="btn primary" data-act="newInt" data-arg="" type="button">${svg('plus')} Nuovo</button></div></div>
   <div class="kpis"><div class="kpi"><div class="l">Da programmare</div><div class="v">${nDp}</div></div><div class="kpi"><div class="l">Da fare</div><div class="v">${ap.length - nDp}</div></div><div class="kpi"><div class="l">Urgenti</div><div class="v">${ap.filter(i => i.urgenza && i.urgenza !== 'normale').length}</div></div><div class="kpi"><div class="l">Fatti ${MESI[+TODAY.slice(5, 7) - 1]}</div><div class="v">${S.interventi.filter(i => i.stato === 'completato' && (i.dataProg || i.data || '').startsWith(TODAY.slice(0, 7))).length}</div></div></div>
   <div class="seg segscroll" role="group" aria-label="Filtro">${F.map(([k, l]) => `<button data-act="intF" data-arg="${k}" aria-pressed="${f === k}" type="button">${l}${k === 'daprog' && nDp ? ` <span class="badge">${nDp}</span>` : ''}</button>`).join('')}</div>
   ${f === 'daprog' ? `<div class="small muted">Gli interventi ancora senza data: restano qui finché non fissi il giorno. Tocca «Fissa data» quando sai quando andare.</div>` : ''}
@@ -2779,6 +2835,7 @@ function menuHtml() {
   return `<div class="dr-head"><div><img class="dr-logo" src="icone/logo-scritta.png?v=2" alt="Cassero Installazioni"><b>Diario di Posa</b><div class="small">${st.mode === 'demo' ? 'Modalità prova' : esc(st.email || '')}</div></div><button class="iconbtn" data-act="menuClose" type="button" aria-label="Chiudi menu">×</button></div>
   <div class="tape" aria-hidden="true"></div>
   <div class="dr-sec">Sezioni</div>
+  ${item('menuGo', 'pose', 'cal', `Pose${prevDaProgrammare('posa').length ? ` <span class="badge">${prevDaProgrammare('posa').length}</span>` : ''}`, 'da programmare, programmate, fatte', UI.tab === 'pose')}
   ${item('menuGo', 'moduli', 'clip2', 'Moduli', 'compilati, divisi per modulo e rivenditore', UI.tab === 'moduli')}
   ${item('menuGo', 'an', 'an', 'Analisi', 'statistiche di lavoro e materiale', UI.tab === 'an')}
   ${item('menuGo', 'van', 'van', 'Furgone', 'scadenze e chilometri', UI.tab === 'van')}
@@ -3692,7 +3749,8 @@ function sheetPrev(p) {
     ${p.esitoRiv ? `<div class="notice small ${p.esitoRiv.esito === 'accettato' ? 'ok' : ''}"><b>${p.esitoRiv.esito === 'accettato' ? 'Accettato' : 'Non accettato'} da ${esc(p.esitoRiv.chi || 'rivenditore')}</b> · ${esc(quandoMod(p.esitoRiv.quando))}${p.esitoRiv.nota ? `<div class="prewrap">${esc(p.esitoRiv.nota)}</div>` : ''}</div>` : ''}
     ${p.richiestaRiv && store.st.mode !== 'demo' ? '<div class="small muted">Nato dalla richiesta di un rivenditore: quando lo salvi con lo stato «Inviato», lui riceve l\'avviso e trova il PDF nella sua area riservata.</div>' : ''}
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
-    ${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}
+    <div class="g2">${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}${F('È un preventivo per', sel('perLavoro', [['posa', 'Una posa'], ['intervento', 'Un intervento']], p.perLavoro === 'intervento' ? 'intervento' : 'posa'))}</div>
+    <div class="small muted" style="margin-top:-6px">Quando è accettato, finisce da solo tra ${p.perLavoro === 'intervento' ? 'gli interventi' : 'le pose'} da programmare.</div>
     <div class="fieldset"><span class="fs-t">Cliente</span>
       ${campoCliente('cnome', 'Nome o ragione sociale', c.nome)}
       ${F('Riferimento', inp('riferimento', p.riferimento, 'text', 'placeholder="Es. Sig. Rossi (cliente finale)" list="riflist"'))}
@@ -3802,7 +3860,8 @@ function salvaPrev(fd) {
     numero: fd.get('numero').trim(), data: fd.get('data'), validita: n2(fd.get('validita')), stato: fd.get('stato'),
     cliente: { nome: fd.get('cnome').trim(), tipo: fd.get('ctipo'), indirizzo: fd.get('cindirizzo').trim(), piva: fd.get('cpiva').trim(), telefono: fd.get('ctel').trim(), email: fd.get('cemail').trim() },
     riferimento: String(fd.get('riferimento') || '').trim(), cantiere: fd.get('cantiere').trim(), oggetto: fd.get('oggetto').trim(), righe: conKm(leggiRighe(), fd), firmato: prevFirmato || null,
-    urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni') };
+    urgenza: !!fd.get('urgApp'), urgenzaPct: LIST().urgenzaPct, iva: fd.get('iva'), note: fd.get('note').trim(), condizioni: !!fd.get('condizioni'),
+    perLavoro: fd.get('perLavoro') === 'intervento' ? 'intervento' : 'posa' };
   if (d.stato !== 'bozza' && !d.dataInvio) d.dataInvio = TODAY;
   { const ora = !isNew && S.preventivi.find(q => q.id === p.id);
     if (ora?.esitoRiv && !p.esitoRiv && d.stato === (p.stato || 'bozza')) { d.esitoRiv = ora.esitoRiv; d.stato = ora.stato; }   // ha risposto mentre avevi la scheda aperta
@@ -4681,6 +4740,12 @@ document.addEventListener('click', async e => {
     case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
+    case 'poseF': UI.poseFilter = arg; render(); break;
+    case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: '', calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
+    case 'posaNonServe': {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo: non programmarla'; break; }
+      const p = S.preventivi.find(x => x.id === id); if (p) store.put('preventivi', id, { ...stripId(p), nonProgrammare: true }); toast('Tolta da «Da programmare»'); render(); break;
+    }
     case 'oggiVai': { const el = $('#o-' + CSS.escape(id)); if (el) { el.open = true; const y = el.getBoundingClientRect().top + window.scrollY - altezzaTesta(); window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' }); } break; }
     case 'diarioAdd': {
       const t = String($('#diarioTesto')?.value || '').trim(), g = $('#diarioData')?.value || TODAY;
@@ -4884,6 +4949,7 @@ document.addEventListener('change', e => {
   if (t.id === 'attach') { const fs = [...(t.files || [])]; t.value = ''; addFiles(fs); return; }
   if (['f_oraInizio', 'f_oraFine', 'f_tuttoGiorno'].includes(t.id)) setTimeout(disegnaOrariGiorni, 0);
   if (t.id === 'f_cliente' && $('#sedeBox')) { const cur = $('#f_sede')?.value || ''; $('#sedeBox').innerHTML = campoSede({ sede: cur }, t.value, null); }
+  if (t.id === 'f_perLavoro') { const n = t.closest('.g2')?.nextElementSibling; if (n?.classList.contains('small')) n.textContent = `Quando è accettato, finisce da solo tra ${t.value === 'intervento' ? 'gli interventi' : 'le pose'} da programmare.`; }
   if (t.id === 'f_orariDiversi') { const bx = $('#ogBox'); if (bx) { bx.hidden = !t.checked; if (t.checked) disegnaOrariGiorni(); } return; }
   if (t.id === 'f_tuttoGiorno') { const bx = $('#orariBox'); if (bx) { bx.hidden = t.checked; if (!t.checked && !$('#f_oraInizio').value) { $('#f_oraInizio').value = TUTTO_GIORNO[0]; } } return; }
   if (t.id === 'f_oraInizio' && $('#f_oraFine') && !$('#f_oraFine').value && t.value) { const h = Math.min(+t.value.slice(0, 2) + 2, 23); $('#f_oraFine').value = `${String(h).padStart(2, '0')}${t.value.slice(2)}`; }
