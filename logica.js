@@ -2,7 +2,7 @@
 // Nessuna dipendenza: funziona nel browser e in Node.
 
 export const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
-export const AMM = [['da_cons','Consuntivo da fare','bad'],['inv','Da inviare','warn'],['cons','Da fatturare','warn'],['fatt','Da incassare','in'],['pag','Incassato','ok']];
+export const AMM = [['da_cons','Consuntivo da fare','bad'],['inv','Da inviare','warn'],['acc','Da accettare','warn'],['cons','Da fatturare','warn'],['fatt','Da incassare','in'],['pag','Incassato','ok']];
 export const STATI = [['aperto','Da programmare','bad'],['programmato','Programmato','in'],['in_corso','In corso','warn'],['completato','Completato','ok'],['annullato','Annullato','']];
 export const URG = [['normale','Normale',''],['alta','Urgente','warn'],['critica','Molto urgente','bad']];
 export const CAT = [['materiale','Materiale da posa'],['furgone','Furgone (assic., bollo, tagliandi)'],['carburante','Carburante'],['attrezzatura','Attrezzatura'],['telefono','Telefono e ufficio'],['altro','Altro']];
@@ -93,6 +93,8 @@ export function promemoria(S, today = oggi(), momento = 'app') {
     if (N.consuntivi && dc.length) out.push({ lvl: 'bad', txt: `${dc.length} ${dc.length === 1 ? 'consuntivo da fare' : 'consuntivi da fare'}`, sub: eur(sum(dc, x => x.importo)), act: 'fatt' });
     const dv = all.filter(x => x.amm === 'inv');
     if (N.consuntivi && dv.length) out.push({ lvl: 'warn', txt: `${dv.length} ${dv.length === 1 ? 'consuntivo da inviare' : 'consuntivi da inviare'}`, sub: eur(sum(dv, x => x.importo)), act: 'fatt' });
+    const dvar = all.filter(x => x.amm === 'acc' && x.esitoCons?.esito === 'variazione');
+    if (N.consuntivi && dvar.length) out.push({ lvl: 'bad', txt: `${dvar.length} ${dvar.length === 1 ? 'consuntivo con variazione di prezzo chiesta' : 'consuntivi con variazione di prezzo chiesta'}`, sub: 'da correggere e rimandare', act: 'fatt' });
     const df = all.filter(x => x.amm === 'cons');
     if (N.fatture && df.length) out.push({ lvl: 'warn', txt: `${df.length} ${df.length === 1 ? 'lavoro da fatturare' : 'lavori da fatturare'}`, sub: eur(sum(df, x => x.importo)), act: 'fatt' });
     const di = all.filter(x => x.amm === 'fatt');

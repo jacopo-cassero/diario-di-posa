@@ -709,6 +709,27 @@ function esitoPrevRiv(d) {
   if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'bad'}">${d.esito === 'accettato' ? 'Accettato' : 'Non accettato'}</span>${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}</div>`;
   return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivPrevEsito" data-arg="accettato" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Accetto il preventivo</button><button class="btn sm" data-act="rivPrevEsito" data-arg="rifiutato" data-id="${esc(d.id)}" type="button">Non lo accetto</button></div>`;
 }
+/** Sotto un consuntivo nella mia area: «Accetto» / «Chiedo una variazione di prezzo», oppure la risposta già data. */
+function esitoConsRiv(d) {
+  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'warn'}">${d.esito === 'accettato' ? 'Accettato' : 'Variazione chiesta'}</span>${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}${d.esito === 'variazione' ? '<div class="muted">L\'installatore corregge il consuntivo e te lo rimanda qui.</div>' : ''}</div>`;
+  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivConsEsito" data-arg="accettato" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Accetto il consuntivo</button><button class="btn sm" data-act="rivConsEsito" data-arg="variazione" data-id="${esc(d.id)}" type="button">Chiedo una variazione di prezzo</button></div>`;
+}
+function sheetEsitoCons(d, scelta) {
+  const si = scelta === 'accettato';
+  openSheet(si ? 'Accetti il consuntivo?' : 'Variazione di prezzo', `
+    <div class="small"><b>${esc(d.titolo || 'Consuntivo')}</b></div>
+    <div class="small muted">${si ? 'L\'installatore riceve subito l\'avviso e il consuntivo risulta accettato.' : 'Scrivi il prezzo che avete concordato o cosa va cambiato: l\'installatore riceve l\'avviso, corregge il consuntivo e te lo rimanda qui.'}</div>
+    ${F(si ? 'Note per l\'installatore (facoltativo)' : 'Variazione che chiedi', `<textarea name="enota" id="f_enota" rows="3" maxlength="1000" ${si ? '' : 'required'} placeholder="${si ? 'Es. tutto ok, procedi con la fattura' : 'Es. come d\'accordo al telefono, 1.200 € invece di 1.350 €'}"></textarea>`)}`,
+  async fd => {
+    const nota = String(fd.get('enota') || '').trim();
+    if (!si && !nota) throw Object.assign(new Error('vuoto'), { userMsg: 'Scrivi la variazione che chiedi' });
+    let r;
+    try { r = await store.rpc('rispondi_consuntivo', { documento: d.id, scelta, messaggio: nota }); }
+    catch (e) { if (/find the function|schema cache|does not exist/i.test(e.message || '')) e.userMsg = 'Non è ancora attivo: avvisa l\'installatore.'; throw e; }
+    toast(String(r || '').startsWith('gia:') ? 'Il consuntivo è già fatturato: per cambiarlo chiama l\'installatore' : si ? 'Consuntivo accettato: l\'installatore è avvisato' : 'Richiesta mandata all\'installatore');
+    RIV.docCarico = false; render();
+  }, { saveLabel: si ? 'Sì, accetto' : 'Manda la richiesta' });
+}
 function sheetEsitoPrev(d, scelta) {
   const si = scelta === 'accettato';
   openSheet(si ? 'Accetti il preventivo?' : 'Non accetti il preventivo?', `
@@ -893,7 +914,7 @@ function rRivMieiDoc() {
   const visti = new Set(), M = (RIV.mieiDoc || []).filter(d => { const k = chiaveDoc(d); if (visti.has(k)) return false; visti.add(k); return true; }).map(d => ({ ...d, tipo: tipoDocRiv(d) }));
   const tipi = [...new Set(M.map(d => d.tipo))].sort((a, b) => ORD_TIPI(a) - ORD_TIPI(b) || a.localeCompare(b));
   const card0 = d => `<button type="button" class="card docriv" data-act="rivMioDoc" data-id="${esc(d.id)}"><div class="row between"><span class="t">${esc(d.titolo)}</span>${svg('doc', 'i')}</div><div class="small muted">${d.data ? fmtD(d.data, { day: 'numeric', month: 'long', year: 'numeric' }) + ' · ' : ''}PDF</div></button>`;
-  const card = d => d.kind === 'preventivi' && esitoPrevRiv(d) ? `<div class="docesito">${card0(d)}${esitoPrevRiv(d)}</div>` : card0(d);
+  const card = d => d.kind === 'preventivi' && esitoPrevRiv(d) ? `<div class="docesito">${card0(d)}${esitoPrevRiv(d)}</div>` : d.consuntivo ? `<div class="docesito">${card0(d)}${esitoConsRiv(d)}</div>` : card0(d);
   return `<div class="row between"><h2>I tuoi documenti</h2><button class="btn sm" data-act="rivDocAgg" type="button">Aggiorna</button></div>
   <div class="small muted">I documenti dei tuoi lavori in PDF: preventivi, rapporti di cantiere, verbali di fine lavori e moduli firmati.</div>
   ${M.length ? tipi.map(t => { const L = M.filter(d => d.tipo === t); return `<details class="cartella" ${tipi.length === 1 ? 'open' : ''}><summary>${svg('folder', 'i')} <b>${esc(t)}</b> <span class="chip">${L.length}</span></summary><div class="stack">${L.map(card).join('')}</div></details>`; }).join('') : '<div class="empty small">Ancora nessun documento. Quando chiudo un tuo lavoro, il rapporto e i verbali compaiono qui.</div>'}`;
@@ -1492,6 +1513,7 @@ document.addEventListener('click', async e => {
     case 'rivPrevNuovo': sheetPrevRiv(); break;
     case 'rivPrevPdf': { const d = (RIV.prevDoc || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevEsito': { const d = (RIV.prevDoc || []).find(x => x.id === id) || (RIV.mieiDoc || []).find(x => x.id === id); if (d) sheetEsitoPrev(d, b.dataset.arg); break; }
+    case 'rivConsEsito': { const d = (RIV.mieiDoc || []).find(x => x.id === id); if (d) sheetEsitoCons(d, b.dataset.arg); break; }
     case 'rivPrevMod': { const r = (RIV.prev || []).find(x => x.id === id); if (r) sheetPrevRiv(r); break; }
     case 'richPrevVista': {
       b.disabled = true;
@@ -2255,12 +2277,13 @@ function rInt() {
   <div class="stack">${L.slice(0, sel ? L.length : quanti('int-' + f)).map(i => sel ? `<label class="selcard"><input type="checkbox" class="intChk" data-id="${esc(i.id)}" ${sel.has(i.id) ? 'checked' : ''} ${open(i) ? '' : 'disabled'}>${intCard(i)}</label>` : intCard(i)).join('') || `<div class="empty">${f === 'daprog' ? 'Nessun intervento da programmare.<br><span class="small">Quando crei un intervento senza data intervento, finisce qui.</span>' : 'Nessun intervento in questa lista.<br><span class="small">Segna qui riparazioni, regolazioni e chiamate in garanzia, con urgenza e stato.</span>'}</div>`}${sel ? '' : altri('int-' + f, L.length)}</div>`;
 }
 
-const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', cons: 'Segna fatturato', fatt: 'Segna incassato' };
+const PROSSIMO = { da_cons: 'Segna consuntivo fatto', inv: 'Segna inviato', acc: 'Segna accettato', cons: 'Segna fatturato', fatt: 'Segna incassato' };
 function rCons() {
+  if (store.st.lastSync && !consCollegati) setTimeout(collegaConsVecchi, 0);
   let h = `<div class="row between"><h2>Consuntivi</h2></div>`;
   {
     const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importoCons ?? x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
-    h += `<div class="small muted">Ogni lavoro passa per cinque tappe: consuntivo da fare, da inviare, da fatturare, da incassare, incassato. Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
+    h += `<div class="small muted">Ogni lavoro passa per sei tappe: consuntivo da fare, da inviare, da accettare, da fatturare, da incassare, incassato. Quando il rivenditore accetta il consuntivo dalla sua area, passa da solo in «Da fatturare». Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
     AMM.forEach(([k, l, c]) => {
       let L = all.filter(x => (x.amm || 'da_cons') === k);
       // i pagati: solo gli ultimi 60 giorni, in una sezione chiusa
@@ -2273,7 +2296,8 @@ function rCons() {
       if (k === 'pag') { h += `<details class="stack pagati" ${UI.pagAperti ? 'open' : ''}><summary>${testa}</summary>${voci.slice(0, quanti('cons-' + k)).map(v => v.h || cardFatt(v.x, k, imp)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</details>`; return; }
       h += `<section class="stack">${testa}
       ${voci.slice(0, quanti('cons-' + k)).map(v => v.h || ((x) => `<div class="card tap" ${tapLavCons(x)}><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.consRap ? ` · consuntivo con il rapporto del ${fmtD(x.consRap, { day: 'numeric', month: 'short' })}` : x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
-        <div class="row">${['da_cons', 'inv'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k === 'inv' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</section>`;
+        ${k === 'acc' || k === 'cons' ? esitoConsHtml(x) : ''}
+        <div class="row">${['da_cons', 'inv', 'acc'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k !== 'da_cons' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</section>`;
     });
   }
   return h;
@@ -4398,15 +4422,15 @@ async function creaRapportoPdf(kind, id, { prezzi = false, cons = false, foto = 
   catch (e) { console.warn(e); toast('Non sono riuscito a creare il rapporto'); return; }
   const dIt = s => String(s || '').split('-').reverse().join('-');
   const nome = nomeDoc('Rapporto', r.riferimento, x.cliente) + '.pdf';
-  mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: nomeDoc('Rapporto', r.riferimento, x.cliente), data: r.data, lavoro_id: x.id, kind });
-  if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r);
+  mostraPdf(bytes, nome, 'Rapporto di cantiere', null, { x, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo: nomeDoc('Rapporto', r.riferimento, x.cliente), data: r.data, lavoro_id: x.id, kind, ...(cons || x.consRap ? { consuntivo: refCons([[kind, x]]) } : {}) });
+  if (pubblica.length) pubblicaRapporto(kind, x, bytes, pubblica, r, cons || !!x.consRap);
   if (cons) rapportoComeCons(kind, x, r, pubblica.length > 0);
 }
 /** Il rapporto con i prezzi fa da consuntivo: il lavoro entra (o avanza) nella pagina Consuntivi con il totale del rapporto. */
 function rapportoComeCons(kind, x, r, giaInviato) {
   const tot = totali({ righe: r.righe || [], iva: r.iva }, LIST()).imponibile, base = n2(kind === 'lavori' ? x.importo : x.costo);
   const prima = x.amm || 'da_cons';
-  const amm = prima === 'da_cons' ? (giaInviato ? 'cons' : 'inv') : prima === 'inv' && giaInviato ? 'cons' : prima;
+  const amm = prima === 'da_cons' ? (giaInviato ? 'acc' : 'inv') : prima === 'inv' && giaInviato ? 'acc' : prima;
   const d = { ...stripId(x), amm, consRap: TODAY, iva: r.iva };
   if ((r.righe || []).length && Math.abs(tot - base) > 0.009) d.importoCons = tot; else if (!x.consAgg?.sconto && !x.consAgg?.totale) delete d.importoCons;
   if (!(tot > 0 || base > 0)) { toast('Il rapporto non ha prezzi: aggiungi le voci con il prezzo per usarlo come consuntivo'); return; }
@@ -4420,7 +4444,7 @@ function rapportoComeCons(kind, x, r, giaInviato) {
  * Mette un PDF (non modificabile) nell'area riservata dei rivenditori: «I tuoi documenti».
  * Se lo stesso documento era già stato pubblicato, viene sostituito.
  */
-async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = null, kind = null }, rivIds) {
+async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = null, kind = null, consuntivo = null }, rivIds) {
   const blob = new Blob([bytes], { type: 'application/pdf' });
   // più accessi della stessa azienda: una sola cartella (quella del primo accesso); tolgo le copie vecchie negli altri
   const G = rivIds.map(r => gruppoDi(r)).filter(Boolean);
@@ -4429,15 +4453,19 @@ async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = 
   if (vecchie.length) store.tabella('documenti_cliente').delete().in('id', vecchie).then(() => {}, () => {});
   for (const rid of rivIds) {
     const path = await store.caricaFisso(`rivenditori/${rid}/${cartella}/${chiave}.pdf`, blob);
-    const { error } = await store.tabella('documenti_cliente').upsert({ id: `${chiave}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id, kind, data: data || TODAY, creato: new Date().toISOString() });
+    const riga = { id: `${chiave}-${rid}`, titolare: path.split('/')[0], rivenditore: rid, titolo, path, lavoro_id, kind, data: data || TODAY, creato: new Date().toISOString() };
+    // consuntivo: il rivenditore lo può accettare; se lo rimando corretto, la risposta di prima si azzera
+    let { error } = await store.tabella('documenti_cliente').upsert(consuntivo ? { ...riga, consuntivo, esito: null, esito_quando: null, esito_nota: null } : riga);
+    if (error && consuntivo && /consuntivo|esito|column|schema cache/i.test(error.message || '')) ({ error } = await store.tabella('documenti_cliente').upsert(riga));
     if (error) throw Object.assign(error, { userMsg: /relation|does not exist|schema cache/i.test(error.message || '') ? 'Per pubblicare i documenti lancia prima lo script area_rivenditore.sql' : 'Non sono riuscito a pubblicare il documento' });
   }
   if (RAPP.lista) RAPP.lista = null;
+  if (consuntivo) consMandato(consuntivo);
 }
-async function pubblicaRapporto(kind, x, bytes, rivIds, r) {
+async function pubblicaRapporto(kind, x, bytes, rivIds, r, comeCons = false) {
   try {
     const titolo = `Rapporto di cantiere · ${r.data ? fmtD(r.data, { day: 'numeric', month: 'short', year: 'numeric' }) : 'senza data'}${r.riferimento ? ' · Rif. ' + r.riferimento : r.cantiere ? ' · ' + r.cantiere : ''}`;
-    await pubblicaPdf({ bytes, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo, data: r.data, lavoro_id: x.id, kind }, rivIds);
+    await pubblicaPdf({ bytes, chiave: `rap-${x.id}`, cartella: 'rapporti', titolo, data: r.data, lavoro_id: x.id, kind, ...(comeCons ? { consuntivo: refCons([[kind, x]]) } : {}) }, rivIds);
     const cur = S[kind].find(y => y.id === x.id); if (cur) store.put(kind, x.id, { ...stripId(cur), rapportoPubblicato: TODAY });
     toast(rivIds.length === 1 ? 'Rapporto messo nell\'area del rivenditore' : `Rapporto messo nell'area di ${rivIds.length} rivenditori`);
   } catch (e) { console.warn(e); toast(e.userMsg || 'Pubblicazione non riuscita: controlla la rete e riprova'); }
@@ -4461,7 +4489,7 @@ function apriPdf(tipo, doc, indietro) {
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
   pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo, bytes,
-    pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : tipo === 'consuntivo' ? { ...pubGenerico(nome, { cliente: doc.cliente?.nome, clienteId: doc.clienteId || trovaCliente(doc.cliente?.nome)?.id }, 'consuntivi'), chiave: `cons-${hashTesto([doc.cliente?.nome, doc.data, doc.dataFine].join('|'))}`, data: doc.dataFine || doc.data || TODAY } : null };
+    pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : tipo === 'consuntivo' ? { ...pubGenerico(nome, { cliente: doc.cliente?.nome, clienteId: doc.clienteId || trovaCliente(doc.cliente?.nome)?.id }, 'consuntivi'), chiave: `cons-${hashTesto([doc.cliente?.nome, doc.data, doc.dataFine].join('|'))}`, data: doc.dataFine || doc.data || TODAY, consuntivo: doc.consRef || null } : null };
   if (pdfCorrente.pub && GESTORE() && store.st.mode !== 'demo') setTimeout(() => boxPubblica(), 0);
   let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
   openSheet(tipo === 'preventivo' ? 'Preventivo pronto' : 'Consuntivo pronto', `
@@ -4582,6 +4610,42 @@ function sheetRinnova(k) {
 const selStato = (kind, id, k, gruppo = '') => `<select class="btn sm statosel" data-change="ammSet" data-kind="${kind}" data-id="${esc(id)}" data-gruppo="${esc(gruppo)}" aria-label="Cambia stato">${AMM.map(([v, l]) => `<option value="${v}" ${v === k ? 'selected' : ''}>${v === k ? 'Stato: ' : '↩ '}${l}</option>`).join('')}</select>`;
 const tapLavCons = x => `data-act="consTap" data-arg="${x._k}" data-id="${esc(x.id)}" role="button" tabindex="0" aria-label="Apri la scheda del lavoro di ${esc(x.cliente || '')}"`;
 const cardFatt = (x, k, imp) => `<div class="card tap" ${tapLavCons(x)}><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}</div><div class="row">${selStato(x._k, x.id, k)}</div></div>`;
+/** La risposta del rivenditore al consuntivo (accettato o variazione di prezzo chiesta). */
+function esitoConsHtml(x) {
+  const e = x?.esitoCons; if (!e?.esito) return '';
+  if (e.esito === 'accettato') return `<div class="small"><span class="chip ok">Accettato</span> da ${esc(e.chi || 'rivenditore')}${e.quando ? ' · ' + esc(quandoMod(e.quando)) : ''}${e.nota ? ` · <span class="muted">${esc(corto(e.nota, 120))}</span>` : ''}</div>`;
+  return `<div class="notice small"><b>Variazione di prezzo chiesta da ${esc(e.chi || 'rivenditore')}</b>${e.quando ? ' · ' + esc(quandoMod(e.quando)) : ''}${e.nota ? `<div class="prewrap">${esc(e.nota)}</div>` : ''}<div class="muted">Correggi il prezzo nel consuntivo, rifai il PDF e rimettilo nella sua cartella: gli torna il tasto «Accetto».</div></div>`;
+}
+/** A quali lavori si riferisce un consuntivo: «l:<id>|i:<id>». */
+const refCons = L => L.map(([k, x]) => (k === 'lavori' ? 'l:' : 'i:') + x.id).join('|');
+const lavoriDaRef = ref => String(ref || '').split('|').map(t => { const k = t[0] === 'l' ? 'lavori' : t[0] === 'i' ? 'interventi' : null; const x = k && S[k].find(y => y.id === t.slice(2)); return x ? [k, x] : null; }).filter(Boolean);
+/** Consuntivo messo nella cartella del rivenditore: è inviato, aspetta la sua risposta (una variazione vecchia si chiude). */
+function consMandato(ref) {
+  for (const [k, x] of lavoriDaRef(ref)) {
+    const a = x.amm || 'da_cons', d = { ...stripId(x) };
+    if (['da_cons', 'inv'].includes(a)) d.amm = 'acc';
+    if (d.esitoCons) delete d.esitoCons;
+    if (d.amm !== a || x.esitoCons) store.put(k, x.id, d);
+  }
+}
+/** I consuntivi messi nelle cartelle prima di questa versione: li collego ai loro lavori, così il rivenditore li può accettare. */
+let consCollegati = false;
+async function collegaConsVecchi() {
+  if (consCollegati || !GESTORE() || store.st.mode === 'demo' || !navigator.onLine) return; consCollegati = true;
+  try {
+    const { data, error } = await store.tabella('documenti_cliente').select('id').like('path', '%/consuntivi/%').is('consuntivo', null).limit(200);
+    if (error || !data?.length) return;
+    const chiavi = new Map(), gruppi = new Set();
+    for (const k of ['lavori', 'interventi']) for (const x of S[k]) {
+      if (!['inv', 'acc', 'cons'].includes(x.amm)) continue;
+      if (x.gruppoCons?.id) { if (gruppi.has(x.gruppoCons.id)) continue; gruppi.add(x.gruppoCons.id);
+        const L = lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ kind: kk, x: y, d: kk === 'lavori' ? y.data : (y.dataProg || y.data) })).sort((a, b) => String(a.d).localeCompare(b.d));
+        try { const d = docMulti(L, x.gruppoCons.iva || AZ().ivaPredefinita); chiavi.set(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons(L.map(j => [j.kind, j.x]))); } catch {}
+      } else { try { const d = docDaLavoro(x, k, AZ()); chiavi.set(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons([[k, x]])); } catch {} }
+    }
+    for (const r of data) { const c = [...chiavi.keys()].find(c => r.id.startsWith(c + '-')); if (c) await store.tabella('documenti_cliente').update({ consuntivo: chiavi.get(c) }).eq('id', r.id); }
+  } catch (e) { console.warn(e); }
+}
 /** Una sola fattura per il consuntivo di più giorni: i lavori avanzano insieme. */
 function cardGruppoCons(gg, k) {
   const g = gg[0].gruppoCons, sconto = Math.round((n2(g.lordo) - n2(g.imponibile)) * 100) / 100;
@@ -4589,6 +4653,7 @@ function cardGruppoCons(gg, k) {
   return `<div class="card gruppocons"><div class="row between"><span class="t">${esc(g.cliente || gg[0].cliente || '')}</span><span class="price">${eur(g.imponibile)}</span></div>
     <div class="small"><span class="chip in">Consuntivo unico</span> ${gg.length} ${gg.length === 1 ? 'lavoro' : 'lavori'} · ${g.dal === g.al ? fmtD(g.dal) : `dal ${fmtD(g.dal, { day: 'numeric', month: 'short' })} al ${fmtD(g.al, { day: 'numeric', month: 'short', year: 'numeric' })}`}</div>
     <div class="small muted">${Math.abs(sconto) > 0.009 ? `Prezzo pieno <s>${eur(g.lordo)}</s> · ${sconto > 0 ? 'sconto' : 'in più'} ${eur(Math.abs(sconto))} · ` : ''}${ivaL[2] > 0 ? `totale IVA compresa ${eur(g.totale)}` : esc(ivaL[1])}</div>
+    ${k === 'acc' || k === 'cons' ? esitoConsHtml(gg.find(x => x.esitoCons) || gg[0]) : ''}
     <details class="small"><summary>Lavori compresi</summary>${gg.map(x => `<div>${fmtD(x._d, { day: 'numeric', month: 'short' })} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''} · ${eur(x.importoCons ?? x.importo)}</div>`).join('')}</details>
     <div class="row">${k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${PROSSIMO[k]}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
 }
@@ -4658,7 +4723,7 @@ document.addEventListener('click', async e => {
     case 'selMode': UI.sel = new Set(); render(); toast('Tocca i giorni da mettere nel consuntivo'); break;
     case 'selAnnulla': UI.sel = null; render(); break;
     case 'selCons': sheetConsMulti(); break;
-    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); cmCtx.firma = $('#f_consFirma')?.value || ''; apriPdf('consuntivo', { ...conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), firma: cmCtx.firma, firmaData: cmCtx.firma ? TODAY : '' }, () => sheetConsMulti(cmCtx.adj)); break; }
+    case 'consMultiPdf': { const sc = jobsScelti(); if (!sc.length) { toast('Scegli almeno un lavoro'); break; } cmCtx.adj = leggiAgg(); cmCtx.firma = $('#f_consFirma')?.value || ''; apriPdf('consuntivo', { ...conAggiustamenti(docMulti(sc, $('#f_iva')?.value || AZ().ivaPredefinita), cmCtx.adj), firma: cmCtx.firma, firmaData: cmCtx.firma ? TODAY : '', consRef: refCons(sc.map(j => [j.kind, j.x])) }, () => sheetConsMulti(cmCtx.adj)); break; }
     case 'intF': UI.intFilter = arg; render(); break;
     case 'prevCollTutti': filtraPrevColl(true); break;
     case 'mostraAltriLav': { const a = $('#altriLav'); if (a) a.hidden = false; b.remove(); break; }
@@ -4787,7 +4852,7 @@ document.addEventListener('click', async e => {
     case 'rinnova': sheetRinnova(arg); break;
     case 'cons': sheetCons(arg, id); break;
     case 'amm': advance(arg, id); render(); break;
-    case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'cons' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
+    case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'acc' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
     case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
@@ -4951,7 +5016,7 @@ document.addEventListener('click', async e => {
       apriPdf('preventivo', saved, () => sheetPrev(S.preventivi.find(x => x.id === saved.id) || saved));
       break;
     }
-    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const adj = leggiAgg(), fir = $('#f_consFirma')?.value || '', firData = fir ? (fir === x.consFirma && x.consFirmaData || TODAY) : ''; if (JSON.stringify(adj) !== JSON.stringify(x.consAgg || {}) || fir !== (x.consFirma || '')) store.put(arg, id, { ...stripId(x), consAgg: adj, consFirma: fir, consFirmaData: firData }); const doc0 = docDaLavoro(x, arg, AZ()); doc0.firma = fir; doc0.firmaData = firData; doc0.iva = $('#f_iva')?.value || doc0.iva; apriPdf('consuntivo', conAggiustamenti(doc0, adj), () => sheetCons(arg, id)); break; }
+    case 'consPdf': { const x = S[arg].find(r => r.id === id); if (!x) break; const adj = leggiAgg(), fir = $('#f_consFirma')?.value || '', firData = fir ? (fir === x.consFirma && x.consFirmaData || TODAY) : ''; if (JSON.stringify(adj) !== JSON.stringify(x.consAgg || {}) || fir !== (x.consFirma || '')) store.put(arg, id, { ...stripId(x), consAgg: adj, consFirma: fir, consFirmaData: firData }); const doc0 = docDaLavoro(x, arg, AZ()); doc0.firma = fir; doc0.firmaData = firData; doc0.iva = $('#f_iva')?.value || doc0.iva; doc0.consRef = x.gruppoCons?.id ? refCons(lavoriGruppo(x.gruppoCons.id)) : refCons([[arg, x]]); apriPdf('consuntivo', conAggiustamenti(doc0, adj), () => sheetCons(arg, id)); break; }
     case 'pdfShare': if (pdfCorrente) navigator.share({ files: [pdfCorrente.file], title: pdfCorrente.file.name }).catch(err => { if (err.name !== 'AbortError') toast('Condivisione non riuscita: usa "Apri il PDF"'); }); break;
     case 'pdfDown': if (pdfCorrente) { const a = Object.assign(document.createElement('a'), { href: pdfCorrente.url, download: pdfCorrente.file.name }); document.body.appendChild(a); a.click(); a.remove(); } break;
     case 'pdfBack': if (pdfCorrente?.indietro) pdfCorrente.indietro(); break;
