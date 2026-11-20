@@ -4458,6 +4458,11 @@ async function pubblicaPdf({ bytes, chiave, cartella, titolo, data, lavoro_id = 
     let { error } = await store.tabella('documenti_cliente').upsert(consuntivo ? { ...riga, consuntivo, esito: null, esito_quando: null, esito_nota: null } : riga);
     if (error && consuntivo && /consuntivo|esito|column|schema cache/i.test(error.message || '')) ({ error } = await store.tabella('documenti_cliente').upsert(riga));
     if (error) throw Object.assign(error, { userMsg: /relation|does not exist|schema cache/i.test(error.message || '') ? 'Per pubblicare i documenti lancia prima lo script area_rivenditore.sql' : 'Non sono riuscito a pubblicare il documento' });
+    // lo stesso consuntivo messo prima con un altro nome: tolgo la copia vecchia, così ne resta uno solo
+    if (consuntivo) try {
+      const { data: doppi } = await store.tabella('documenti_cliente').select('id,path').eq('rivenditore', rid).eq('consuntivo', consuntivo);
+      for (const d of (doppi || []).filter(d => d.id !== riga.id)) { await store.tabella('documenti_cliente').delete().eq('id', d.id); if (d.path !== path) store.removeFile(d.path).catch(() => {}); }
+    } catch {}
   }
   if (RAPP.lista) RAPP.lista = null;
   if (consuntivo) consMandato(consuntivo);
@@ -4489,7 +4494,7 @@ function apriPdf(tipo, doc, indietro) {
   const file = new File([bytes], nome, { type: 'application/pdf' });
   if (pdfCorrente?.url) URL.revokeObjectURL(pdfCorrente.url);
   pdfCorrente = { file, url: URL.createObjectURL(file), indietro, doc, tipo, bytes,
-    pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : tipo === 'consuntivo' ? { ...pubGenerico(nome, { cliente: doc.cliente?.nome, clienteId: doc.clienteId || trovaCliente(doc.cliente?.nome)?.id }, 'consuntivi'), chiave: `cons-${hashTesto([doc.cliente?.nome, doc.data, doc.dataFine].join('|'))}`, data: doc.dataFine || doc.data || TODAY, consuntivo: doc.consRef || null } : null };
+    pub: tipo === 'preventivo' && doc.id ? pubPrev(doc) : tipo === 'consuntivo' ? { ...pubGenerico(nome, { cliente: doc.cliente?.nome, clienteId: doc.clienteId || trovaCliente(doc.cliente?.nome)?.id }, 'consuntivi'), chiave: doc.consRef ? `cons-${hashTesto(doc.consRef)}` : `cons-${hashTesto([doc.cliente?.nome, doc.data, doc.dataFine].join('|'))}`, data: doc.dataFine || doc.data || TODAY, consuntivo: doc.consRef || null } : null };
   if (pdfCorrente.pub && GESTORE() && store.st.mode !== 'demo') setTimeout(() => boxPubblica(), 0);
   let share = false; try { share = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
   openSheet(tipo === 'preventivo' ? 'Preventivo pronto' : 'Consuntivo pronto', `
@@ -4635,14 +4640,17 @@ async function collegaConsVecchi() {
   try {
     const { data, error } = await store.tabella('documenti_cliente').select('id').like('path', '%/consuntivi/%').is('consuntivo', null).limit(200);
     if (error || !data?.length) return;
-    const chiavi = new Map(), gruppi = new Set();
+    const chiavi = new Map(), gruppi = new Set(), doppie = new Set();
+    const metti = (c, ref) => { if (chiavi.has(c) && chiavi.get(c) !== ref) doppie.add(c); chiavi.set(c, ref); };
     for (const k of ['lavori', 'interventi']) for (const x of S[k]) {
       if (!['inv', 'acc', 'cons'].includes(x.amm)) continue;
       if (x.gruppoCons?.id) { if (gruppi.has(x.gruppoCons.id)) continue; gruppi.add(x.gruppoCons.id);
         const L = lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ kind: kk, x: y, d: kk === 'lavori' ? y.data : (y.dataProg || y.data) })).sort((a, b) => String(a.d).localeCompare(b.d));
-        try { const d = docMulti(L, x.gruppoCons.iva || AZ().ivaPredefinita); chiavi.set(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons(L.map(j => [j.kind, j.x]))); } catch {}
-      } else { try { const d = docDaLavoro(x, k, AZ()); chiavi.set(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons([[k, x]])); } catch {} }
+        try { const d = docMulti(L, x.gruppoCons.iva || AZ().ivaPredefinita); metti(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons(L.map(j => [j.kind, j.x]))); } catch {}
+      } else { try { const d = docDaLavoro(x, k, AZ()); metti(`cons-${hashTesto([d.cliente?.nome, d.data, d.dataFine].join('|'))}`, refCons([[k, x]])); } catch {} }
     }
+    // due lavori dello stesso cliente nello stesso giorno: non so quale sia, non collego (lo collega il prossimo «Metti nella cartella»)
+    for (const c of doppie) chiavi.delete(c);
     for (const r of data) { const c = [...chiavi.keys()].find(c => r.id.startsWith(c + '-')); if (c) await store.tabella('documenti_cliente').update({ consuntivo: chiavi.get(c) }).eq('id', r.id); }
   } catch (e) { console.warn(e); }
 }
