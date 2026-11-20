@@ -1,4 +1,4 @@
-2026-11-20T15:40:13.630Z
+2026-11-20T15:41:20.673Z
 SUPABASE_URL: presente (40 caratteri, inizia con "https://uolc…")
 SUPABASE_SERVICE_ROLE_KEY: presente (41 caratteri, inizia con "sb_…")
 VAPID_PUBLIC_KEY: presente (87 caratteri, inizia con "BHJ…")
