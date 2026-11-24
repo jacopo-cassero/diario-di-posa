@@ -3476,7 +3476,41 @@ function calcoloDi(l) {
   return r.length && r.every(x => x.unita === 'ora') ? 'ore' : 'pezzo';
 }
 
+/* ===== Cantiere chiuso: una pagina sola, con documenti firmati, foto e diario ===== */
+/** Chiuso = consuntivo accettato (da fatturare, da incassare o incassato). */
+const cantiereChiuso = x => !!x && GESTORE() && !x.forse && ['cons', 'fatt', 'pag'].includes(x.amm);
+function sheetChiuso(kind, x) {
+  const pos = kind === 'lavori', quando = pos ? (x.dataFine && x.dataFine > x.data ? `dal ${dIt(x.data)} al ${dIt(x.dataFine)}` : dIt(x.data)) : dIt(x.dataProg || x.data);
+  const amm = ammOf(x.amm), imp = n2(pos ? (x.importoCons ?? x.importo) : (x.importoCons ?? x.costo));
+  const all = (x.allegati || []).filter(f => f && f.path), foto = all.filter(eImmagine), file = all.filter(f => !eImmagine(f));
+  const p = x.preventivoId ? S.preventivi.find(y => y.id === x.preventivoId) : null;
+  const mods = S.moduli.filter(m => m.ref?.id === x.id);
+  const rif = rifDi(x), cfin = x.clienteFinale || (rif && rif !== x.cliente ? rif : '');
+  const doc = [];
+  if (p) doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${p.firmato?.path ? 'apriFirmatoTit' : 'editPrev'}" ${p.firmato?.path ? `data-arg="${esc(p.firmato.path)}"` : `data-id="${esc(p.id)}"`}>Preventivo ${esc(p.numero || '')}${p.firmato?.path ? ' · firmato' : ''}</button>${p.firmaRiv?.firmatario ? `<small class="muted">${esc(p.firmaRiv.firmatario)}</small>` : ''}</div>`);
+  if (x.consFirmaRiv?.path) doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="apriFirmatoTit" data-arg="${esc(x.consFirmaRiv.path)}">Consuntivo · firmato</button><small class="muted">${esc(x.consFirmaRiv.firmatario || '')}</small></div>`);
+  else doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${x.consRap ? 'rapCons' : 'cons'}" data-arg="${kind}" data-id="${esc(x.id)}">Consuntivo${x.consFirma ? ' · firmato dal cliente' : ''}</button></div>`);
+  mods.forEach(m => doc.push(`<div class="file">${svg('clip2', 'i')}<button type="button" class="open" data-act="editMod" data-id="${esc(m.id)}">${esc(m.titolo || 'Modulo')}${m.stato === 'firmato' ? ' · firmato' : ''}</button></div>`));
+  file.forEach((f, i) => { if (p?.firmato?.path && f.path === p.firmato.path) return; doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="chiusoFile" data-arg="${kind}" data-id="${esc(x.id)}" data-n="${i}">${esc(f.nome || 'File')}</button></div>`); });
+  openSheet(pos ? 'Posa chiusa' : 'Intervento chiuso', `
+    <div class="stack chiuso">
+      <div class="row between"><div><b>${esc(rif || x.cliente || (pos ? 'Posa' : 'Intervento'))}</b><div class="small muted">${esc(quando)}${x.indirizzo ? ' · ' + esc(x.indirizzo) : ''}</div></div>${imp ? `<span class="price">${eur(imp)}</span>` : ''}</div>
+      <div class="row"><span class="chip ${amm[2]}">${esc(amm[1])}</span>${x.amm !== 'pag' ? `<button class="btn sm" data-act="amm" data-arg="${kind}" data-id="${esc(x.id)}" type="button">${PROSSIMO[x.amm]}</button>` : ''}</div>
+      <div class="fieldset"><span class="fs-t">Rivenditore e cliente</span>
+        <div class="small"><b>${esc(x.cliente || '—')}</b>${x.sede ? ' · ' + esc(x.sede) : ''}</div>
+        ${cfin ? `<div class="small">Cliente finale: ${esc(cfin)}</div>` : ''}
+        ${x.telefono ? `<div class="small">Tel. ${esc(x.telefono)}</div>` : ''}
+        ${(pos ? x.installato : x.descrizione) ? `<div class="small muted prewrap">${esc(pos ? x.installato : x.descrizione)}</div>` : ''}
+      </div>
+      <div class="fieldset"><span class="fs-t">Documenti</span><div class="files">${doc.join('')}</div></div>
+      ${foto.length ? `<div class="fieldset"><span class="fs-t">Foto (${foto.length})</span><div class="thumbs">${foto.map((f, i) => `<button type="button" class="thumbbtn" data-act="chiusoFoto" data-arg="${kind}" data-id="${esc(x.id)}" data-n="${i}" aria-label="Apri la foto ${i + 1}"><img data-file="${esc(f.mini || f.path)}" alt=""></button>`).join('')}</div></div>` : ''}
+      ${dalRivHtml(kind, x)}
+      ${diarioHtml(kind, x)}
+      <button type="button" class="btn sm ghost" data-act="schedaCompleta" data-arg="${kind}" data-id="${esc(x.id)}">Apri la scheda completa (per correggere)</button>
+    </div>`, null);
+}
 function sheetLav(l, prefill) {
+  if (l && !prefill && cantiereChiuso(l) && UI.schedaCompleta !== l.id) return sheetChiuso('lavori', l);
   const isNew = !l; l = l || { data: UI.day, amm: 'da_cons', calcolo: 'pezzo', ...(prefill || {}) };
   OG_PRIMA = { ...(l.orariGiorni || {}) };
   sheetFiles = [...(l.allegati || [])];
@@ -3584,6 +3618,7 @@ function cambiaCalcolo(modo) {
 
 /* intervento */
 function sheetInt(i, day, prefill) {
+  if (i && !prefill && cantiereChiuso(i) && UI.schedaCompleta !== i.id) return sheetChiuso('interventi', i);
   const isNew = !i; i = i || { data: TODAY, dataProg: day || '', stato: day ? 'programmato' : 'aperto', urgenza: 'normale', amm: 'da_cons', ...(prefill || {}) };
   sheetFiles = [...(i.allegati || [])];
   openSheet(isNew ? 'Nuovo intervento' : 'Intervento', `
@@ -3959,7 +3994,10 @@ function prevCard(p) {
 function rPrev() {
   const FL = [['aperti', 'Aperti'], ['accettati', 'Accettati'], ['rifiutati', 'Rifiutati'], ['tutti', 'Tutti']];
   const aperto = p => ['bozza', 'inviato'].includes(p.stato || 'bozza');
-  const L = S.preventivi.filter(p => UI.prevFilter === 'tutti' || (UI.prevFilter === 'aperti' && aperto(p)) || (UI.prevFilter === 'accettati' && p.stato === 'accettato') || (UI.prevFilter === 'rifiutati' && p.stato === 'rifiutato'))
+  // diventati posa o intervento: restano dentro la scheda del cantiere, non qui
+  const giaCantiere = new Set([...S.lavori, ...S.interventi].map(x => x.preventivoId).filter(Boolean));
+  const nCant = S.preventivi.filter(p => giaCantiere.has(p.id)).length;
+  const L = S.preventivi.filter(p => !giaCantiere.has(p.id)).filter(p => UI.prevFilter === 'tutti' || (UI.prevFilter === 'aperti' && aperto(p)) || (UI.prevFilter === 'accettati' && p.stato === 'accettato') || (UI.prevFilter === 'rifiutati' && p.stato === 'rifiutato'))
     .sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.numero).localeCompare(String(a.numero)));
   const anno = TODAY.slice(0, 4);
   const chiusi = S.preventivi.filter(p => ['accettato', 'rifiutato'].includes(p.stato));
@@ -3967,6 +4005,7 @@ function rPrev() {
   return `<div class="row between"><h2>Preventivi</h2><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Nuovo</button></div>
   <div class="kpis"><div class="kpi"><div class="l">Da inviare</div><div class="v">${S.preventivi.filter(p => (p.stato || 'bozza') === 'bozza').length}</div></div><div class="kpi"><div class="l">In attesa</div><div class="v">${S.preventivi.filter(p => p.stato === 'inviato').length}</div></div><div class="kpi"><div class="l">Accettati ${anno}</div><div class="v">${eur(sum(acc.filter(p => (p.data || '').startsWith(anno)), p => totPrev(p).imponibile))}</div></div><div class="kpi"><div class="l">Tasso accettazione</div><div class="v">${chiusi.length ? Math.round(acc.length / chiusi.length * 100) + '%' : '—'}</div></div></div>
   <div class="seg" role="group" aria-label="Filtro">${FL.map(([k, l]) => `<button data-act="prevF" data-arg="${k}" aria-pressed="${UI.prevFilter === k}" type="button">${l}</button>`).join('')}</div>
+  ${nCant ? `<div class="small muted">${nCant === 1 ? '1 preventivo è diventato posa o intervento: lo trovi' : `${nCant} preventivi sono diventati posa o intervento: li trovi`} dentro la scheda del cantiere.</div>` : ''}
   <div class="stack">${L.slice(0, quanti('prev-' + UI.prevFilter)).map(prevCard).join('') || `<div class="empty"><b>${S.preventivi.length ? 'Nessun preventivo in questa lista.' : 'Nessun preventivo ancora.'}</b><span class="small">Scegli le voci dal listino, il totale si calcola da solo e il PDF con termini, condizioni e firma è pronto da mandare.</span><button class="btn primary" data-act="newPrev" type="button">${svg('plus')} Crea un preventivo</button></div>`}${altri('prev-' + UI.prevFilter, L.length)}</div>`;
 }
 let prevCtx = null;
@@ -5034,6 +5073,9 @@ document.addEventListener('click', async e => {
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
     case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
+    case 'schedaCompleta': { const x = S[arg]?.find(r => r.id === id); if (!x) break; UI.schedaCompleta = id; arg === 'lavori' ? sheetLav(x) : sheetInt(x); break; }
+    case 'chiusoFoto': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const L = (x.allegati || []).filter(f => f?.path && eImmagine(f)); apriFoto(L.map(f => ({ path: f.path, nome: f.nome })), +b.dataset.n || 0); break; }
+    case 'chiusoFile': { const x = S[arg]?.find(r => r.id === id); const f = x && (x.allegati || []).filter(f => f?.path && !eImmagine(f))[+b.dataset.n || 0]; if (!f) break; /\.pdf$/i.test(f.nome || f.path) ? apriPdfRiv({ id: 'tit' }, { path: f.path, titolo: f.nome || 'Documento', azioni: false }) : guardaFile(f.path, f.nome); break; }
     case 'apriFirmatoTit': if (arg) apriPdfRiv({ id: 'tit' }, { path: arg, titolo: 'Documento firmato', azioni: false }); break;
     case 'newForse': sheetForse(arg || UI.day || TODAY); break;
     case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; delete d.dataForse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
