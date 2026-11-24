@@ -733,7 +733,8 @@ function azioniPdfRiv(d) {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('pdfview') && $('#sheet').hidden) chiudiPdfRiv(); });
 function chiudiPdfRiv() { document.getElementById('pdfview')?.remove(); document.body.classList.remove('noscroll'); }
-async function apriPdfRiv(d, { path = d.path, titolo = d.titolo || 'Documento', azioni = true } = {}) {
+async function apriPdfRiv(d, { path = d.path, titolo = d.titolo || 'Documento', azioni = true, bytes: dati = null } = {}) {
+  if (dati) path = 'mem:' + Date.now();
   chiudiPdfRiv();
   const ov = document.createElement('div'); ov.id = 'pdfview'; ov.className = 'pdfview'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', titolo);
   const az = azioni ? azioniPdfRiv(d) : '';
@@ -743,7 +744,7 @@ async function apriPdfRiv(d, { path = d.path, titolo = d.titolo || 'Documento', 
   Object.assign(VIS, { d, path, titolo, bytes: null });
   const box = ov.querySelector('.pdfpagine');
   try {
-    const bytes = await bytesDi(path); if (VIS.path !== path || !ov.isConnected) return; VIS.bytes = bytes;
+    const bytes = dati || await bytesDi(path); if (VIS.path !== path || !ov.isConnected) return; VIS.bytes = bytes;
     const lib = await pdfjs(); const doc = await lib.getDocument({ data: bytes.slice() }).promise;
     box.innerHTML = '';
     const dpr = Math.min(window.devicePixelRatio || 1, 2), W = Math.min(box.clientWidth - 16, 900);
@@ -1636,7 +1637,12 @@ document.addEventListener('click', async e => {
     case 'rivFirma': { const d = VIS.d?.id === id ? VIS.d : (RIV.mieiDoc || []).find(x => x.id === id) || (RIV.prevDoc || []).find(x => x.id === id); if (d) { chiudiPdfRiv(); sheetFirmaRiv(d); } break; }
     case 'rivApriFirmato': { const d = (RIV.mieiDoc || []).find(x => x.id === id) || (RIV.prevDoc || []).find(x => x.id === id); if (d?.firma_path) apriPdfRiv(d, { path: d.firma_path, titolo: (d.titolo || 'Documento') + ' · firmato', azioni: false }); break; }
     case 'pdfvChiudi': chiudiPdfRiv(); break;
-    case 'pdfvScarica': if (VIS.path) scaricaFile(VIS.path, String(VIS.titolo || 'Documento').replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break;
+    case 'pdfvScarica': {
+      const nome = String(VIS.titolo || 'Documento').replace(/[\/\\:*?"<>|]+/g, '-').replace(/\.pdf$/i, '') + '.pdf';
+      if (String(VIS.path).startsWith('mem:') && VIS.bytes) { const u = URL.createObjectURL(new Blob([VIS.bytes], { type: 'application/pdf' })); const l = document.createElement('a'); l.href = u; l.download = nome; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
+      else if (VIS.path) scaricaFile(VIS.path, nome);
+      break;
+    }
     case 'firmaUsaSalvata': { const v = firmaSalvata(); if (v) { $('#f_firmaRiv').value = v; document.querySelector('canvas.pad[data-for="firmaRiv"]')?._mostra?.(); } break; }
     case 'rivDocApri': { const x = (RIV.docs || []).find(d => d.id === b.dataset.id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
@@ -3487,10 +3493,10 @@ function sheetChiuso(kind, x) {
   const mods = S.moduli.filter(m => m.ref?.id === x.id);
   const rif = rifDi(x), cfin = x.clienteFinale || (rif && rif !== x.cliente ? rif : '');
   const doc = [];
-  if (p) doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${p.firmato?.path ? 'apriFirmatoTit' : 'editPrev'}" ${p.firmato?.path ? `data-arg="${esc(p.firmato.path)}"` : `data-id="${esc(p.id)}"`}>Preventivo ${esc(p.numero || '')}${p.firmato?.path ? ' · firmato' : ''}</button>${p.firmaRiv?.firmatario ? `<small class="muted">${esc(p.firmaRiv.firmatario)}</small>` : ''}</div>`);
+  if (p) doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${p.firmato?.path ? 'apriFirmatoTit' : 'chiusoPdf'}" ${p.firmato?.path ? `data-arg="${esc(p.firmato.path)}"` : `data-arg="prev" data-id="${esc(p.id)}"`}>Preventivo ${esc(p.numero || '')}${p.firmato?.path ? ' · firmato' : ''}</button>${p.firmaRiv?.firmatario ? `<small class="muted">${esc(p.firmaRiv.firmatario)}</small>` : ''}</div>`);
   if (x.consFirmaRiv?.path) doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="apriFirmatoTit" data-arg="${esc(x.consFirmaRiv.path)}">Consuntivo · firmato</button><small class="muted">${esc(x.consFirmaRiv.firmatario || '')}</small></div>`);
-  else doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${x.consRap ? 'rapCons' : 'cons'}" data-arg="${kind}" data-id="${esc(x.id)}">Consuntivo${x.consFirma ? ' · firmato dal cliente' : ''}</button></div>`);
-  mods.forEach(m => doc.push(`<div class="file">${svg('clip2', 'i')}<button type="button" class="open" data-act="editMod" data-id="${esc(m.id)}">${esc(m.titolo || 'Modulo')}${m.stato === 'firmato' ? ' · firmato' : ''}</button></div>`));
+  else doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="${x.consRap ? 'rapCons' : 'chiusoPdf'}" data-arg="${x.consRap ? kind : 'cons:' + kind}" data-id="${esc(x.id)}">Consuntivo${x.consFirma ? ' · firmato dal cliente' : ''}</button></div>`);
+  mods.forEach(m => doc.push(`<div class="file">${svg('clip2', 'i')}<button type="button" class="open" data-act="chiusoPdf" data-arg="mod" data-id="${esc(m.id)}">${esc(m.titolo || 'Modulo')}${m.stato === 'firmato' ? ' · firmato' : ''}</button></div>`));
   file.forEach((f, i) => { if (p?.firmato?.path && f.path === p.firmato.path) return; doc.push(`<div class="file">${svg('doc', 'i')}<button type="button" class="open" data-act="chiusoFile" data-arg="${kind}" data-id="${esc(x.id)}" data-n="${i}">${esc(f.nome || 'File')}</button></div>`); });
   openSheet(pos ? 'Posa chiusa' : 'Intervento chiuso', `
     <div class="stack chiuso">
@@ -5073,6 +5079,27 @@ document.addEventListener('click', async e => {
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
     case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
+    case 'chiusoPdf': {
+      // il documento di un cantiere chiuso: rifaccio il PDF dai dati salvati e lo mostro, senza aprire la scheda
+      try {
+        let bytes, titolo;
+        if (arg === 'prev') { const pv = S.preventivi.find(y => y.id === id); if (!pv) break; ({ bytes } = creaPdfDoc('preventivo', pv)); titolo = `Preventivo ${pv.numero || ''}`.trim(); }
+        else if (arg === 'mod') {
+          const m = S.moduli.find(y => y.id === id); if (!m) break; const uff = m.ufficiale && ufficiale(m.modelloId);
+          bytes = uff ? creaModuloUfficiale({ mod: m, modello: uff, sfondo: await sfondoModulo(uff.id) }) : creaModulo({ mod: { ...m, clienteDati: trovaCliente(m.cliente) || {} }, azienda: AZ(), immagini: IMG });
+          titolo = m.titolo || 'Modulo';
+        } else {
+          const kind = arg.split(':')[1], x = S[kind]?.find(y => y.id === id); if (!x) break; let doc;
+          if (x.gruppoCons?.id) {
+            const L = lavoriGruppo(x.gruppoCons.id).map(([kk, y]) => ({ kind: kk, x: y, d: kk === 'lavori' ? y.data : (y.dataProg || y.data) })).sort((a2, b2) => String(a2.d).localeCompare(b2.d));
+            doc = conAggiustamenti(docMulti(L, x.gruppoCons.iva || x.iva || AZ().ivaPredefinita), x.gruppoCons.agg || {});
+          } else { doc = docDaLavoro(x, kind, AZ()); doc.firma = x.consFirma || ''; doc.firmaData = x.consFirmaData || ''; doc.iva = x.iva || doc.iva; doc = conAggiustamenti(doc, x.consAgg || {}); }
+          ({ bytes } = creaPdfDoc('consuntivo', doc)); titolo = nomeDoc('Consuntivo', rifDi(x), x.cliente);
+        }
+        apriPdfRiv({ id: 'tit' }, { titolo, azioni: false, bytes });
+      } catch (err) { console.warn(err); toast('Non sono riuscito a creare il PDF'); }
+      break;
+    }
     case 'schedaCompleta': { const x = S[arg]?.find(r => r.id === id); if (!x) break; UI.schedaCompleta = id; arg === 'lavori' ? sheetLav(x) : sheetInt(x); break; }
     case 'chiusoFoto': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const L = (x.allegati || []).filter(f => f?.path && eImmagine(f)); apriFoto(L.map(f => ({ path: f.path, nome: f.nome })), +b.dataset.n || 0); break; }
     case 'chiusoFile': { const x = S[arg]?.find(r => r.id === id); const f = x && (x.allegati || []).filter(f => f?.path && !eImmagine(f))[+b.dataset.n || 0]; if (!f) break; /\.pdf$/i.test(f.nome || f.path) ? apriPdfRiv({ id: 'tit' }, { path: f.path, titolo: f.nome || 'Documento', azioni: false }) : guardaFile(f.path, f.nome); break; }
