@@ -198,6 +198,17 @@ export function createStore(cfg, onChange) {
       const esistente = !!error || !data.user || (Array.isArray(data.user.identities) && data.user.identities.length === 0);
       return { esistente, conferma: !esistente && !data.session };
     },
+    /** Controlla la password di chi è collegato senza toccare il collegamento (per firmare un documento). */
+    async verificaPassword(password) {
+      if (!sb) throw Object.assign(new Error('demo'), { userMsg: 'Serve il collegamento al database.' });
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { userMsg: 'Serve la connessione per firmare.' });
+      const { data: u } = await sb.auth.getUser(); const email = u?.user?.email;
+      if (!email) throw Object.assign(new Error('nouser'), { userMsg: 'Esci e rientra, poi riprova.' });
+      const tmp = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'ddp-verifica-firma' } });
+      const { data, error } = await tmp.auth.signInWithPassword({ email, password });
+      if (error || data?.user?.id !== uid) return false;
+      return email;   // nessun «esci»: scollegherebbe anche gli altri dispositivi
+    },
     uid: () => uid, owner: () => owner,
     refresh,
 

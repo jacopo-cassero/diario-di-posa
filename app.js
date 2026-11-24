@@ -701,22 +701,143 @@ async function caricaListinoRiv() {
   try { const { data, error } = await store.tabella('richieste_preventivo').select('*').order('creato', { ascending: false }).limit(40); if (!error) RIV.prev = data; } catch {}
   // i preventivi in PDF che l'installatore ha messo nella mia area
   try {
-    let { data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id,esito,esito_quando,esito_nota').eq('kind', 'preventivi');
+    let { data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id,kind,esito,esito_quando,esito_nota,firma_path').eq('kind', 'preventivi');
+    if (error) ({ data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id,kind,esito,esito_quando,esito_nota').eq('kind', 'preventivi'));
     if (error) ({ data, error } = await store.tabella('documenti_cliente').select('id,titolo,path,lavoro_id').eq('kind', 'preventivi'));
     RIV.prevDoc = error ? [] : data || [];
   } catch { RIV.prevDoc = []; }
   RIV.listinoCarico = true; render();
 }
 /** Sotto un preventivo nella mia area: «Accetto» / «Non lo accetto», oppure la risposta già data. Senza lo script non compare. */
+/* ===== Il rivenditore apre il PDF a schermo intero e lo firma ===== */
+let PDFJS = null;
+async function pdfjs() {
+  if (!PDFJS) { PDFJS = await import('./vendor/pdfjs/pdf.min.mjs'); PDFJS.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', location.href).href; }
+  return PDFJS;
+}
+async function bytesDi(path) {
+  const u = await store.fileUrl(path); if (!u) throw new Error('url');
+  const r = await fetch(u); if (!r.ok) throw new Error('http ' + r.status);
+  return new Uint8Array(await r.arrayBuffer());
+}
+const VIS = { d: null, path: '', titolo: '', bytes: null };
+const firmabile = d => !!d && (d.kind === 'preventivi' || !!d.consuntivo);
+function azioniPdfRiv(d) {
+  if (!firmabile(d)) return '';
+  const cons = !!d.consuntivo, id = esc(d.id);
+  if (!d.esito) return `<button type="button" class="btn primary" data-act="rivFirma" data-id="${id}">${svg('check', 'i')} Accetto e firmo</button>
+    <button type="button" class="btn" data-act="${cons ? 'rivConsEsito' : 'rivPrevEsito'}" data-arg="${cons ? 'variazione' : 'rifiutato'}" data-id="${id}">${cons ? 'Chiedo una variazione' : 'Non accetto'}</button>`;
+  const ok = d.esito === 'accettato';
+  return `<span class="chip ${ok ? 'ok' : d.esito === 'variazione' ? 'warn' : 'bad'}">${ok ? (d.firma_path ? 'Accettato e firmato' : 'Accettato') : d.esito === 'variazione' ? 'Variazione chiesta' : 'Non accettato'}</span>
+    ${d.firma_path ? `<button type="button" class="btn" data-act="rivApriFirmato" data-id="${id}">Apri quello firmato</button>` : ''}`;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('pdfview') && $('#sheet').hidden) chiudiPdfRiv(); });
+function chiudiPdfRiv() { document.getElementById('pdfview')?.remove(); document.body.classList.remove('noscroll'); }
+async function apriPdfRiv(d, { path = d.path, titolo = d.titolo || 'Documento', azioni = true } = {}) {
+  chiudiPdfRiv();
+  const ov = document.createElement('div'); ov.id = 'pdfview'; ov.className = 'pdfview'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', titolo);
+  const az = azioni ? azioniPdfRiv(d) : '';
+  ov.innerHTML = `<header><button type="button" class="iconbtn" data-act="pdfvChiudi" aria-label="Chiudi">×</button><b>${esc(titolo)}</b><button type="button" class="btn sm" data-act="pdfvScarica">Scarica</button></header>
+    <div class="pdfpagine"><div class="pdfcarico small muted">Apro il documento…</div></div>${az ? `<footer>${az}</footer>` : ''}`;
+  document.body.appendChild(ov); document.body.classList.add('noscroll');
+  Object.assign(VIS, { d, path, titolo, bytes: null });
+  const box = ov.querySelector('.pdfpagine');
+  try {
+    const bytes = await bytesDi(path); if (VIS.path !== path || !ov.isConnected) return; VIS.bytes = bytes;
+    const lib = await pdfjs(); const doc = await lib.getDocument({ data: bytes.slice() }).promise;
+    box.innerHTML = '';
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), W = Math.min(box.clientWidth - 16, 900);
+    for (let i = 1; i <= doc.numPages; i++) {
+      const pg = await doc.getPage(i), v1 = pg.getViewport({ scale: 1 }), v = pg.getViewport({ scale: (W * dpr) / v1.width });
+      const cv = document.createElement('canvas'); cv.className = 'pdfpag'; cv.width = Math.round(v.width); cv.height = Math.round(v.height);
+      cv.style.width = W + 'px'; cv.setAttribute('aria-label', `Pagina ${i} di ${doc.numPages}`); box.appendChild(cv);
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: v }).promise;
+      if (!ov.isConnected) return;
+    }
+  } catch (e) {
+    console.warn(e);
+    if (ov.isConnected) box.innerHTML = `<div class="empty small">Non riesco a mostrare il documento qui.<button type="button" class="btn sm" data-act="pdfvScarica">Scaricalo</button></div>`;
+  }
+}
+const salvaFirmaKey = () => `ddp:firma:${store.uid?.() || ''}`;
+const firmaSalvata = () => { try { return localStorage.getItem(salvaFirmaKey()) || ''; } catch { return ''; } };
+async function sha256(bytes) { const h = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+const winAnsi = t => String(t || '').replace(/[‘’]/g, "'").replace(/[“”«»]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[^\x20-\x7E -ÿ€]/g, '');
+/** Il PDF originale, con «Firmato da…» in fondo a ogni pagina e una pagina finale con la firma. */
+async function pdfFirmato(bytes, { titolo, firmatario, azienda, quando, hash, firmaJpeg, email }) {
+  const { PDFDocument, StandardFonts, rgb } = await import('./vendor/pdf-lib/pdf-lib.esm.min.js');
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const font = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const cod = hash.slice(0, 4).toUpperCase() + '-' + hash.slice(4, 8).toUpperCase();
+  const piede = winAnsi(`Accettato e firmato da ${firmatario}${azienda ? ' (' + azienda + ')' : ''} il ${quando} - cod. ${cod}`);
+  for (const pg of doc.getPages()) { const { width } = pg.getSize(); pg.drawText(piede, { x: 28, y: 12, size: 7, font, color: rgb(0.35, 0.35, 0.35), maxWidth: width - 56 }); }
+  const pg = doc.addPage([595.28, 841.89]); let y = 780; const X = 56;
+  const riga = (t, o = {}) => { pg.drawText(winAnsi(t), { x: X, y, size: o.size || 11, font: o.bold ? bold : font, color: rgb(0.1, 0.1, 0.1), maxWidth: 483, lineHeight: (o.size || 11) * 1.35 }); y -= o.gap || 20; };
+  riga('ACCETTAZIONE E FIRMA', { size: 18, bold: true, gap: 34 });
+  riga(`Documento: ${titolo}`, { bold: true });
+  riga(`Firmato da: ${firmatario}${azienda ? ' - ' + azienda : ''}`);
+  riga(`Data e ora: ${quando}`);
+  riga(`Account: ${email}`, { gap: 30 });
+  riga('Firma:', { bold: true, gap: 8 });
+  const img = await doc.embedJpg(firmaJpeg); const sc = Math.min(260 / img.width, 110 / img.height);
+  pg.drawRectangle({ x: X, y: y - 118, width: 276, height: 122, borderColor: rgb(0.75, 0.75, 0.75), borderWidth: 0.6 });
+  pg.drawImage(img, { x: X + 8, y: y - 114 + (110 - img.height * sc) / 2, width: img.width * sc, height: img.height * sc }); y -= 150;
+  riga('Impronta del documento originale (SHA-256):', { size: 9, bold: true, gap: 13 });
+  riga(hash, { size: 8.5, gap: 28 });
+  pg.drawText(winAnsi('Firma elettronica semplice apposta dall\'area riservata dell\'app Diario di Posa, dopo la verifica della password dell\'account indicato. L\'impronta permette di controllare che il documento firmato sia identico all\'originale ricevuto.'), { x: X, y, size: 8.5, font, color: rgb(0.35, 0.35, 0.35), maxWidth: 483, lineHeight: 12 });
+  doc.setTitle(winAnsi(titolo + ' - firmato'));
+  return await doc.save();
+}
+function sheetFirmaRiv(d) {
+  const A = store.st.accesso || {}, salvata = firmaSalvata();
+  openSheet('Accetto e firmo', `
+    <div class="small"><b>${esc(d.titolo || 'Documento')}</b></div>
+    <div class="small muted">Firmando accetti ${d.consuntivo ? 'il consuntivo' : 'il preventivo'}. Firma con il dito o, dal computer, con il mouse; oppure usa l'immagine della tua firma.</div>
+    <div class="firma full"><div class="row between"><span class="fs-t">La tua firma</span><button type="button" class="linkbtn" data-act="firmaCancella" data-arg="firmaRiv">Cancella</button></div><canvas class="pad" data-for="firmaRiv" aria-label="Spazio per la firma"></canvas><input type="hidden" id="f_firmaRiv" name="firmaRiv" value=""><div class="small muted">Tocca il riquadro: si apre in grande.</div></div>
+    <div class="row">${salvata ? '<button type="button" class="btn sm" data-act="firmaUsaSalvata">Usa la firma salvata</button>' : ''}<label class="btn sm filebtn">Carica l'immagine della firma<input type="file" id="f_firmaImg" accept="image/*" hidden></label></div>
+    ${F('Nome e cognome di chi firma', inp('fr_nome', A.nome || '', 'text', 'required maxlength="120" autocomplete="name"'))}
+    <label class="check small"><input type="checkbox" name="fr_salva" id="f_fr_salva" ${salvata ? '' : 'checked'}> Salva la firma su questo dispositivo, per la prossima volta</label>
+    ${F('Nota per l\'installatore (facoltativa)', inp('fr_nota', '', 'text', 'maxlength="500"'))}
+    ${F('La tua password, per conferma', inp('fr_pw', '', 'password', 'required autocomplete="current-password"'))}`,
+  async fd => {
+    const firma = String(fd.get('firmaRiv') || ''), nome = String(fd.get('fr_nome') || '').trim(), pw = String(fd.get('fr_pw') || '');
+    if (!/^data:image\/jpeg;base64,/.test(firma)) throw Object.assign(new Error('firma'), { userMsg: 'Fai la firma nel riquadro (o usa l\'immagine)' });
+    if (!nome) throw Object.assign(new Error('nome'), { userMsg: 'Scrivi il nome di chi firma' });
+    if (!pw) throw Object.assign(new Error('pw'), { userMsg: 'Scrivi la tua password' });
+    const email = await store.verificaPassword(pw);
+    if (!email) throw Object.assign(new Error('pw'), { userMsg: 'Password sbagliata: riprova' });
+    const orig = VIS.d?.id === d.id && VIS.bytes ? VIS.bytes : await bytesDi(d.path);
+    const hash = await sha256(orig), ora = new Date();
+    const quando = ora.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const jpeg = Uint8Array.from(atob(firma.split(',')[1]), c => c.charCodeAt(0));
+    const out = await pdfFirmato(orig, { titolo: d.titolo || 'Documento', firmatario: nome, azienda: A.azienda || '', quando, hash, firmaJpeg: jpeg, email });
+    const path = await store.caricaInCartella('firme', `${String(d.id).replace(/[^\w-]+/g, '-').slice(0, 80)}-${ora.getTime()}.pdf`, new Blob([out], { type: 'application/pdf' }));
+    try { await store.rpc('firma_documento', { documento: d.id, firma: { path, nome, hash }, messaggio: String(fd.get('fr_nota') || '').trim() }); }
+    catch (e) { if (/find the function|schema cache|does not exist/i.test(e.message || '')) e.userMsg = 'La firma non è ancora attiva: avvisa l\'installatore.'; throw e; }
+    if (fd.get('fr_salva')) try { localStorage.setItem(salvaFirmaKey(), firma); } catch {}
+    toast('Firmato: l\'installatore è avvisato'); chiudiPdfRiv();
+    RIV.docCarico = false; RIV.listinoCarico = false; render();
+  }, { saveLabel: 'Firma e accetta' });
+  requestAnimationFrame(initFirme);
+  $('#f_firmaImg')?.addEventListener('change', async e => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try {
+      const url = URL.createObjectURL(f), im = new Image(); await new Promise((ok, ko) => { im.onload = ok; im.onerror = ko; im.src = url; });
+      const k = Math.min(900 / im.width, 400 / im.height, 1), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      const x = c.getContext('2d'); x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      $('#f_firmaRiv').value = c.toDataURL('image/jpeg', 0.85); document.querySelector('canvas.pad[data-for="firmaRiv"]')?._mostra?.(); toast('Immagine della firma caricata');
+    } catch { toast('Non riesco a leggere questa immagine: prova una foto JPG o PNG'); }
+  });
+}
 function esitoPrevRiv(d) {
   if (!d || !('esito' in d)) return '';
-  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'bad'}">${d.esito === 'accettato' ? 'Accettato' : 'Non accettato'}</span>${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}</div>`;
-  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivPrevEsito" data-arg="accettato" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Accetto il preventivo</button><button class="btn sm" data-act="rivPrevEsito" data-arg="rifiutato" data-id="${esc(d.id)}" type="button">Non lo accetto</button></div>`;
+  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'bad'}">${d.esito === 'accettato' ? (d.firma_path ? 'Accettato e firmato' : 'Accettato') : 'Non accettato'}</span>${d.firma_path ? ` <button type="button" class="linkbtn" data-act="rivApriFirmato" data-id="${esc(d.id)}">PDF firmato</button>` : ''}${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}</div>`;
+  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivFirmaApri" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Apri, accetto e firmo</button><button class="btn sm" data-act="rivPrevEsito" data-arg="rifiutato" data-id="${esc(d.id)}" type="button">Non lo accetto</button></div>`;
 }
 /** Sotto un consuntivo nella mia area: «Accetto» / «Chiedo una variazione di prezzo», oppure la risposta già data. */
 function esitoConsRiv(d) {
-  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'warn'}">${d.esito === 'accettato' ? 'Accettato' : 'Variazione chiesta'}</span>${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}${d.esito === 'variazione' ? '<div class="muted">L\'installatore corregge il consuntivo e te lo rimanda qui.</div>' : ''}</div>`;
-  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivConsEsito" data-arg="accettato" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Accetto il consuntivo</button><button class="btn sm" data-act="rivConsEsito" data-arg="variazione" data-id="${esc(d.id)}" type="button">Chiedo una variazione di prezzo</button></div>`;
+  if (d.esito) return `<div class="small esitoriv"><span class="chip ${d.esito === 'accettato' ? 'ok' : 'warn'}">${d.esito === 'accettato' ? (d.firma_path ? 'Accettato e firmato' : 'Accettato') : 'Variazione chiesta'}</span>${d.firma_path ? ` <button type="button" class="linkbtn" data-act="rivApriFirmato" data-id="${esc(d.id)}">PDF firmato</button>` : ''}${d.esito_quando ? ' il ' + esc(quandoMod(d.esito_quando)) : ''}${d.esito_nota ? ` · <span class="muted">${esc(corto(d.esito_nota, 120))}</span>` : ''}${d.esito === 'variazione' ? '<div class="muted">L\'installatore corregge il consuntivo e te lo rimanda qui.</div>' : ''}</div>`;
+  return `<div class="row esitoriv"><button class="btn sm primary" data-act="rivFirmaApri" data-id="${esc(d.id)}" type="button">${svg('check', 'i')} Apri, accetto e firmo</button><button class="btn sm" data-act="rivConsEsito" data-arg="variazione" data-id="${esc(d.id)}" type="button">Chiedo una variazione di prezzo</button></div>`;
 }
 function sheetEsitoCons(d, scelta) {
   const si = scelta === 'accettato';
@@ -1510,14 +1631,20 @@ document.addEventListener('click', async e => {
     }
     case 'rivTab': UI.rivTab = b.dataset.arg; render(); window.scrollTo({ top: 0 }); break;
     case 'rivDocAgg': RIV.docCarico = false; render(); break;
-    case 'rivMioDoc': { const d = (RIV.mieiDoc || []).find(x => x.id === b.dataset.id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
+    case 'rivMioDoc': { const d = (RIV.mieiDoc || []).find(x => x.id === b.dataset.id); if (d) apriPdfRiv(d); break; }
+    case 'rivFirmaApri': { const d = (RIV.mieiDoc || []).find(x => x.id === id) || (RIV.prevDoc || []).find(x => x.id === id); if (d) apriPdfRiv(d); break; }
+    case 'rivFirma': { const d = VIS.d?.id === id ? VIS.d : (RIV.mieiDoc || []).find(x => x.id === id) || (RIV.prevDoc || []).find(x => x.id === id); if (d) { chiudiPdfRiv(); sheetFirmaRiv(d); } break; }
+    case 'rivApriFirmato': { const d = (RIV.mieiDoc || []).find(x => x.id === id) || (RIV.prevDoc || []).find(x => x.id === id); if (d?.firma_path) apriPdfRiv(d, { path: d.firma_path, titolo: (d.titolo || 'Documento') + ' · firmato', azioni: false }); break; }
+    case 'pdfvChiudi': chiudiPdfRiv(); break;
+    case 'pdfvScarica': if (VIS.path) scaricaFile(VIS.path, String(VIS.titolo || 'Documento').replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break;
+    case 'firmaUsaSalvata': { const v = firmaSalvata(); if (v) { $('#f_firmaRiv').value = v; document.querySelector('canvas.pad[data-for="firmaRiv"]')?._mostra?.(); } break; }
     case 'rivDocApri': { const x = (RIV.docs || []).find(d => d.id === b.dataset.id); if (x) scaricaFile(x.path, x.nomeFile); break; }
     case 'rivListinoPdf': if (RIV.listino?.pdf && await apriPdfRemoto(RIV.listino.pdf, `Listino ${RIV.listino?.azienda?.ragioneSociale || 'posa'}.pdf`.replace(/[\/\\:*?"<>|]+/g, '-'))) break;
     {  const L = LISTINO_RIV(); await pdfListino(L, RIV.listino?.azienda || {}, `Listino posa ${L.anno || ''} ${(RIV.listino?.azienda?.ragioneSociale || 'Cassero')}`.trim().replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
     case 'rivPrevNuovo': sheetPrevRiv(); break;
-    case 'rivPrevPdf': { const d = (RIV.prevDoc || []).find(x => x.id === id); if (d) scaricaFile(d.path, d.titolo.replace(/[\/\\:*?"<>|]+/g, '-') + '.pdf'); break; }
-    case 'rivPrevEsito': { const d = (RIV.prevDoc || []).find(x => x.id === id) || (RIV.mieiDoc || []).find(x => x.id === id); if (d) sheetEsitoPrev(d, b.dataset.arg); break; }
-    case 'rivConsEsito': { const d = (RIV.mieiDoc || []).find(x => x.id === id); if (d) sheetEsitoCons(d, b.dataset.arg); break; }
+    case 'rivPrevPdf': { const d = (RIV.prevDoc || []).find(x => x.id === id); if (d) apriPdfRiv(d); break; }
+    case 'rivPrevEsito': { const d = (RIV.prevDoc || []).find(x => x.id === id) || (RIV.mieiDoc || []).find(x => x.id === id); if (d) { chiudiPdfRiv(); sheetEsitoPrev(d, b.dataset.arg); } break; }
+    case 'rivConsEsito': { const d = (RIV.mieiDoc || []).find(x => x.id === id); if (d) { chiudiPdfRiv(); sheetEsitoCons(d, b.dataset.arg); } break; }
     case 'rivPrevMod': { const r = (RIV.prev || []).find(x => x.id === id); if (r) sheetPrevRiv(r); break; }
     case 'richPrevVista': {
       b.disabled = true;
@@ -2337,7 +2464,7 @@ function rCons() {
       h += `<section class="stack">${testa}
       ${voci.slice(0, quanti('cons-' + k)).map(v => v.h || ((x) => `<div class="card tap" ${tapLavCons(x)}><div class="row between"><span class="t">${esc(x.cliente)}</span><span class="price">${eur(imp(x))}</span></div><div class="small muted">${fmtD(x._d)} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''}${x.consRap ? ` · consuntivo con il rapporto del ${fmtD(x.consRap, { day: 'numeric', month: 'short' })}` : x.importoCons != null && Math.abs(x.importoCons - x.importo) > 0.009 ? ` · <s>${eur(x.importo)}</s> scontato` : ''}</div>
         ${k === 'acc' || k === 'cons' ? esitoConsHtml(x) : ''}
-        <div class="row">${['da_cons', 'inv', 'acc'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k !== 'da_cons' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</section>`;
+        <div class="row">${['da_cons', 'inv', 'acc'].includes(k) ? `<button class="btn sm ${k === 'da_cons' ? 'dark' : ''}" data-act="${x.consRap && k !== 'da_cons' ? 'rapCons' : 'cons'}" data-arg="${x._k}" data-id="${x.id}" type="button">${k === 'da_cons' ? 'Prepara consuntivo' : x.consRap ? 'Apri il rapporto' : 'Apri consuntivo'}</button>` : ''}${k === 'acc' && serveFirmaRiv(x) ? '<span class="small muted">Aspetta la firma del rivenditore</span>' : `<button class="btn sm" data-act="amm" data-arg="${x._k}" data-id="${x.id}" type="button">${PROSSIMO[k]}</button>`}${selStato(x._k, x.id, k)}</div></div>`)(v.x)).join('') || '<div class="small muted">Niente qui.</div>'}${altri('cons-' + k, voci.length)}</section>`;
     });
   }
   return h;
@@ -3851,10 +3978,10 @@ function sheetPrev(p) {
   const c = p.cliente || {};
   openSheet(isNew ? 'Nuovo preventivo' : `Preventivo ${p.numero || ''}`, `
     ${p.richiestaRiv ? novitaPrevHtml(p.richiestaRiv) : ''}
-    ${p.esitoRiv ? `<div class="notice small ${p.esitoRiv.esito === 'accettato' ? 'ok' : ''}"><b>${p.esitoRiv.esito === 'accettato' ? 'Accettato' : 'Non accettato'} da ${esc(p.esitoRiv.chi || 'rivenditore')}</b> · ${esc(quandoMod(p.esitoRiv.quando))}${p.esitoRiv.nota ? `<div class="prewrap">${esc(p.esitoRiv.nota)}</div>` : ''}</div>` : ''}
+    ${p.esitoRiv ? `<div class="notice small ${p.esitoRiv.esito === 'accettato' ? 'ok' : ''}"><b>${p.esitoRiv.esito === 'accettato' ? 'Accettato' : 'Non accettato'} da ${esc(p.esitoRiv.chi || 'rivenditore')}</b> · ${esc(quandoMod(p.esitoRiv.quando))}${p.esitoRiv.nota ? `<div class="prewrap">${esc(p.esitoRiv.nota)}</div>` : ''}${firmaRivHtml(p.firmaRiv)}</div>` : ''}
     ${p.richiestaRiv && store.st.mode !== 'demo' ? '<div class="small muted">Nato dalla richiesta di un rivenditore: quando lo salvi con lo stato «Inviato», lui riceve l\'avviso e trova il PDF nella sua area riservata.</div>' : ''}
     <div class="g3">${F('Numero', inp('numero', p.numero, 'text', 'required'))}${F('Data', inp('data', p.data, 'date', 'required'))}${F('Validità giorni', inp('validita', p.validita, 'number'))}</div>
-    <div class="g2">${F('Stato', sel('stato', STATI_PREV.map(s => [s[0], s[1]]), p.stato || 'bozza'))}${F('È un preventivo per', sel('perLavoro', [['posa', 'Una posa'], ['intervento', 'Un intervento']], p.perLavoro === 'intervento' ? 'intervento' : 'posa'))}</div>
+    <div class="g2">${F('Stato', sel('stato', STATI_PREV.filter(s => s[0] !== 'accettato' || p.stato === 'accettato' || !serveFirmaRiv(p)).map(s => [s[0], s[1]]), p.stato || 'bozza') + (p.stato !== 'accettato' && serveFirmaRiv(p) ? '<div class="small muted">«Accettato» lo mette il rivenditore, firmando dalla sua area.</div>' : ''))}${F('È un preventivo per', sel('perLavoro', [['posa', 'Una posa'], ['intervento', 'Un intervento']], p.perLavoro === 'intervento' ? 'intervento' : 'posa'))}</div>
     <div class="small muted" style="margin-top:-6px">Quando è accettato, finisce da solo tra ${p.perLavoro === 'intervento' ? 'gli interventi' : 'le pose'} da programmare.</div>
     <div class="fieldset"><span class="fs-t">Cliente</span>
       ${campoCliente('cnome', 'Nome o ragione sociale', c.nome)}
@@ -4658,9 +4785,12 @@ const cardFatt = (x, k, imp) => `<div class="card tap" ${tapLavCons(x)}><div cla
 /** La risposta del rivenditore al consuntivo (accettato o variazione di prezzo chiesta). */
 function esitoConsHtml(x) {
   const e = x?.esitoCons; if (!e?.esito) return '';
-  if (e.esito === 'accettato') return `<div class="small"><span class="chip ok">Accettato</span> da ${esc(e.chi || 'rivenditore')}${e.quando ? ' · ' + esc(quandoMod(e.quando)) : ''}${e.nota ? ` · <span class="muted">${esc(corto(e.nota, 120))}</span>` : ''}</div>`;
+  if (e.esito === 'accettato') return `<div class="small"><span class="chip ok">${x.consFirmaRiv?.path ? 'Accettato e firmato' : 'Accettato'}</span> da ${esc(e.chi || 'rivenditore')}${e.quando ? ' · ' + esc(quandoMod(e.quando)) : ''}${e.nota ? ` · <span class="muted">${esc(corto(e.nota, 120))}</span>` : ''}</div>${firmaRivHtml(x.consFirmaRiv)}`;
   return `<div class="notice small"><b>Variazione di prezzo chiesta da ${esc(e.chi || 'rivenditore')}</b>${e.quando ? ' · ' + esc(quandoMod(e.quando)) : ''}${e.nota ? `<div class="prewrap">${esc(e.nota)}</div>` : ''}<div class="muted">Correggi il prezzo nel consuntivo, rifai il PDF e rimettilo nella sua cartella: gli torna il tasto «Accetto».</div></div>`;
 }
+/** Il cliente è un rivenditore con l'accesso all'app: preventivi e consuntivi li accetta solo lui, firmando. */
+const serveFirmaRiv = x => { if (!x || store.st.mode === 'demo' || !GESTORE()) return false; try { return rivDiLavoro({ cliente: x.cliente?.nome ?? x.cliente, clienteId: x.clienteId, sede: x.sede }).length > 0; } catch { return false; } };
+const firmaRivHtml = f => f?.path ? `<div class="small">${svg('check', 'i')} Firmato da <b>${esc(f.firmatario || f.chi || 'rivenditore')}</b>${f.quando ? ' · ' + esc(quandoMod(f.quando)) : ''} <button type="button" class="linkbtn" data-act="apriFirmatoTit" data-arg="${esc(f.path)}">Apri il PDF firmato</button></div>` : '';
 /** A quali lavori si riferisce un consuntivo: «l:<id>|i:<id>». */
 const refCons = L => L.map(([k, x]) => (k === 'lavori' ? 'l:' : 'i:') + x.id).join('|');
 const lavoriDaRef = ref => String(ref || '').split('|').map(t => { const k = t[0] === 'l' ? 'lavori' : t[0] === 'i' ? 'interventi' : null; const x = k && S[k].find(y => y.id === t.slice(2)); return x ? [k, x] : null; }).filter(Boolean);
@@ -4703,7 +4833,7 @@ function cardGruppoCons(gg, k) {
     <div class="small muted">${Math.abs(sconto) > 0.009 ? `Prezzo pieno <s>${eur(g.lordo)}</s> · ${sconto > 0 ? 'sconto' : 'in più'} ${eur(Math.abs(sconto))} · ` : ''}${ivaL[2] > 0 ? `totale IVA compresa ${eur(g.totale)}` : esc(ivaL[1])}</div>
     ${k === 'acc' || k === 'cons' ? esitoConsHtml(gg.find(x => x.esitoCons) || gg[0]) : ''}
     <details class="small"><summary>Lavori compresi</summary>${gg.map(x => `<div>${fmtD(x._d, { day: 'numeric', month: 'short' })} · ${x._k === 'lavori' ? 'Posa' : 'Intervento'}${x._t ? ' · ' + esc(x._t) : ''} · ${eur(x.importoCons ?? x.importo)}</div>`).join('')}</details>
-    <div class="row">${k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${PROSSIMO[k]}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
+    <div class="row">${k === 'acc' && serveFirmaRiv(gg[0]) ? '<span class="small muted">Aspetta la firma del rivenditore</span>' : k !== 'pag' ? `<button class="btn sm" data-act="ammGruppo" data-arg="${esc(g.id)}" type="button">${PROSSIMO[k]}</button>` : ''}${selStato('', '', k, g.id)}<button class="btn sm ghost" data-act="sciogliGruppo" data-arg="${esc(g.id)}" type="button">Separa</button></div></div>`;
 }
 /** Stato del consuntivo unico: quello del lavoro più indietro. */
 function statoGruppo(gid) { const L = lavoriGruppo(gid); return AMM[Math.min(...L.map(([, x]) => Math.max(0, AMM.findIndex(a => a[0] === (x.amm || 'da_cons')))))][0]; }
@@ -4904,6 +5034,7 @@ document.addEventListener('click', async e => {
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
     case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
+    case 'apriFirmatoTit': if (arg) apriPdfRiv({ id: 'tit' }, { path: arg, titolo: 'Documento firmato', azioni: false }); break;
     case 'newForse': sheetForse(arg || UI.day || TODAY); break;
     case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; delete d.dataForse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
     case 'poseF': UI.poseFilter = arg; render(); break;

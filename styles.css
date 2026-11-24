@@ -709,3 +709,17 @@ details.cartella[open]>summary{margin-bottom:10px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .day.rv-occ.rv-forse .rvl{color:#c4b5fd}}
 :root[data-theme="dark"] .day.rv-occ.rv-forse .rvl{color:#c4b5fd}
 .btn.forsebtn{border-style:dashed;border-color:#7c3aed}
+
+/* PDF a schermo intero (area del rivenditore) */
+body.noscroll{overflow:hidden}
+.pdfview{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column}
+.pdfview>header{display:flex;align-items:center;gap:10px;background:#343a40;color:#fff;padding:calc(env(safe-area-inset-top,0px) + 8px) max(12px,env(safe-area-inset-right,0px)) 8px max(12px,env(safe-area-inset-left,0px))}
+.pdfview>header b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.95rem}
+.pdfview>header .iconbtn{color:#fff;font-size:1.6rem;line-height:1;background:transparent;border:0}
+.pdfpagine{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:8px;display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--sunk)}
+.pdfpag{max-width:100%;height:auto;background:#fff;box-shadow:0 1px 6px rgb(0 0 0/.25)}
+.pdfcarico{padding:40px 0}
+.pdfview>footer{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;padding:10px max(12px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 10px) max(12px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line)}
+.pdfview>footer .btn{flex:1 1 160px;max-width:340px}
+.filebtn{cursor:pointer}
+.pdfview>header .btn{background:transparent;color:#fff;border-color:rgb(255 255 255/.55)}
