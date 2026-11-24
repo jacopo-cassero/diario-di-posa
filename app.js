@@ -375,12 +375,14 @@ async function spostaPrenotazioniDi(lavoroId, da, a) {
 const RIV = { mese: TODAY.slice(0, 7), occ: new Set(), mesiCaricati: new Set(), mie: [], da: '', a: '', carico: false, err: '', listino: null, listinoCarico: false, listinoErr: '', prev: null };
 async function caricaRiv(forza) {
   const A = store.st.accesso;
-  if (forza) { RIV.mesiCaricati.clear(); RIV.occ.clear(); }
+  if (forza) { RIV.mesiCaricati.clear(); RIV.occ.clear(); RIV.forseOcc?.clear(); }
   try {
     const da = RIV.mese + '-01', a = iso(new Date(+RIV.mese.slice(0, 4), +RIV.mese.slice(5, 7) + 1, 0));
     if (!RIV.mesiCaricati.has(RIV.mese)) {
       const occ = await store.rpc('disponibilita', { da, a: piuGiorni(a, 7) });
       (occ || []).forEach(g => RIV.occ.add(String(g).slice(0, 10)));
+      // giorni tenuti «in forse» dall'installatore (se lo script date_forse.sql non è ancora lanciato, restano solo «occupato»)
+      try { const fo = await store.rpc('giorni_forse', { da, a: piuGiorni(a, 7) }); RIV.forseOcc = RIV.forseOcc || new Set(); (fo || []).forEach(g => RIV.forseOcc.add(String(g).slice(0, 10))); } catch {}
       RIV.mesiCaricati.add(RIV.mese);
     }
     const { data, error } = await store.tabella('prenotazioni').select('*').order('data', { ascending: false }).limit(60);
@@ -398,11 +400,11 @@ function statoGiorno(k) {
   const A = store.st.accesso, dow = pd(k).getDay();
   const LL = (RIV.lavori || []).filter(l => l.data && k >= l.data && k <= (l.dataFine && l.dataFine > l.data ? l.dataFine : l.data));
   if (LL.length) { const lav = LL[0], tipo = lav.kind === 'lavori' ? 'posa' : 'intervento', rif = String(lav.riferimento || '').trim();
-    return ['lav', `Tuo lavoro · ${tipo}${rif ? ' · ' + rif : ''}${LL.length > 1 ? ` (+${LL.length - 1})` : ''}`, (rif || (lav.kind === 'lavori' ? 'Posa' : 'Interv.')) + (LL.length > 1 ? ` +${LL.length - 1}` : '')]; }
+    return ['lav', `${lav.forse ? 'Forse · tuo' : 'Tuo lavoro'} · ${tipo}${rif ? ' · ' + rif : ''}${LL.length > 1 ? ` (+${LL.length - 1})` : ''}`, (lav.forse ? '? ' : '') + (rif || (lav.forse ? 'Forse' : lav.kind === 'lavori' ? 'Posa' : 'Interv.')) + (LL.length > 1 ? ` +${LL.length - 1}` : ''), !!lav.forse && LL.every(x => x.forse)]; }
   const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
   if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
   if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
-  if (RIV.occ.has(k)) return ['occ', 'Occupato'];
+  if (RIV.occ.has(k)) return RIV.forseOcc?.has(k) ? ['occ', 'Forse occupato (non ancora sicuro)', '', true] : ['occ', 'Occupato'];
   if (k < piuGiorni(TODAY, A.preavviso ?? 2)) return ['no', k < TODAY ? '' : 'Preavviso troppo breve'];
   const max = new Date(pd(TODAY)); max.setMonth(max.getMonth() + (A.mesi ?? 4));
   if (k > iso(max)) return ['no', 'Non ancora prenotabile'];
@@ -416,9 +418,9 @@ function rRivenditore() {
   let cells = ['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(d => `<div class="dow">${d}</div>`).join('');
   for (let i = 0; i < off; i++) cells += '<div class="day blank"></div>';
   for (let d = 1; d <= dim; d++) {
-    const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l, rifG] = statoGiorno(k);
+    const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l, rifG, fo] = statoGiorno(k);
     const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
-    cells += `<button class="day rv-${s} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? 'occupato' : s === 'mia' ? 'tua' : ''}</span></button>`;
+    cells += `<button class="day rv-${s} ${fo ? 'rv-forse' : ''} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? (fo ? 'forse' : 'occupato') : s === 'mia' ? 'tua' : ''}</span></button>`;
   }
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
@@ -429,7 +431,7 @@ function rRivenditore() {
   <section class="stack">
     <div class="cal-head"><button class="iconbtn" data-act="rivMese" data-arg="-1" aria-label="Mese precedente" type="button" ${RIV.mese <= piuGiorni(TODAY, -365).slice(0, 7) ? 'disabled' : ''}>${svg('l')}</button><h2>${monthName(RIV.mese)}</h2><button class="iconbtn" data-act="rivMese" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="cal rivcal">${cells}</div>
-    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-lav"></i> tuoi lavori</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
+    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-occ rv-forse"></i> forse</span><span><i class="lg rv-lav"></i> tuoi lavori</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
     ${RIV.da ? `<div class="selbar"><div><b>${RIV.a && RIV.a !== RIV.da ? `Dal ${fmtD(RIV.da, { day: 'numeric', month: 'short' })} al ${fmtD(RIV.a, { day: 'numeric', month: 'short' })}` : fmtD(RIV.da, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div class="small">${lavorative} ${lavorative === 1 ? 'giornata' : 'giornate'} di lavoro${RIV.a ? '' : ' · tocca un altro giorno per prenderne di più'}</div></div><div class="row"><button class="btn sm" data-act="rivAnnullaSel" type="button">Annulla</button><button class="btn sm primary" data-act="rivPrenota" type="button">Prenota</button></div></div>` : ''}
   </section>
   ${['granted', 'unsupported', 'notready'].includes(pushState()) ? '' : `<section class="panel stack"><div><b>Avvisi sul telefono</b><div class="small muted">Ti arriva una notifica quando confermo, sposto o annullo una prenotazione e quando il tuo preventivo è pronto.</div></div>${statoDispositivo()}</section>`}
@@ -497,6 +499,8 @@ function sheetLavRiv(l, modifica = false) {
   openSheet(nome, `
     <div class="stack">
       <div class="meta"><span>${svg('cal', 'i')} ${esc(quando)}${ora ? ' · ' + esc(ora) : ''}</span></div>
+      ${l.forse ? `<div class="notice small"><span class="chip forse">Data in forse</span> <b>Non è ancora sicura.</b> L'installatore ti tiene questa data. Se il lavoro c'è, conferma; ${l.dataForse ? 'se non serve, annullala e il giorno torna libero.' : 'per spostarla o toglierla chiama l\'installatore.'}
+        <div class="row" style="margin-top:8px"><button class="btn sm primary" type="button" data-act="rivForse" data-arg="conferma" data-id="${esc(l.id)}" data-kind="${esc(l.kind)}">${svg('check', 'i')} Confermo la data</button>${l.dataForse ? `<button class="btn sm" type="button" data-act="rivForse" data-arg="annulla" data-id="${esc(l.id)}" data-kind="${esc(l.kind)}">Annulla questa data</button>` : ''}</div></div>` : ''}
       <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
         <div><div class="small muted">Cliente finale</div><b>${esc(l.riferimento || '—')}</b></div>
         <div><div class="small muted">Indirizzo</div>${l.indirizzo ? `<a href="${mappa}" target="_blank" rel="noopener">${esc(l.indirizzo)}</a>` : '—'}</div>
@@ -1656,6 +1660,17 @@ document.addEventListener('click', async e => {
     case 'rivAggiorna': await caricaRiv(true); toast('Calendario aggiornato'); break;
     case 'rivLav': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l); break; }
     case 'rivLavMod': { const l = (RIV.lavori || []).find(x => x.id === id && x.kind === arg); if (l) sheetLavRiv(l, true); break; }
+    case 'rivForse': {
+      const l = (RIV.lavori || []).find(x => x.id === id && x.kind === b.dataset.kind); if (!l) break;
+      if (arg === 'annulla' && !b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo per annullare'; break; }
+      b.disabled = true;
+      try {
+        const r = await store.rpc('rispondi_data_forse', { tipo: l.kind, lavoro: l.id, scelta: arg });
+        toast(r === 'gia' ? 'La data era già confermata' : arg === 'conferma' ? 'Data confermata: l\'installatore è avvisato' : 'Data annullata: il giorno torna libero');
+        closeSheet(); caricaRiv(true);
+      } catch (e) { b.disabled = false; toast(/find the function|schema cache|does not exist/i.test(e.message || '') ? 'Non è ancora attivo: avvisa l\'installatore' : (e.message || 'Non sono riuscito, riprova')); }
+      break;
+    }
     case 'rivAllFoto': case 'rivAllFile': {
       const l = (RIV.lavori || []).find(x => x.id === id && x.kind === b.dataset.kind); if (!l) break;
       const { foto, altri } = allegatiInst(l), i = +arg || 0;
@@ -2027,6 +2042,31 @@ function elencoGiorno(dl, di, de) {
     ${tot && !vediL.length && !vediI.length && f === 'dafare' ? `<div class="empty small">Tutto fatto per oggi 👍</div>` : ''}
     ${nasc ? `<button type="button" class="linkbtn small" data-act="dayFiltro" data-arg="tutti">${nasc} ${nasc === 1 ? 'lavoro completato o annullato nascosto' : 'lavori completati o annullati nascosti'}: mostra</button>` : ''}`;
 }
+/** Data in forse segnata da te: un segnaposto in calendario, con o senza rivenditore. Al rivenditore non arriva nessuna notifica. */
+function sheetForse(k) {
+  const riv = [...S.clienti].filter(c => c.tipo === 'rivenditore').sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+  openSheet('Data in forse', `
+    <div class="small muted">Tieni il giorno in forse. Se scegli un rivenditore lo vede nel suo calendario come «forse», <b>senza nessuna notifica</b>, e lo può confermare o annullare da solo. Gli altri rivenditori lo vedono «forse occupato».</div>
+    <div class="g2">${F('Dal', inp('fo_da', k, 'date', 'required'))}${F('Al (se più giorni)', inp('fo_a', '', 'date'))}</div>
+    ${F('Per', `<select name="fo_cli" id="f_fo_cli"><option value="">Nessun rivenditore (lo vedi solo tu)</option>${riv.map(c => `<option value="${esc(c.id)}">${esc(c.nome)}</option>`).join('')}</select>`)}
+    <div id="fo_sede"></div>
+    ${F('Cosa', sel('fo_tipo', [['lavori', 'Posa'], ['interventi', 'Intervento']], 'lavori'))}
+    ${F('Nota (la vede anche il rivenditore)', inp('fo_nota', '', 'text', 'maxlength="120" placeholder="Es. forse cantiere Rossi, 4 finestre"'))}`,
+  async fd => {
+    const da = String(fd.get('fo_da') || ''), a = String(fd.get('fo_a') || ''), cid = String(fd.get('fo_cli') || ''), tipo = fd.get('fo_tipo') === 'interventi' ? 'interventi' : 'lavori';
+    if (!da) throw Object.assign(new Error('vuoto'), { userMsg: 'Scegli il giorno' });
+    if (a && a < da) throw Object.assign(new Error('date'), { userMsg: 'Il giorno di fine viene prima dell\'inizio' });
+    const c = S.clienti.find(x => x.id === cid), nota = String(fd.get('fo_nota') || '').trim(), sede = String(fd.get('sede') || '').trim();
+    const base = { cliente: c?.nome || '', clienteId: c?.id || '', riferimento: nota, forse: true, dataForse: true, ...(sede ? { sede } : {}) };
+    const d = tipo === 'lavori' ? { ...base, data: da, dataFine: a > da ? a : '', soloFeriali: true, calcolo: 'pezzo', righe: [] }
+      : { ...base, data: TODAY, dataProg: da, stato: 'programmato', urgenza: 'normale', descrizione: nota };
+    store.put(tipo, null, d);
+    toast(c ? `Segnata in forse per ${c.nome}: non gli arriva nessuna notifica` : 'Data segnata in forse');
+    render();
+  }, { saveLabel: 'Segna in forse' });
+  const disegnaSede = () => { const c = S.clienti.find(x => x.id === $('#f_fo_cli').value); $('#fo_sede').innerHTML = c ? campoSede({}, c.nome, c.id) : ''; };
+  $('#f_fo_cli')?.addEventListener('change', disegnaSede);
+}
 const bottoneForse = (kind, x) => x.forse ? `<button type="button" class="btn sm" data-act="confermaData" data-arg="${kind}" data-id="${esc(x.id)}">${svg('check', 'i')} Data confermata</button>` : '';
 const bottoneFatto = (kind, x) => {
   if (kind === 'lavori') { const f = posaFatta(x, UI.day); return `<button type="button" class="btn sm ${f ? '' : 'ok'}" data-act="${f ? 'posaRiapri' : 'posaFatta'}" data-id="${x.id}">${f ? 'Riapri' : '✓ Segna fatta'}</button>`; }
@@ -2210,7 +2250,7 @@ function giornoHtml(k) {
   const cc = UI.calCli && S.clienti.find(c => c.id === UI.calCli);
   const mioCli = x => !cc || x.clienteId === cc.id || (!x.clienteId && normNome(x.cliente) === normNome(cc.nome));
   const dl = S.lavori.filter(mioCli).filter(l => inPosa(l, k)), di = S.interventi.filter(mioCli).filter(i => intNelGiorno(i, k)), de = evDel(k);
-  return `<div class="row giornobtn"><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button><button class="btn sm" data-act="newInt" data-arg="${k}" type="button">+ Intervento</button><button class="btn sm" data-act="newEv" data-arg="${k}" type="button">+ Ferie, fiera, corso</button></div>
+  return `<div class="row giornobtn"><button class="btn primary sm" data-act="newLav" type="button">${svg('plus')} Posa</button><button class="btn sm" data-act="newInt" data-arg="${k}" type="button">+ Intervento</button><button class="btn sm" data-act="newEv" data-arg="${k}" type="button">+ Ferie, fiera, corso</button><button class="btn sm forsebtn" data-act="newForse" data-arg="${k}" type="button">? Data in forse</button></div>
     ${elencoGiorno(dl, di, de)}`;
 }
 function apriGiorno(k) {
@@ -2282,7 +2322,7 @@ function rCons() {
   if (store.st.lastSync && !consCollegati) setTimeout(collegaConsVecchi, 0);
   let h = `<div class="row between"><h2>Consuntivi</h2></div>`;
   {
-    const all = [...S.lavori.map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importoCons ?? x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
+    const all = [...S.lavori.filter(x => !x.forse).map(x => ({ ...x, _k: 'lavori', _d: x.data, _t: x.installato })), ...S.interventi.filter(i => i.stato === 'completato').map(x => ({ ...x, _k: 'interventi', _d: x.dataProg || x.data, importo: x.costo, _t: x.descrizione }))].filter(x => n2(x.importoCons ?? x.importo) > 0 && x._d <= TODAY).sort((a, b) => String(a._d).localeCompare(b._d));
     h += `<div class="small muted">Ogni lavoro passa per sei tappe: consuntivo da fare, da inviare, da accettare, da fatturare, da incassare, incassato. Quando il rivenditore accetta il consuntivo dalla sua area, passa da solo in «Da fatturare». Tocca il pulsante per farlo avanzare; se hai sbagliato, correggi dal menu «Stato».</div>`;
     AMM.forEach(([k, l, c]) => {
       let L = all.filter(x => (x.amm || 'da_cons') === k);
@@ -4860,11 +4900,12 @@ document.addEventListener('click', async e => {
     case 'rinnova': sheetRinnova(arg); break;
     case 'cons': sheetCons(arg, id); break;
     case 'amm': advance(arg, id); render(); break;
-    case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'acc' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da fatturare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da fatturare'); break; }
+    case 'rapConsInviato': { const x = S[arg]?.find(r => r.id === id); if (!x) break; if ((x.amm || 'da_cons') === 'inv') store.put(arg, id, { ...stripId(x), amm: 'acc' }); const b = $('#rapConsBox'); if (b) b.innerHTML = '<b>Consuntivo inviato: ora è da accettare</b><div class="small muted">Lo trovi nella pagina Consuntivi.</div>'; toast('Da accettare'); break; }
     case 'rapCons': sheetRapporto(arg, id); break;
     case 'trasforma': sheetTrasforma(arg, id); break;
     case 'mostraAltri': (UI.mostra ||= {})[arg] = quanti(arg) + PASSO; render(); break;
-    case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
+    case 'newForse': sheetForse(arg || UI.day || TODAY); break;
+    case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; delete d.dataForse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
     case 'poseF': UI.poseFilter = arg; render(); break;
     case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: '', calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
     case 'posaNonServe': {

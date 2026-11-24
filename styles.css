@@ -701,3 +701,11 @@ details.cartella[open]>summary{margin-bottom:10px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip.forse{color:#ddd0ff}}
 :root[data-theme="dark"] .chip.forse{color:#ddd0ff}
 .mostraaltri{width:100%;justify-content:center}
+
+/* date in forse nel calendario del rivenditore */
+.day.rv-forse{background-image:repeating-linear-gradient(135deg,rgba(124,58,237,.16) 0 5px,transparent 5px 10px);border:1.5px dashed #7c3aed}
+.lg.rv-forse{background-image:repeating-linear-gradient(135deg,rgba(124,58,237,.22) 0 3px,transparent 3px 6px);border:1px dashed #7c3aed}
+.day.rv-occ.rv-forse .rvl{color:#6d28d9;font-weight:600}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .day.rv-occ.rv-forse .rvl{color:#c4b5fd}}
+:root[data-theme="dark"] .day.rv-occ.rv-forse .rvl{color:#c4b5fd}
+.btn.forsebtn{border-style:dashed;border-color:#7c3aed}

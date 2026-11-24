@@ -86,7 +86,7 @@ export function promemoria(S, today = oggi(), momento = 'app') {
       }
     }
     const all = [
-      ...(S.lavori || []).map(x => ({ ...x, _d: x.dataFine || x.data })),
+      ...(S.lavori || []).filter(x => !x.forse).map(x => ({ ...x, _d: x.dataFine || x.data })),
       ...(S.interventi || []).filter(i => i.stato === 'completato').map(x => ({ ...x, _d: x.dataProg || x.data, importo: x.costo })),
     ].filter(x => x._d && x._d <= today && n2(x.importo) > 0);
     const dc = all.filter(x => (x.amm || 'da_cons') === 'da_cons');
