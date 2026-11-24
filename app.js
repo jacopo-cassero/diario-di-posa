@@ -712,7 +712,7 @@ async function caricaListinoRiv() {
 /* ===== Il rivenditore apre il PDF a schermo intero e lo firma ===== */
 let PDFJS = null;
 async function pdfjs() {
-  if (!PDFJS) { PDFJS = await import('./vendor/pdfjs/pdf.min.mjs'); PDFJS.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', location.href).href; }
+  if (!PDFJS) { PDFJS = await import('./vendor/pdfjs/pdf.min.js'); PDFJS.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.js', location.href).href; }
   return PDFJS;
 }
 async function bytesDi(path) {
