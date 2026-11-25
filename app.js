@@ -117,6 +117,8 @@ function schedaTesto(p) {
   const s = p.scheda || {};
   const mat = (s.materiale || []).filter(r => r.tipo || r.qta).map(r => `${n2(r.qta) || ''} ${r.tipo || ''}${r.note ? ' (' + r.note + ')' : ''}`.trim());
   return [
+    s.modo === 'affiancamento' ? 'AFFIANCAMENTO A ORE (giornata a tariffa oraria, con i ragazzi del rivenditore)' : s.modo === 'preventivo' ? 'DA PREVENTIVARE' : '',
+    s.modo === 'affiancamento' && s.ragazzi && `Ragazzi del rivenditore: ${s.ragazzi}`, s.modo === 'affiancamento' && s.orario && `Orario: ${s.orario}`,
     s.forse && 'Data: FORSE, non ancora sicura', p.cliente && `Cliente finale: ${p.cliente}`, p.telefono && `Tel. ${p.telefono}`,
     ...SCHEDA.filter(([k]) => s[k]).map(([k, l]) => `${l}: ${s[k]}`),
     mat.length && `Materiale: ${mat.join(', ')}`, s.misure && `Misure e dettagli: ${s.misure}`,
@@ -245,13 +247,14 @@ function rRichieste() {
 function cardPren(p, azioni) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore);
   const giorni = p.data_fine > p.data ? `dal ${fmtD(p.data, { day: 'numeric', month: 'short' })} al ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'long', day: 'numeric', month: 'long' });
-  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chipgrp">${p.scheda?.forse ? '<span class="chip forse">Forse</span>' : ''}<span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></span></div>
+  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chipgrp">${p.scheda?.modo === 'affiancamento' ? '<span class="chip">Affiancamento a ore</span>' : p.scheda?.modo === 'preventivo' ? '<span class="chip">Da preventivare</span>' : ''}${p.scheda?.forse ? '<span class="chip forse">Forse</span>' : ''}<span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></span></div>
     <div class="small"><b>${giorni}</b>${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.indirizzo ? ' · ' + esc(p.indirizzo) : ''}</div>
     ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
     ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
     ${schedaTesto(p) ? `<details class="small" ${azioni ? 'open' : ''}><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>` : '<div class="small muted">Nessun dettaglio del cantiere.</div>'}
     ${p.rivenditore ? fileCantHtml([[p.rivenditore, p.id]], { titolo: 'Foto e documenti del rivenditore' }) : ''}
-    ${azioni ? `<div class="row"><button class="btn sm primary" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.stato === 'confermata' ? `<div class="row">${p.lavoro_id ? `<button class="btn sm" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}<button class="btn sm ghost" data-act="prenAnnulla" data-id="${p.id}" type="button">Annulla la data</button></div>` : ''}</div>`;
+    ${azioni && p.scheda?.modo === 'preventivo' ? (() => { const pv = S.preventivi.find(x => x.prenotazioneId === p.id); return `<div class="row"><button class="btn sm primary" data-act="${pv ? 'editPrev' : 'prevDaPren'}" data-id="${pv ? esc(pv.id) : p.id}" type="button">${pv ? `Apri il preventivo ${esc(pv.numero || '')}` : 'Prepara il preventivo'}</button></div>${pv ? '' : '<div class="small muted">La data resta in forse per lui finché non accetti. Quando firma il preventivo, programmi la posa e la data si conferma da sola.</div>'}`; })() : ''}
+    ${azioni ? `<div class="row"><button class="btn sm ${p.scheda?.modo === 'preventivo' ? '' : 'primary'}" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.stato === 'confermata' ? `<div class="row">${p.lavoro_id ? `<button class="btn sm" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}<button class="btn sm ghost" data-act="prenAnnulla" data-id="${p.id}" type="button">Annulla la data</button></div>` : ''}</div>`;
 }
 const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
 function sheetDaiAccesso(r = {}) {
@@ -348,7 +351,7 @@ async function confermaPren(p) {
   base.clienteId = dcr.id || assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
   if (base.clienteFinale && stessoCliente(base.clienteFinale, '', chi, '')) { base.clienteFinale = ''; base.riferimento = ''; }
   let kind, d;
-  if (p.tipo === 'posa') { kind = 'lavori'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: 'pezzo', righe: [], installato: mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · ') }; }
+  if (p.tipo === 'posa') { kind = 'lavori'; const aff = s.modo === 'affiancamento'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: aff ? 'ore' : 'pezzo', righe: [], installato: aff ? `Affiancamento a ore${s.descrizione ? ': ' + s.descrizione : ''}` : mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · '), ...(aff ? { affiancamento: true } : {}) }; }
   else { kind = 'interventi'; d = { ...base, data: TODAY, dataProg: p.data, stato: 'programmato', urgenza: 'normale', descrizione: `${p.tipo === 'sopralluogo' ? 'SOPRALLUOGO\n' : ''}${testo}` }; }
   const id = store.put(kind, null, d);
   const { error } = await store.tabella('prenotazioni').update({ stato: 'confermata', lavoro_id: id, aggiornato: new Date().toISOString() }).eq('id', p.id);
@@ -402,7 +405,7 @@ function statoGiorno(k) {
   if (LL.length) { const lav = LL[0], tipo = lav.kind === 'lavori' ? 'posa' : 'intervento', rif = String(lav.riferimento || '').trim();
     return ['lav', `${lav.forse ? 'Forse · tuo' : 'Tuo lavoro'} · ${tipo}${rif ? ' · ' + rif : ''}${LL.length > 1 ? ` (+${LL.length - 1})` : ''}`, (lav.forse ? '? ' : '') + (rif || (lav.forse ? 'Forse' : lav.kind === 'lavori' ? 'Posa' : 'Interv.')) + (LL.length > 1 ? ` +${LL.length - 1}` : ''), !!lav.forse && LL.every(x => x.forse)]; }
   const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
-  if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
+  if (mia) return mia.stato === 'confermata' ? ['mia', 'Tua · confermata'] : ['mia', 'Tua richiesta · in forse finché non la accetto', '', true];
   if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
   if (RIV.occ.has(k)) return RIV.forseOcc?.has(k) ? ['occ', 'Occupato da un altro lavoro, non ancora sicuro', '', true] : ['occ', 'Occupato'];
   if (k < piuGiorni(TODAY, A.preavviso ?? 2)) return ['no', k < TODAY ? '' : 'Preavviso troppo breve'];
@@ -420,7 +423,7 @@ function rRivenditore() {
   for (let d = 1; d <= dim; d++) {
     const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l, rifG, fo] = statoGiorno(k);
     const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
-    cells += `<button class="day rv-${s} ${fo ? (s === 'lav' ? 'rv-forsemio' : 'rv-forseocc') : ''} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? (fo ? '? occ.' : 'occupato') : s === 'mia' ? 'tua' : ''}</span></button>`;
+    cells += `<button class="day rv-${s} ${fo ? (s === 'lav' || s === 'mia' ? 'rv-forsemio' : 'rv-forseocc') : ''} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? (fo ? '? occ.' : 'occupato') : s === 'mia' ? (fo ? '? tua' : 'tua') : ''}</span></button>`;
   }
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
@@ -545,50 +548,72 @@ function cardMiaPren(p) {
 function sheetPrenota() {
   const da = RIV.da, a = RIV.a || RIV.da;
   svuotaRvFoto(); rvMax = MAX_FOTO_CANT; pDocs = [];
-  openSheet('Prenota', `
-    <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · le giornate restano bloccate per te finché non confermo.</div>
-    <div class="small muted">Compila quello che sai: nessun campo è obbligatorio, il resto ce lo diciamo a voce.</div>
-    <div class="g2">${F('Cosa serve', sel('ptipo', [['posa', 'Posa'], ['intervento', 'Intervento / assistenza']], 'posa'))}${F('La data è', sel('pforse', [['no', 'Confermata'], ['si', 'Forse (non ancora sicura)']], 'no'))}</div>
+  openSheet('Chiedi la data', `
+    <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · la data resta <b>in forse per te</b> finché non la accetto: nessun altro la può chiedere.</div>
+    <div class="fieldset"><span class="fs-t">Cosa ti serve</span>
+      <label class="radiorow"><input type="radio" name="pmodo" value="preventivo" checked><span><b>Un lavoro da preventivare</b><small>Mi dici cosa c'è da fare (porte, finestre, materiale, misure): ti preparo il preventivo per quella data.</small></span></label>
+      <label class="radiorow"><input type="radio" name="pmodo" value="affiancamento"><span><b>Affiancamento a ore</b><small>Vengo a lavorare insieme ai tuoi ragazzi: la giornata è a tariffa oraria.</small></span></label>
+    </div>
     <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
       <div class="g2">${F('Cliente finale', inp('pcliente', ''))}${F('Telefono cliente', inp('ptel', '', 'tel'))}</div>
-      ${F('Indirizzo del cantiere', inp('pind', '', 'text', 'placeholder="Via, civico, comune"'))}
+      ${F('Indirizzo del cantiere *', inp('pind', '', 'text', 'placeholder="Via, civico, comune"'))}
       <div class="g2">${SCHEDA.slice(0, 3).map(([k, l, t]) => F(l, inp('ps_' + k, '', t === 'testo' ? 'text' : t))).join('')}</div>
+    </div>
+    <div id="pPrev" class="stack">
+      <div class="fieldset"><span class="fs-t">Materiale da posare</span>
+        <div id="pmat" class="stack">${rigaMat()}${rigaMat()}</div>
+        <button type="button" class="btn sm" data-act="pmAdd">+ Riga</button>
+        ${F('Misure e dettagli', `<textarea id="f_pmisure" name="pmisure" rows="2" placeholder="Misure, colori, tipo di posa, controtelai…"></textarea>`)}
+      </div>
+      ${F('Lavoro da fare *', `<textarea id="f_pdescr" name="pdescr" rows="3" placeholder="Es. 5 porte interne da montare, smontaggio delle vecchie, coprifili…"></textarea>`)}
+    </div>
+    <div id="pAff" class="stack" hidden>
+      <div class="g2">${F('Quanti dei tuoi ragazzi', inp('pragazzi', '', 'number', 'min="0" max="20" inputmode="numeric"'))}${F('Orario indicativo', inp('porario', '', 'text', 'placeholder="Es. 8–17"'))}</div>
+      ${F('Cosa farete insieme *', `<textarea id="f_paff" name="paff" rows="3" placeholder="Es. posa di 10 finestre con i miei due ragazzi"></textarea>`)}
     </div>
     <div class="fieldset"><span class="fs-t">Accesso al cantiere</span>
       <div class="g2">${SCHEDA.slice(3, 9).map(([k, l, o]) => F(l, sel('ps_' + k, [['', '—'], ...o.map(x => [x, x])], ''))).join('')}</div>
       ${F(SCHEDA[9][1], inp('ps_orari', '', 'text', 'placeholder="Es. dopo le 9, chiavi dal vicino, ZTL fino alle 10"'))}
     </div>
-    <div class="fieldset"><span class="fs-t">Materiale da posare</span>
-      <div id="pmat" class="stack">${rigaMat()}${rigaMat()}</div>
-      <button type="button" class="btn sm" data-act="pmAdd">+ Riga</button>
-      ${F('Misure e dettagli', `<textarea id="f_pmisure" name="pmisure" rows="2" placeholder="Misure, colori, tipo di posa, controtelai…"></textarea>`)}
-    </div>
-    ${F('Lavoro da fare', `<textarea id="f_pdescr" name="pdescr" rows="3" placeholder="Cosa c'è da fare, cosa togliere, finiture…"></textarea>`)}
-    ${F('Note per l\'installazione', `<textarea id="f_pnote" name="pnote" rows="3" placeholder="Tutto quello che mi serve sapere per la posa"></textarea>`)}
+    ${F('Note per l\'installazione', `<textarea id="f_pnote" name="pnote" rows="2" placeholder="Tutto quello che mi serve sapere"></textarea>`)}
     <div class="fieldset"><div class="row between"><span class="fs-t">Foto del cantiere</span><span class="small muted" id="rvFotoN"></span></div>
       <div class="thumbs" id="rvThumbs"></div>
       <label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label></div>
-    <div class="fieldset"><span class="fs-t">Documenti per la posa</span>
+    <div class="fieldset"><span class="fs-t">Documenti</span>
       <div class="small muted">Documenti di trasporto, rilievo misure, progetti, schede tecniche… (PDF, foto, Word, Excel; al massimo ${MAX_MB_DOC} MB l'uno)</div>
       <div class="stack doclist" id="pDocList"></div>
-      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi documenti<input type="file" id="pDocIn" accept="${ACCETTA_DOC}" multiple hidden></label></div>`,
+      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi documenti<input type="file" id="pDocIn" accept="${ACCETTA_DOC}" multiple hidden></label></div>
+    <div class="small muted">* obbligatorio</div>`,
   async fd => {
-    await rvPronte;
+    const modo = fd.get('pmodo') === 'affiancamento' ? 'affiancamento' : 'preventivo';
     const scheda = Object.fromEntries(SCHEDA.map(([k]) => [k, String(fd.get('ps_' + k) || '').trim()]).filter(([, v]) => v));
     const mt = fd.getAll('pm_tipo'), mq = fd.getAll('pm_qta'), mn = fd.getAll('pm_note');
-    scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
-    scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim(); scheda.note = String(fd.get('pnote') || '').trim();
-    if (fd.get('pforse') === 'si') scheda.forse = true;
-    const nuova = await store.rpc('prenota', { da, a, tipo: fd.get('ptipo'), cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
+    scheda.modo = modo;
+    scheda.note = String(fd.get('pnote') || '').trim();
+    if (!String(fd.get('pind') || '').trim()) throw Object.assign(new Error('ind'), { userMsg: 'Scrivi l\'indirizzo del cantiere' });
+    if (modo === 'preventivo') {
+      scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
+      scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim();
+      if (!scheda.descrizione && !scheda.materiale.length) throw Object.assign(new Error('descr'), { userMsg: 'Scrivi cosa c\'è da fare (o il materiale): mi serve per il preventivo' });
+    } else {
+      scheda.descrizione = String(fd.get('paff') || '').trim(); scheda.ragazzi = String(fd.get('pragazzi') || '').trim(); scheda.orario = String(fd.get('porario') || '').trim();
+      if (!scheda.descrizione) throw Object.assign(new Error('aff'), { userMsg: 'Scrivi cosa farete insieme' });
+    }
+    await rvPronte;
+    const nuova = await store.rpc('prenota', { da, a, tipo: 'posa', cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
     RIV.da = RIV.a = '';
-    const foto = [...rvFoto], docs = [...pDocs]; let msg = 'Prenotazione inviata: ti confermo appena possibile';
+    const foto = [...rvFoto], docs = [...pDocs]; let msg = 'Richiesta inviata: la data è in forse per te finché non la accetto';
     if (foto.length + docs.length) {
       const perse = typeof nuova === 'string' && nuova ? await caricaFileCant(nuova, foto, docs) : foto.length + docs.length;
-      msg = perse ? `Prenotazione inviata, ma ${perse} file non sono stati caricati: aggiungili dal lavoro quando è confermato` : `Prenotazione inviata con ${foto.length + docs.length} file: ti confermo appena possibile`;
+      msg = perse ? `Richiesta inviata, ma ${perse} file non sono stati caricati: aggiungili dal lavoro quando è confermato` : `Richiesta inviata con ${foto.length + docs.length} file: la data è in forse per te`;
     }
     svuotaRvFoto(); pDocs = []; toast(msg);
     await caricaRiv(true);
-  }, { saveLabel: 'Invia prenotazione' });
+  }, { saveLabel: 'Invia la richiesta' });
+  document.querySelectorAll('#sheetBody input[name="pmodo"]').forEach(r => r.addEventListener('change', () => {
+    const aff = document.querySelector('#sheetBody input[name="pmodo"]:checked')?.value === 'affiancamento';
+    $('#pPrev').hidden = aff; $('#pAff').hidden = !aff;
+  }));
 }
 
 /* ---------- vista DIPENDENTE ---------- */
@@ -1755,6 +1780,15 @@ document.addEventListener('click', async e => {
     case 'credCopia': try { await navigator.clipboard.writeText($('#credTxt').textContent); toast('Messaggio copiato'); } catch { toast('Seleziona il testo e copialo'); } break;
     case 'credShare': try { await navigator.share({ text: $('#credTxt').textContent }); } catch {} break;
     case 'prenConferma': { const p = ACC.pren.find(x => x.id === id); if (!p) break; b.disabled = true; try { await confermaPren(p); } catch (err) { toast(err.userMsg || 'Non riuscito'); b.disabled = false; } break; }
+    case 'prevDaPren': {
+      const p = ACC.pren.find(x => x.id === id); if (!p) break;
+      const r = ACC.membri.find(m => m.user_id === p.rivenditore) || {}, dc = datiClienteRiv(r), az = AZ();
+      const fin = p.cliente && !stessoCliente(p.cliente, '', dc.cliente.nome, '') ? p.cliente : '';
+      sheetPrev({ numero: prossimoNumero(S.preventivi, TODAY.slice(0, 4)), data: TODAY, stato: 'bozza', validita: +az.validitaGiorni || 30, iva: az.ivaPredefinita, condizioni: true,
+        cliente: dc.cliente, ...(dc.id ? { clienteId: dc.id } : {}), ...(sedeDi(r) ? { sede: sedeDi(r) } : {}), riferimento: fin, cantiere: p.indirizzo || '', oggetto: schedaTesto(p), righe: [], perLavoro: 'posa',
+        richiestaDi: p.rivenditore, prenotazioneId: p.id, dataPren: p.data, dataFinePren: p.data_fine > p.data ? p.data_fine : '' });
+      break;
+    }
     case 'prenRifiuta': {
       const p = ACC.pren.find(x => x.id === id); if (!p) break;
       openSheet('Rifiuta la prenotazione', `${F('Motivo (lo vede il rivenditore)', inp('pmotivo', '', 'text', 'placeholder="Es. quel giorno non riesco, proponi un\'altra data"'))}`, async fd => {
@@ -2291,6 +2325,7 @@ function cardPrevDaProg(p) {
   const t = totPrev(p);
   return `<div class="card"><div class="row between"><span class="t">${esc(rifDi(p) || p.cliente?.nome || 'Cliente')}${rifDi(p) && p.cliente?.nome ? `<small class="rif">${esc(p.cliente.nome)}</small>` : ''}</span><span class="price">${eur(t.imponibile)}</span></div>
     <div class="small muted">Preventivo ${esc(p.numero || '')}${p.esitoRiv?.quando ? ` · accettato ${esc(quandoMod(p.esitoRiv.quando))}` : p.dataInvio ? ` · inviato il ${esc(dIt(p.dataInvio))}` : ''}${p.cantiere ? ' · ' + esc(p.cantiere) : ''}</div>
+    ${p.dataPren ? `<div class="small"><span class="chip forse">Data chiesta</span> ${esc(dIt(p.dataPren))}${p.dataFinePren ? ' – ' + esc(dIt(p.dataFinePren)) : ''}</div>` : ''}
     ${p.oggetto ? `<div class="small prewrap">${esc(corto(p.oggetto, 220))}</div>` : ''}
     <div class="row"><button class="btn sm primary" data-act="posaDaPrev" data-id="${esc(p.id)}" type="button">${svg('cal', 'i')} Programma la posa</button><button class="btn sm" data-act="editPrev" data-id="${esc(p.id)}" type="button">Apri il preventivo</button><button class="btn sm ghost" data-act="posaNonServe" data-id="${esc(p.id)}" type="button">Non serve</button></div></div>`;
 }
@@ -3599,7 +3634,10 @@ function sheetLav(l, prefill) {
     Object.assign(d, leggiOrario(fd));
     { const og = leggiOrariGiorni(fd, d); if (Object.keys(og).length) d.orariGiorni = og; else delete d.orariGiorni; }
     if (fd.get('forse')) d.forse = true; else delete d.forse;
+    if (isNew && l.prenotazioneId) d.prenotazioneId = l.prenotazioneId;
     const id = store.put('lavori', isNew ? null : l.id, d);
+    // posa nata dal preventivo di una richiesta di data: la richiesta si conferma con questa posa (e la data con lei)
+    if (isNew && d.prenotazioneId && store.st.mode !== 'demo') store.tabella('prenotazioni').update({ stato: 'confermata', lavoro_id: id, data: d.data, data_fine: d.dataFine || d.data, aggiornato: new Date().toISOString() }).eq('id', d.prenotazioneId).eq('stato', 'richiesta').then(() => caricaAccessi(true), e => console.warn(e));
     if (fd.get('prevColl')) collegaPrevLavoro(fd.get('prevColl'), 'lavori', id);
     if (!isNew && (l.data !== d.data || (l.dataFine || '') !== (d.dataFine || ''))) spostaPrenotazioniDi(id, d.data, d.dataFine);
     if (isNew && d.preventivoId) {
@@ -5117,7 +5155,7 @@ document.addEventListener('click', async e => {
     case 'newForse': sheetForse(arg || UI.day || TODAY); break;
     case 'confermaData': { const x = S[arg]?.find(r => r.id === id); if (!x) break; const d = { ...stripId(x) }; delete d.forse; delete d.dataForse; store.put(arg, id, d); toast('Data confermata'); render(); break; }
     case 'poseF': UI.poseFilter = arg; render(); break;
-    case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: '', calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
+    case 'posaDaPrev': { const p = S.preventivi.find(x => x.id === id); if (!p) break; sheetLav(null, { ...datiDaPrev(p), data: p.dataPren || '', dataFine: p.dataFinePren || '', ...(p.prenotazioneId ? { prenotazioneId: p.prenotazioneId } : {}), calcolo: 'pezzo', importo: totPrev(p).imponibile, note: [p.oggetto, p.note].filter(Boolean).join(' – ') }); break; }
     case 'posaNonServe': {
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tocca di nuovo: non programmarla'; break; }
       const p = S.preventivi.find(x => x.id === id); if (p) store.put('preventivi', id, { ...stripId(p), nonProgrammare: true }); toast('Tolta da «Da programmare»'); render(); break;
