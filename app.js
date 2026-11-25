@@ -404,7 +404,7 @@ function statoGiorno(k) {
   const mia = RIV.mie.find(p => ['richiesta', 'confermata'].includes(p.stato) && k >= p.data && k <= p.data_fine);
   if (mia) return ['mia', mia.stato === 'confermata' ? 'Tua · confermata' : 'Tua · da confermare'];
   if (!(A.giorni || [1, 2, 3, 4, 5]).includes(dow) || festivi(+k.slice(0, 4)).has(k)) return ['chiuso', 'Chiuso'];
-  if (RIV.occ.has(k)) return RIV.forseOcc?.has(k) ? ['occ', 'Forse occupato (non ancora sicuro)', '', true] : ['occ', 'Occupato'];
+  if (RIV.occ.has(k)) return RIV.forseOcc?.has(k) ? ['occ', 'Occupato da un altro lavoro, non ancora sicuro', '', true] : ['occ', 'Occupato'];
   if (k < piuGiorni(TODAY, A.preavviso ?? 2)) return ['no', k < TODAY ? '' : 'Preavviso troppo breve'];
   const max = new Date(pd(TODAY)); max.setMonth(max.getMonth() + (A.mesi ?? 4));
   if (k > iso(max)) return ['no', 'Non ancora prenotabile'];
@@ -420,7 +420,7 @@ function rRivenditore() {
   for (let d = 1; d <= dim; d++) {
     const k = `${RIV.mese}-${String(d).padStart(2, '0')}`; const [s, l, rifG, fo] = statoGiorno(k);
     const sel = RIV.da && (k === RIV.da || (RIV.a && k >= RIV.da && k <= RIV.a));
-    cells += `<button class="day rv-${s} ${fo ? 'rv-forse' : ''} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? (fo ? 'forse' : 'occupato') : s === 'mia' ? 'tua' : ''}</span></button>`;
+    cells += `<button class="day rv-${s} ${fo ? (s === 'lav' ? 'rv-forsemio' : 'rv-forseocc') : ''} ${sel ? 'sel' : ''} ${k === TODAY ? 'today' : ''}" data-act="rivGiorno" data-arg="${k}" ${s === 'lib' || s === 'lav' || sel ? '' : 'aria-disabled="true"'} aria-label="${fmtD(k)}: ${l}" title="${l}" type="button"><span class="n">${d}</span><span class="rvl${s === 'lav' ? ' rvrif' : ''}">${s === 'lav' ? esc(rifG) : s === 'lib' ? 'libero' : s === 'occ' ? (fo ? '? occ.' : 'occupato') : s === 'mia' ? 'tua' : ''}</span></button>`;
   }
   const lavorative = RIV.da ? giorniLavorativi(RIV.da, RIV.a || RIV.da).length : 0;
   const attive = RIV.mie.filter(p => p.stato !== 'annullata' && p.data_fine >= TODAY);
@@ -431,7 +431,7 @@ function rRivenditore() {
   <section class="stack">
     <div class="cal-head"><button class="iconbtn" data-act="rivMese" data-arg="-1" aria-label="Mese precedente" type="button" ${RIV.mese <= piuGiorni(TODAY, -365).slice(0, 7) ? 'disabled' : ''}>${svg('l')}</button><h2>${monthName(RIV.mese)}</h2><button class="iconbtn" data-act="rivMese" data-arg="1" aria-label="Mese successivo" type="button">${svg('r')}</button></div>
     <div class="cal rivcal">${cells}</div>
-    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-occ rv-forse"></i> forse</span><span><i class="lg rv-lav"></i> tuoi lavori</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
+    <div class="legend"><span><i class="lg rv-lib"></i> libero</span><span><i class="lg rv-occ"></i> occupato</span><span><i class="lg rv-occ rv-forseocc"></i> ? occupato (forse)</span><span><i class="lg rv-lav"></i> tuoi lavori</span><span><i class="lg rv-forsemio"></i> tue date in forse</span><span><i class="lg rv-mia"></i> tue prenotazioni</span><span><i class="lg rv-chiuso"></i> chiuso</span></div>
     ${RIV.da ? `<div class="selbar"><div><b>${RIV.a && RIV.a !== RIV.da ? `Dal ${fmtD(RIV.da, { day: 'numeric', month: 'short' })} al ${fmtD(RIV.a, { day: 'numeric', month: 'short' })}` : fmtD(RIV.da, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div class="small">${lavorative} ${lavorative === 1 ? 'giornata' : 'giornate'} di lavoro${RIV.a ? '' : ' · tocca un altro giorno per prenderne di più'}</div></div><div class="row"><button class="btn sm" data-act="rivAnnullaSel" type="button">Annulla</button><button class="btn sm primary" data-act="rivPrenota" type="button">Prenota</button></div></div>` : ''}
   </section>
   ${['granted', 'unsupported', 'notready'].includes(pushState()) ? '' : `<section class="panel stack"><div><b>Avvisi sul telefono</b><div class="small muted">Ti arriva una notifica quando confermo, sposto o annullo una prenotazione e quando il tuo preventivo è pronto.</div></div>${statoDispositivo()}</section>`}
@@ -1922,8 +1922,18 @@ async function caricaImmagini() {
 }
 
 /* ---------- render ---------- */
+/** I preventivi già diventati posa o intervento escono dalla cartella Preventivi del rivenditore (il PDF resta nella scheda del cantiere). */
+let prevTolti = '';
+function togliPrevDalleCartelle() {
+  if (!GESTORE() || store.st.mode === 'demo' || !store.st.lastSync || !navigator.onLine) return;
+  const ids = [...new Set([...S.lavori, ...S.interventi].map(x => x.preventivoId).filter(Boolean))].sort(), chiave = ids.join(',');
+  if (!ids.length || chiave === prevTolti) return; prevTolti = chiave;
+  store.tabella('documenti_cliente').delete().eq('kind', 'preventivi').in('lavoro_id', ids)
+    .then(({ error }) => { if (error) { console.warn(error); prevTolti = ''; } }, () => { prevTolti = ''; });
+}
 function render() {
   try { interventiDaPreventivi(); } catch (e) { console.warn(e); }
+  try { togliPrevDalleCartelle(); } catch (e) { console.warn(e); }
   TODAY = oggi();
   const st = store.st;
   const logged = st.auth === 'in' || st.auth === 'demo';

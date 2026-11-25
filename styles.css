@@ -703,11 +703,11 @@ details.cartella[open]>summary{margin-bottom:10px}
 .mostraaltri{width:100%;justify-content:center}
 
 /* date in forse nel calendario del rivenditore */
-.day.rv-forse{background-image:repeating-linear-gradient(135deg,rgba(124,58,237,.16) 0 5px,transparent 5px 10px);border:1.5px dashed #7c3aed}
-.lg.rv-forse{background-image:repeating-linear-gradient(135deg,rgba(124,58,237,.22) 0 3px,transparent 3px 6px);border:1px dashed #7c3aed}
-.day.rv-occ.rv-forse .rvl{color:#6d28d9;font-weight:600}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .day.rv-occ.rv-forse .rvl{color:#c4b5fd}}
-:root[data-theme="dark"] .day.rv-occ.rv-forse .rvl{color:#c4b5fd}
+.day.rv-forsemio{background:#7c3aed;border:2px dashed #fde047;color:#fff;box-shadow:0 0 0 2px rgba(124,58,237,.35)}
+.day.rv-forsemio .n,.day.rv-forsemio .rvl,.day.rv-forsemio .rvl.rvrif{color:#fff}
+.lg.rv-forsemio{background:#7c3aed;border:1.5px dashed #fde047}
+.day.rv-forseocc{background:var(--sunk);color:var(--muted);border:1px dashed var(--muted)}
+.lg.rv-forseocc{border:1px dashed var(--muted)}
 .btn.forsebtn{border-style:dashed;border-color:#7c3aed}
 
 /* PDF a schermo intero (area del rivenditore) */
