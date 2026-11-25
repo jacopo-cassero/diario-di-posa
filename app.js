@@ -117,7 +117,7 @@ function schedaTesto(p) {
   const s = p.scheda || {};
   const mat = (s.materiale || []).filter(r => r.tipo || r.qta).map(r => `${n2(r.qta) || ''} ${r.tipo || ''}${r.note ? ' (' + r.note + ')' : ''}`.trim());
   return [
-    s.modo === 'affiancamento' ? 'AFFIANCAMENTO A ORE (giornata a tariffa oraria, con i ragazzi del rivenditore)' : s.modo === 'preventivo' ? 'DA PREVENTIVARE' : '',
+    s.modo === 'affiancamento' ? 'AFFIANCAMENTO A ORE (giornata a tariffa oraria, con i ragazzi del rivenditore)' : s.modo === 'preventivo' ? 'DA PREVENTIVARE' : s.modo === 'esistente' ? `POSA DEL PREVENTIVO GIÀ FATTO${s.preventivoTitolo ? ': ' + s.preventivoTitolo : ''}` : '',
     s.modo === 'affiancamento' && s.ragazzi && `Ragazzi del rivenditore: ${s.ragazzi}`, s.modo === 'affiancamento' && s.orario && `Orario: ${s.orario}`,
     s.forse && 'Data: FORSE, non ancora sicura', p.cliente && `Cliente finale: ${p.cliente}`, p.telefono && `Tel. ${p.telefono}`,
     ...SCHEDA.filter(([k]) => s[k]).map(([k, l]) => `${l}: ${s[k]}`),
@@ -247,13 +247,14 @@ function rRichieste() {
 function cardPren(p, azioni) {
   const r = ACC.membri.find(m => m.user_id === p.rivenditore);
   const giorni = p.data_fine > p.data ? `dal ${fmtD(p.data, { day: 'numeric', month: 'short' })} al ${fmtD(p.data_fine, { day: 'numeric', month: 'short' })}` : fmtD(p.data, { weekday: 'long', day: 'numeric', month: 'long' });
-  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chipgrp">${p.scheda?.modo === 'affiancamento' ? '<span class="chip">Affiancamento a ore</span>' : p.scheda?.modo === 'preventivo' ? '<span class="chip">Da preventivare</span>' : ''}${p.scheda?.forse ? '<span class="chip forse">Forse</span>' : ''}<span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></span></div>
+  return `<div class="card"><div class="row between"><span class="t">${esc(conSede(r?.azienda || r?.nome || 'Rivenditore', r))}</span><span class="chipgrp">${p.scheda?.modo === 'affiancamento' ? '<span class="chip">Affiancamento a ore</span>' : p.scheda?.modo === 'preventivo' ? '<span class="chip">Da preventivare</span>' : p.scheda?.modo === 'esistente' ? '<span class="chip">Preventivo già fatto</span>' : ''}${p.scheda?.forse ? '<span class="chip forse">Forse</span>' : ''}<span class="chip ${p.stato === 'confermata' ? 'ok' : 'warn'}">${{ posa: 'Posa', intervento: 'Intervento', sopralluogo: 'Sopralluogo' }[p.tipo]}</span></span></div>
     <div class="small"><b>${giorni}</b>${p.cliente ? ' · ' + esc(p.cliente) : ''}${p.indirizzo ? ' · ' + esc(p.indirizzo) : ''}</div>
     ${p.stato === 'rifiutata' || p.stato === 'annullata' ? `<div class="small"><span class="chip ${p.stato === 'rifiutata' ? 'bad' : ''}">${p.stato === 'rifiutata' ? 'Rifiutata' : 'Annullata dal rivenditore'}</span>${p.risposta ? ' ' + esc(p.risposta) : ''}</div>` : ''}
     ${r?.telefono ? `<div class="small"><a href="tel:${esc(r.telefono)}">Chiama ${esc(r.nome || r.azienda || '')}</a></div>` : ''}
     ${schedaTesto(p) ? `<details class="small" ${azioni ? 'open' : ''}><summary>Scheda del cantiere</summary><div class="prewrap">${esc(schedaTesto(p))}</div></details>` : '<div class="small muted">Nessun dettaglio del cantiere.</div>'}
     ${p.rivenditore ? fileCantHtml([[p.rivenditore, p.id]], { titolo: 'Foto e documenti del rivenditore' }) : ''}
     ${azioni && p.scheda?.modo === 'preventivo' ? (() => { const pv = S.preventivi.find(x => x.prenotazioneId === p.id); return `<div class="row"><button class="btn sm primary" data-act="${pv ? 'editPrev' : 'prevDaPren'}" data-id="${pv ? esc(pv.id) : p.id}" type="button">${pv ? `Apri il preventivo ${esc(pv.numero || '')}` : 'Prepara il preventivo'}</button></div>${pv ? '' : '<div class="small muted">La data resta in forse per lui finché non accetti. Quando firma il preventivo, programmi la posa e la data si conferma da sola.</div>'}`; })() : ''}
+    ${azioni && p.scheda?.modo === 'esistente' ? (() => { const pv = S.preventivi.find(x => x.id === p.scheda.preventivoId); return pv ? `<div class="small">Preventivo ${esc(pv.numero || '')} · ${eur(totPrev(pv).imponibile)} · <span class="chip ${pv.stato === 'accettato' ? 'ok' : ''}">${esc((STATI_PREV.find(x => x[0] === (pv.stato || 'bozza')) || [, pv.stato])[1])}</span> <button class="linkbtn" type="button" data-act="editPrev" data-id="${esc(pv.id)}">Apri</button></div>` : '<div class="small muted">Il preventivo scelto non c\'è più.</div>'; })() : ''}
     ${azioni ? `<div class="row"><button class="btn sm ${p.scheda?.modo === 'preventivo' ? '' : 'primary'}" data-act="prenConferma" data-id="${p.id}" type="button">Conferma e metti in calendario</button><button class="btn sm" data-act="prenRifiuta" data-id="${p.id}" type="button">Rifiuta</button></div>` : p.stato === 'confermata' ? `<div class="row">${p.lavoro_id ? `<button class="btn sm" data-act="prenApri" data-id="${p.id}" type="button">Apri nel calendario</button>` : ''}<button class="btn sm ghost" data-act="prenAnnulla" data-id="${p.id}" type="button">Annulla la data</button></div>` : ''}</div>`;
 }
 const pwProvvisoria = () => 'Posa-' + String(crypto.getRandomValues(new Uint32Array(1))[0] % 9000 + 1000) + '-' + Array.from(crypto.getRandomValues(new Uint8Array(3)), b => 'abcdefghjkmnpqrstuvwxyz'[b % 23]).join('');
@@ -351,9 +352,12 @@ async function confermaPren(p) {
   base.clienteId = dcr.id || assicuraCliente(chi, { tipo: 'rivenditore', telefono: r.telefono, email: r.email });
   if (base.clienteFinale && stessoCliente(base.clienteFinale, '', chi, '')) { base.clienteFinale = ''; base.riferimento = ''; }
   let kind, d;
-  if (p.tipo === 'posa') { kind = 'lavori'; const aff = s.modo === 'affiancamento'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: aff ? 'ore' : 'pezzo', righe: [], installato: aff ? `Affiancamento a ore${s.descrizione ? ': ' + s.descrizione : ''}` : mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · '), ...(aff ? { affiancamento: true } : {}) }; }
+  const pvE = s.modo === 'esistente' && S.preventivi.find(x => x.id === s.preventivoId);
+  if (p.tipo === 'posa' && pvE) { kind = 'lavori'; d = { ...datiDaPrev(pvE), ...base, cliente: pvE.cliente?.nome || base.cliente, indirizzo: pvE.cantiere || base.indirizzo, riferimento: pvE.riferimento || base.riferimento || '', data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: 'pezzo', importo: totPrev(pvE).imponibile, note: [pvE.oggetto, s.note].filter(Boolean).join(' – ') }; }
+  else if (p.tipo === 'posa') { kind = 'lavori'; const aff = s.modo === 'affiancamento'; d = { ...base, data: p.data, dataFine: p.data_fine > p.data ? p.data_fine : '', soloFeriali: true, calcolo: aff ? 'ore' : 'pezzo', righe: [], installato: aff ? `Affiancamento a ore${s.descrizione ? ': ' + s.descrizione : ''}` : mat ? `Da posare: ${mat}` : '', note: testo.replace(/\n/g, ' · '), ...(aff ? { affiancamento: true } : {}) }; }
   else { kind = 'interventi'; d = { ...base, data: TODAY, dataProg: p.data, stato: 'programmato', urgenza: 'normale', descrizione: `${p.tipo === 'sopralluogo' ? 'SOPRALLUOGO\n' : ''}${testo}` }; }
   const id = store.put(kind, null, d);
+  if (pvE) store.put('preventivi', pvE.id, { ...stripId(pvE), lavoroId: id });
   const { error } = await store.tabella('prenotazioni').update({ stato: 'confermata', lavoro_id: id, aggiornato: new Date().toISOString() }).eq('id', p.id);
   if (error) { store.drop(kind, id); throw Object.assign(error, { userMsg: 'Non sono riuscito a confermare, riprova' }); }
   toast(`Confermata: ${p.tipo === 'posa' ? 'posa' : 'intervento'} in calendario`);
@@ -545,74 +549,67 @@ function cardMiaPren(p) {
     ${p.risposta ? `<div class="small">Risposta: ${esc(p.risposta)}</div>` : ''}
     ${p.stato === 'richiesta' ? `<button class="linkbtn small" data-act="rivAnnulla" data-id="${p.id}" type="button">Annulla la richiesta</button>` : ''}</div>`;
 }
-function sheetPrenota() {
+/** I miei preventivi che posso mettere in calendario: non rifiutati e non ancora prenotati. */
+function prevPrenotabili() {
+  const giaPren = new Set((RIV.mie || []).filter(p => ['richiesta', 'confermata'].includes(p.stato)).map(p => p.scheda?.preventivoId).filter(Boolean));
+  return (RIV.prevDoc || []).filter(d => d.lavoro_id && d.esito !== 'rifiutato' && !giaPren.has(d.lavoro_id))
+    .sort((a, b) => (a.esito === 'accettato' ? 0 : 1) - (b.esito === 'accettato' ? 0 : 1) || String(b.titolo).localeCompare(String(a.titolo)));
+}
+async function sheetPrenota() {
   const da = RIV.da, a = RIV.a || RIV.da;
+  if (!RIV.listinoCarico) { try { await caricaListinoRiv(); } catch {} }
+  const prevOk = prevPrenotabili();
   svuotaRvFoto(); rvMax = MAX_FOTO_CANT; pDocs = [];
   openSheet('Chiedi la data', `
     <div class="notice small"><b>${a > da ? `Dal ${fmtD(da, { day: 'numeric', month: 'long' })} al ${fmtD(a, { day: 'numeric', month: 'long' })}` : fmtD(da, { weekday: 'long', day: 'numeric', month: 'long' })}</b> · la data resta <b>in forse per te</b> finché non la accetto: nessun altro la può chiedere.</div>
-    <div class="fieldset"><span class="fs-t">Cosa ti serve</span>
-      <label class="radiorow"><input type="radio" name="pmodo" value="preventivo" checked><span><b>Un lavoro da preventivare</b><small>Mi dici cosa c'è da fare (porte, finestre, materiale, misure): ti preparo il preventivo per quella data.</small></span></label>
+    <div class="fieldset"><span class="fs-t">Per cosa</span>
+      <label class="radiorow"><input type="radio" name="pmodo" value="preventivo" checked><span><b>Un lavoro nuovo da preventivare</b><small>Scrivi cosa c'è da fare: ti preparo il preventivo per questa data.</small></span></label>
+      ${prevOk.length ? `<label class="radiorow"><input type="radio" name="pmodo" value="esistente"><span><b>Un preventivo che ti ho già fatto</b><small>Scegli il preventivo: prenoti la posa per questa data.</small></span></label>` : ''}
       <label class="radiorow"><input type="radio" name="pmodo" value="affiancamento"><span><b>Affiancamento a ore</b><small>Vengo a lavorare insieme ai tuoi ragazzi: la giornata è a tariffa oraria.</small></span></label>
     </div>
-    <div class="fieldset"><span class="fs-t">Cliente e cantiere</span>
-      <div class="g2">${F('Cliente finale', inp('pcliente', ''))}${F('Telefono cliente', inp('ptel', '', 'tel'))}</div>
-      ${F('Indirizzo del cantiere *', inp('pind', '', 'text', 'placeholder="Via, civico, comune"'))}
-      <div class="g2">${SCHEDA.slice(0, 3).map(([k, l, t]) => F(l, inp('ps_' + k, '', t === 'testo' ? 'text' : t))).join('')}</div>
-    </div>
     <div id="pPrev" class="stack">
-      <div class="fieldset"><span class="fs-t">Materiale da posare</span>
-        <div id="pmat" class="stack">${rigaMat()}${rigaMat()}</div>
-        <button type="button" class="btn sm" data-act="pmAdd">+ Riga</button>
-        ${F('Misure e dettagli', `<textarea id="f_pmisure" name="pmisure" rows="2" placeholder="Misure, colori, tipo di posa, controtelai…"></textarea>`)}
-      </div>
-      ${F('Lavoro da fare *', `<textarea id="f_pdescr" name="pdescr" rows="3" placeholder="Es. 5 porte interne da montare, smontaggio delle vecchie, coprifili…"></textarea>`)}
+      ${F('Lavoro da fare *', `<textarea id="f_pdescr" name="pdescr" rows="4" placeholder="Es. 5 porte interne da montare in via Roma 12, smontaggio delle vecchie, coprifili…"></textarea>`)}
+    </div>
+    <div id="pEsist" class="stack" hidden>
+      ${F('Preventivo *', `<select id="f_pprev" name="pprev"><option value="">Scegli…</option>${prevOk.map(d => `<option value="${esc(d.id)}">${esc(d.titolo || 'Preventivo')}${d.esito === 'accettato' ? ' · accettato' : ' · non ancora accettato'}</option>`).join('')}</select>`)}
+      ${F('Note (facoltative)', `<textarea id="f_pnotaes" name="pnotaes" rows="2" placeholder="Es. il cliente è pronto, chiavi in portineria"></textarea>`)}
     </div>
     <div id="pAff" class="stack" hidden>
+      ${F('Cosa farete insieme *', `<textarea id="f_paff" name="paff" rows="3" placeholder="Es. posa di 10 finestre con i miei due ragazzi, in via Roma 12"></textarea>`)}
       <div class="g2">${F('Quanti dei tuoi ragazzi', inp('pragazzi', '', 'number', 'min="0" max="20" inputmode="numeric"'))}${F('Orario indicativo', inp('porario', '', 'text', 'placeholder="Es. 8–17"'))}</div>
-      ${F('Cosa farete insieme *', `<textarea id="f_paff" name="paff" rows="3" placeholder="Es. posa di 10 finestre con i miei due ragazzi"></textarea>`)}
     </div>
-    <div class="fieldset"><span class="fs-t">Accesso al cantiere</span>
-      <div class="g2">${SCHEDA.slice(3, 9).map(([k, l, o]) => F(l, sel('ps_' + k, [['', '—'], ...o.map(x => [x, x])], ''))).join('')}</div>
-      ${F(SCHEDA[9][1], inp('ps_orari', '', 'text', 'placeholder="Es. dopo le 9, chiavi dal vicino, ZTL fino alle 10"'))}
-    </div>
-    ${F('Note per l\'installazione', `<textarea id="f_pnote" name="pnote" rows="2" placeholder="Tutto quello che mi serve sapere"></textarea>`)}
-    <div class="fieldset"><div class="row between"><span class="fs-t">Foto del cantiere</span><span class="small muted" id="rvFotoN"></span></div>
-      <div class="thumbs" id="rvThumbs"></div>
-      <label class="btn sm" id="rvFotoPiuBtn">${svg('cam', 'i')} Aggiungi foto<input type="file" id="rvFotoIn" accept="image/*" multiple hidden></label></div>
-    <div class="fieldset"><span class="fs-t">Documenti</span>
-      <div class="small muted">Documenti di trasporto, rilievo misure, progetti, schede tecniche… (PDF, foto, Word, Excel; al massimo ${MAX_MB_DOC} MB l'uno)</div>
+    <div class="fieldset" id="pDocBox"><span class="fs-t">Documenti e foto (facoltativi)</span>
+      <div class="small muted">Rilievo misure, foto del cantiere, documenti di trasporto, schede tecniche… (PDF, foto, Word, Excel; al massimo ${MAX_MB_DOC} MB l'uno)</div>
       <div class="stack doclist" id="pDocList"></div>
-      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi documenti<input type="file" id="pDocIn" accept="${ACCETTA_DOC}" multiple hidden></label></div>
+      <label class="btn sm" id="pDocPiu">${svg('doc', 'i')} Aggiungi documenti o foto<input type="file" id="pDocIn" accept="${ACCETTA_DOC},image/*" multiple hidden></label></div>
     <div class="small muted">* obbligatorio</div>`,
   async fd => {
-    const modo = fd.get('pmodo') === 'affiancamento' ? 'affiancamento' : 'preventivo';
-    const scheda = Object.fromEntries(SCHEDA.map(([k]) => [k, String(fd.get('ps_' + k) || '').trim()]).filter(([, v]) => v));
-    const mt = fd.getAll('pm_tipo'), mq = fd.getAll('pm_qta'), mn = fd.getAll('pm_note');
-    scheda.modo = modo;
-    scheda.note = String(fd.get('pnote') || '').trim();
-    if (!String(fd.get('pind') || '').trim()) throw Object.assign(new Error('ind'), { userMsg: 'Scrivi l\'indirizzo del cantiere' });
+    const modo = ['affiancamento', 'esistente'].includes(fd.get('pmodo')) ? fd.get('pmodo') : 'preventivo';
+    const scheda = { modo };
     if (modo === 'preventivo') {
-      scheda.materiale = mt.map((t, i) => ({ tipo: t, qta: mq[i], note: String(mn[i] || '').trim() })).filter(r => r.tipo || r.qta || r.note);
-      scheda.misure = String(fd.get('pmisure') || '').trim(); scheda.descrizione = String(fd.get('pdescr') || '').trim();
-      if (!scheda.descrizione && !scheda.materiale.length) throw Object.assign(new Error('descr'), { userMsg: 'Scrivi cosa c\'è da fare (o il materiale): mi serve per il preventivo' });
+      scheda.descrizione = String(fd.get('pdescr') || '').trim();
+      if (!scheda.descrizione) throw Object.assign(new Error('descr'), { userMsg: 'Scrivi il lavoro da fare: mi serve per il preventivo' });
+    } else if (modo === 'esistente') {
+      const d = prevOk.find(x => x.id === fd.get('pprev'));
+      if (!d) throw Object.assign(new Error('prev'), { userMsg: 'Scegli il preventivo' });
+      Object.assign(scheda, { preventivoId: d.lavoro_id, preventivoTitolo: d.titolo || '', descrizione: `Posa del ${d.titolo || 'preventivo'}`, note: String(fd.get('pnotaes') || '').trim() });
     } else {
       scheda.descrizione = String(fd.get('paff') || '').trim(); scheda.ragazzi = String(fd.get('pragazzi') || '').trim(); scheda.orario = String(fd.get('porario') || '').trim();
       if (!scheda.descrizione) throw Object.assign(new Error('aff'), { userMsg: 'Scrivi cosa farete insieme' });
     }
-    await rvPronte;
-    const nuova = await store.rpc('prenota', { da, a, tipo: 'posa', cliente: String(fd.get('pcliente')).trim(), indirizzo: String(fd.get('pind')).trim(), telefono: String(fd.get('ptel')).trim(), scheda });
+    const nuova = await store.rpc('prenota', { da, a, tipo: 'posa', cliente: '', indirizzo: '', telefono: '', scheda });
     RIV.da = RIV.a = '';
-    const foto = [...rvFoto], docs = [...pDocs]; let msg = 'Richiesta inviata: la data è in forse per te finché non la accetto';
-    if (foto.length + docs.length) {
-      const perse = typeof nuova === 'string' && nuova ? await caricaFileCant(nuova, foto, docs) : foto.length + docs.length;
-      msg = perse ? `Richiesta inviata, ma ${perse} file non sono stati caricati: aggiungili dal lavoro quando è confermato` : `Richiesta inviata con ${foto.length + docs.length} file: la data è in forse per te`;
+    const docs = [...pDocs]; let msg = 'Richiesta inviata: la data è in forse per te finché non la accetto';
+    if (docs.length) {
+      const perse = typeof nuova === 'string' && nuova ? await caricaFileCant(nuova, [], docs) : docs.length;
+      msg = perse ? `Richiesta inviata, ma ${perse} file non sono stati caricati: aggiungili dal lavoro quando è confermato` : `Richiesta inviata con ${docs.length} file: la data è in forse per te`;
     }
-    svuotaRvFoto(); pDocs = []; toast(msg);
+    pDocs = []; toast(msg);
     await caricaRiv(true);
   }, { saveLabel: 'Invia la richiesta' });
   document.querySelectorAll('#sheetBody input[name="pmodo"]').forEach(r => r.addEventListener('change', () => {
-    const aff = document.querySelector('#sheetBody input[name="pmodo"]:checked')?.value === 'affiancamento';
-    $('#pPrev').hidden = aff; $('#pAff').hidden = !aff;
+    const m = document.querySelector('#sheetBody input[name="pmodo"]:checked')?.value;
+    $('#pPrev').hidden = m !== 'preventivo'; $('#pAff').hidden = m !== 'affiancamento'; $('#pEsist').hidden = m !== 'esistente';
   }));
 }
 
