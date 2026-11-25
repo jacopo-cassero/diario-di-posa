@@ -1963,6 +1963,7 @@ function togliPrevDalleCartelle() {
     .then(({ error }) => { if (error) { console.warn(error); prevTolti = ''; } }, () => { prevTolti = ''; });
 }
 function render() {
+  try { abbinaPrevPerRiferimento(); } catch (e) { console.warn(e); }
   try { interventiDaPreventivi(); } catch (e) { console.warn(e); }
   try { togliPrevDalleCartelle(); } catch (e) { console.warn(e); }
   TODAY = oggi();
@@ -2299,6 +2300,39 @@ const prevDaProgrammare = tipo => S.preventivi.filter(p => p.stato === 'accettat
 function datiDaPrev(p) {
   return { cliente: p.cliente?.nome || '', clienteId: p.clienteId || '', riferimento: p.riferimento || '', indirizzo: p.cantiere || p.cliente?.indirizzo || '', telefono: p.cliente?.telefono || '',
     righe: p.righe || [], allegati: p.firmato ? [p.firmato] : [], preventivoId: p.id, amm: 'da_cons', ...(p.sede ? { sede: p.sede } : {}) };
+}
+/** Posa o intervento già in calendario con lo stesso riferimento (e cliente) di un preventivo accettato e libero: li collego da solo.
+ *  Solo se l'abbinamento è sicuro (un preventivo ↔ un lavoro). Le voci del preventivo entrano nel lavoro solo se il lavoro non ne ha. */
+let abbinando = false, abbinaFatto = '';
+function abbinaPrevPerRiferimento() {
+  if (abbinando || !GESTORE()) return;
+  if (store.st.mode !== 'demo' && (!store.st.lastSync || store.st.syncing || !store.st.online || store.pending())) return;
+  const liberi = S.preventivi.filter(p => p.stato === 'accettato' && !p.nonProgrammare && !lavoroDiPrev(p) && normNome(p.riferimento).length >= 3);
+  const firma = liberi.map(p => p.id).join(',') + '|' + S.lavori.length + '|' + S.interventi.length;
+  if (!liberi.length || firma === abbinaFatto) return; abbinaFatto = firma;
+  const usati = new Set([...S.lavori, ...S.interventi].map(x => x.preventivoId).filter(Boolean));
+  const candidati = (p) => {
+    const k = perLavoroDi(p) === 'intervento' ? 'interventi' : 'lavori';
+    return S[k].filter(x => !x.preventivoId && normNome(x.riferimento) === normNome(p.riferimento) && stessoCliente(x.cliente, x.clienteId, p.cliente?.nome, p.clienteId)).map(x => [k, x]);
+  };
+  abbinando = true;
+  try {
+    for (const p of liberi) {
+      if (usati.has(p.id)) continue;
+      const C = candidati(p); if (C.length !== 1) continue;
+      const [k, x] = C[0];
+      // lo stesso lavoro non deve andare bene anche per un altro preventivo
+      if (liberi.some(q => q.id !== p.id && candidati(q).some(([, y]) => y.id === x.id))) continue;
+      const d = { ...stripId(x), preventivoId: p.id };
+      if (!(x.righe || []).length && (p.righe || []).length) d.righe = p.righe;
+      if (p.firmato?.path && !(x.allegati || []).some(f => f.path === p.firmato.path)) d.allegati = [...(x.allegati || []), p.firmato];
+      if (!x.sede && p.sede) d.sede = p.sede;
+      store.put(k, x.id, d);
+      store.put('preventivi', p.id, { ...stripId(p), lavoroId: x.id, lavoroKind: k });
+      usati.add(p.id);
+      toast(`Preventivo ${p.numero || ''} collegato a ${k === 'lavori' ? 'posa' : 'intervento'} «${x.riferimento}»`);
+    }
+  } catch (e) { console.warn(e); } finally { abbinando = false; }
 }
 let creandoInt = false;
 function interventiDaPreventivi() {
