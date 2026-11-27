@@ -2617,8 +2617,15 @@ function ctxDa(kind, x) {
   base.km = sk.kmTot || ''; base.righe = sk.altre;
   const pv = x.preventivoId && S.preventivi.find(p => p.id === x.preventivoId);
   if (pv) base.rif = 'Preventivo ' + (pv.numero || '');
+  // lavoro di un rivenditore: nei moduli va il cliente finale (il riferimento), con i suoi dati se è in rubrica
+  if (['rivenditore', 'impresa'].includes(c.tipo) && normNome(x.riferimento) && normNome(x.riferimento) !== normNome(x.cliente)) {
+    const cf = trovaCliente(x.riferimento) || {};
+    base.finale = { cliente: String(x.riferimento).trim(), telefono: x.telefono || cf.telefono || '', email: cf.email || '', indirizzo: x.indirizzo || cf.indirizzo || '' };
+  }
   return kind === 'lavori' ? { ...base, data: x.dataFine || x.data, dataLavoro: x.dataFine || x.data, lavori: x.installato, descrizione: x.installato } : { ...base, data: x.dataProg || x.data, descrizione: x.descrizione };
 }
+/** Il rapporto di assistenza resta intestato a chi paga (il rivenditore); gli altri moduli al cliente finale. */
+const ctxModulo = (modelloId, ctx) => ctx.finale && modelloId !== 'rapporto-assistenza' ? { ...ctx, ...ctx.finale, clienteId: '', perFinale: true } : ctx;
 function valoriIniziali(campi, ctx) {
   const v = {};
   for (const c of campi) {
@@ -2632,7 +2639,7 @@ function valoriIniziali(campi, ctx) {
 function sheetScegliModello(ctx = {}) {
   modCtx = ctx;
   openSheet('Nuovo modulo', `
-    ${ctx.cliente ? `<div class="small muted">Per <b>${esc(ctx.cliente)}</b>${ctx.indirizzo ? ' · ' + esc(ctx.indirizzo) : ''}: i dati si compilano da soli.</div>` : ''}
+    ${ctx.cliente ? `<div class="small muted">Per <b>${esc(ctx.finale?.cliente || ctx.cliente)}</b>${ctx.finale ? ` (cliente di ${esc(ctx.cliente)})` : ''}${ctx.indirizzo ? ' · ' + esc(ctx.indirizzo) : ''}: i dati si compilano da soli.${ctx.finale ? ' Il rapporto di assistenza resta intestato al rivenditore.' : ''}</div>` : ''}
     <div class="stack">${modelli().map(m => `<button type="button" class="modchoice" data-act="modNuovo" data-arg="${esc(m.id)}">${svg('clip2')}<span><b>${esc(m.nome)}</b><small>${esc(m.descr || `${(m.campi || []).length} campi`)}</small></span><span class="go">›</span></button>`).join('')}</div>
     <div class="small muted">I quattro moduli Cassero escono nel PDF identici agli originali, con i dati scritti nelle caselle.</div>
     ${GESTORE() ? '<button type="button" class="btn sm" data-act="modelloNuovo">+ Crea un modello tuo</button>' : ''}`, null);
@@ -2903,8 +2910,9 @@ function datiCliente(c) {
   const pi = String(c.piva || '').trim(), sd = String(c.sdi || '').trim();
   return { telefono: c.telefono, email: c.email, indirizzo: c.indirizzo, cf: /^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/i.test(pi) ? pi.toUpperCase() : '', piva: /^[A-Z]{6}\d{2}/i.test(pi) ? '' : pi, sdi: sd.includes('@') ? '' : sd, pec: sd.includes('@') ? sd : '' };
 }
-function valoriUfficiali(m, ctx) {
-  const c = datiCliente(ctx.clienteId ? S.clienti.find(x => x.id === ctx.clienteId) : trovaCliente(ctx.cliente));
+function valoriUfficiali(m, ctx0) {
+  const ctx = ctxModulo(m.id, ctx0);
+  const c = ctx.perFinale ? datiCliente(trovaCliente(ctx.cliente)) : datiCliente(ctx.clienteId ? S.clienti.find(x => x.id === ctx.clienteId) : trovaCliente(ctx.cliente));
   const x = { ...c, ...Object.fromEntries(Object.entries(ctx).filter(([, v]) => v != null && v !== '')) };
   const auto = {
     data: x.data || TODAY, oggi: TODAY, dataLavoro: x.dataLavoro || '', traUnAnno: piuAnno(x.data || TODAY), comune: comuneDa(x.indirizzo),
@@ -5257,7 +5265,7 @@ document.addEventListener('click', async e => {
     case 'cliMod': if (cliCtx) sheetScegliModello(ctxDa('clienti', cliCtx)); break;
     case 'modNuovo': { const m = modelli().find(x => x.id === arg); if (!m) break;
       if (m.ufficiale) { const nome = modCtx.cliente || ''; sheetModuloU({ modelloId: m.id, titolo: m.nome, valori: valoriUfficiali(m, modCtx), cliente: nome, clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); modCtx = {}; break; }
-      const campi = JSON.parse(JSON.stringify(m.campi || [])); sheetModulo({ modelloId: m.id, titolo: m.nome, campi, valori: valoriIniziali(campi, modCtx), cliente: modCtx.cliente || '', clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); break; }
+      const campi = JSON.parse(JSON.stringify(m.campi || [])); sheetModulo({ modelloId: m.id, titolo: m.nome, campi, valori: valoriIniziali(campi, ctxModulo(m.id, modCtx)), cliente: modCtx.cliente || '', clienteId: modCtx.clienteId || '', ref: modCtx.ref || null, data: modCtx.data || TODAY, stato: 'bozza' }, true); break; }
     case 'editMod': { const m = S.moduli.find(x => x.id === id); if (!m) break; if (m.ufficiale && ufficiale(m.modelloId)) sheetModuloU(m, false); else sheetModulo(m, false); break; }
     case 'tuttiOk': { b.closest('.ugrid').querySelectorAll('.uctl').forEach(r => { const h = r.querySelector('input[type=hidden]'); if (h.value) return; const p = r.querySelector('button'); h.value = p.dataset.arg; r.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === p))); }); break; }
     case 'modPdf': {
